@@ -25,6 +25,7 @@ const ProfileScreen = () => {
     updatePreferences,
     updateEmail,
     updatePassword,
+    loadUserProfile, // Add this to use the reload function
     loading: authLoading // Auth context loading state
   } = useAuth();
   
@@ -35,6 +36,9 @@ const ProfileScreen = () => {
   const [confirmCreatePassword, setConfirmCreatePassword] = useState('');
   const [isCreateLoading, setIsCreateLoading] = useState(false);
   const [createFormError, setCreateFormError] = useState('');
+  
+  // State for manual refresh
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
   // State for profile edit modal
   const [showProfileEditModal, setShowProfileEditModal] = useState(false);
@@ -56,7 +60,7 @@ const ProfileScreen = () => {
   const [accountSettingsError, setAccountSettingsError] = useState('');
   
   // Derived state: Check if user has a full Supabase account
-  const hasFullAccount = !!user;
+  const hasFullAccount = !!user?.id;
 
   // Categories for preferences selection
   const categories = [
@@ -82,6 +86,16 @@ const ProfileScreen = () => {
     console.log('ProfileScreen - Display Name:', displayName);
     console.log('ProfileScreen - Preferences:', preferences);
     console.log('ProfileScreen - Has Full Account:', hasFullAccount);
+    
+    // Log more detailed debugging info if there's a discrepancy
+    if (user && !profile) {
+      console.log('ProfileScreen - WARNING: User exists but profile is null!');
+      console.log('This might indicate the database trigger failed or profile wasn\'t loaded');
+    }
+    if (user && !hasFullAccount) {
+      console.log('ProfileScreen - WARNING: User exists but hasFullAccount is false!');
+      console.log('This might indicate an issue with authentication state');
+    }
   }, [user, profile, displayName, preferences, hasFullAccount]);
 
   // Open profile edit modal with current values from context
@@ -148,12 +162,22 @@ const ProfileScreen = () => {
       const result = await upgradeToFullAccount(createEmail, createPassword);
       
       if (result.success) {
-        Alert.alert(
-          'Erfolgreich',
-          'Dein Account wurde erstellt. Du bist jetzt eingeloggt.'
-        );
-        setShowCreateAccountModal(false);
-        // AuthContext onAuthStateChange will update user/profile state
+        console.log('Account successfully created, user ID:', result.data?.user?.id);
+        
+        // Force a UI refresh
+        setTimeout(() => {
+          // Check if user data is set properly after account creation
+          console.log('Account creation completed, checking account status:');
+          console.log('- User:', user ? `ID: ${user.id}` : 'No user set');
+          console.log('- Profile:', profile ? 'Profile exists' : 'No profile');
+          console.log('- Has full account:', !!user?.id);
+          
+          Alert.alert(
+            'Erfolgreich',
+            'Dein Account wurde erstellt. Du bist jetzt eingeloggt.'
+          );
+          setShowCreateAccountModal(false);
+        }, 500);
       } else {
         console.error('Account upgrade failed:', result.error);
         setCreateFormError(result.error?.message || 'Account konnte nicht erstellt werden.');
@@ -394,6 +418,22 @@ const ProfileScreen = () => {
     );
   };
 
+  // Add a function to manually reload the user profile
+  const handleRefreshProfile = async () => {
+    if (!user?.id) return;
+    
+    setIsRefreshing(true);
+    try {
+      console.log('Manually refreshing profile for user:', user.id);
+      await loadUserProfile(user.id);
+      Alert.alert('Aktualisiert', 'Dein Profil wurde aktualisiert.');
+    } catch (error) {
+      console.error('Error refreshing profile:', error);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   // --- Render Functions --- 
 
   const renderProfileHeader = () => (
@@ -416,6 +456,19 @@ const ProfileScreen = () => {
       >
           <Ionicons name="pencil" size={18} color="#4285F4" />
       </TouchableOpacity>
+      {hasFullAccount && (
+        <TouchableOpacity 
+          style={styles.refreshButton}
+          onPress={handleRefreshProfile}
+          disabled={isRefreshing}
+        >
+          {isRefreshing ? (
+            <ActivityIndicator size="small" color="#4285F4" />
+          ) : (
+            <Ionicons name="refresh-circle" size={22} color="#4285F4" />
+          )}
+        </TouchableOpacity>
+      )}
     </View>
   );
 
@@ -1084,6 +1137,10 @@ const styles = StyleSheet.create({
   tabTextActive: {
       color: '#4285F4',
       fontWeight: 'bold',
+  },
+  refreshButton: {
+    padding: 8,
+    marginLeft: 10,
   },
 });
 

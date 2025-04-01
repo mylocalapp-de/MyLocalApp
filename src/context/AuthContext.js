@@ -138,11 +138,11 @@ export const AuthProvider = ({ children }) => {
 
   // --- Account Creation / Upgrade ---
   const upgradeToFullAccount = async (email, password) => {
+    setLoading(true);
     try {
-      setLoading(true);
       console.log('AuthContext: Attempting to upgrade to full account:', email);
 
-      // Basic validation
+      // Basic validation (keep this)
       if (!email || !email.includes('@') || !password || password.length < 6) {
         return {
           success: false,
@@ -150,32 +150,29 @@ export const AuthProvider = ({ children }) => {
         };
       }
 
-      // Get locally stored preferences and display name
+      // Get local data (keep this)
       const localPrefsString = await AsyncStorage.getItem('userPreferences');
-      const localDisplayName = await AsyncStorage.getItem('userDisplayName');
+      const localDisplayName = await AsyncStorage.getItem('userDisplayName') || email.split('@')[0]; // Ensure default
       let localPrefs = [];
       try {
         if (localPrefsString) {
-            localPrefs = JSON.parse(localPrefsString);
-            // Ensure it's an array
-            if (!Array.isArray(localPrefs)) {
-                localPrefs = [];
-            }
+          localPrefs = JSON.parse(localPrefsString);
+          if (!Array.isArray(localPrefs)) localPrefs = [];
         }
       } catch (e) {
-          console.error("AuthContext: Failed to parse local preferences from storage", e);
-          localPrefs = []; // Default to empty array on parse error
+        console.error("AuthContext: Failed to parse local preferences from storage", e);
+        localPrefs = [];
       }
 
-      // Sign up using Supabase Auth
+      // Sign up - disable email confirmation
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          // Pass local data to be picked up by the handle_new_user trigger
+          emailRedirectTo: null, // Important: Disables email confirmation
           data: {
-            display_name: localDisplayName || email.split('@')[0], // Use local name or generate default
-            preferences: localPrefs // Pass the actual array
+            display_name: localDisplayName,
+            preferences: localPrefs
           }
         }
       });
@@ -186,22 +183,75 @@ export const AuthProvider = ({ children }) => {
       }
 
       if (!signUpData.user) {
-        // This should ideally not happen if there's no error, but handle defensively
-         console.error('AuthContext: SignUp successful but no user data returned.');
-         return { success: false, error: { message: 'Registrierung fehlgeschlagen, keine Benutzerdaten.' } };
+        console.error('AuthContext: SignUp successful but no user data returned.');
+        return { success: false, error: { message: 'Registrierung fehlgeschlagen, keine Benutzerdaten.' } };
       }
 
-      console.log('AuthContext: SignUp successful, user:', signUpData.user.id);
-      // The onAuthStateChange listener will handle setting the session, user, and loading the profile.
-      // We might need a brief wait here for the trigger to run and profile to be created?
-      // Or rely on the ProfileScreen logic to handle a potentially null profile initially.
-      // Let's assume the listener handles it.
+      const userId = signUpData.user.id;
+      console.log('AuthContext: SignUp successful, user ID:', userId);
 
-      // Clear local-only markers if desired, or keep them until profile is confirmed loaded
-      // await AsyncStorage.removeItem('userPreferences');
-      // await AsyncStorage.removeItem('userDisplayName');
+      // --- Profile Creation/Verification --- 
+      let profileExists = false;
+      try {
+        // Wait a moment for the trigger potentially
+        await new Promise(resolve => setTimeout(resolve, 1500)); 
 
-      return { success: true, data: { user: signUpData.user } }; // Return Supabase user object
+        // Attempt to load the profile
+        console.log('AuthContext: Checking if profile exists for user ID:', userId);
+        const { data: existingProfile, error: profileCheckError, status } = await supabase
+          .from('profiles')
+          .select('id') // Only need to check existence
+          .eq('id', userId)
+          .maybeSingle(); // Use maybeSingle to handle 0 or 1 row without error
+
+        if (existingProfile) {
+          console.log('AuthContext: Profile found (likely created by trigger).');
+          profileExists = true;
+        } else {
+          console.log('AuthContext: Profile not found, attempting manual creation.');
+          if (profileCheckError && status !== 406) { // Log unexpected errors
+             console.warn('AuthContext: Profile check failed with unexpected error:', profileCheckError);
+          }
+
+          // Manually insert the profile
+          const { error: insertError } = await supabase
+            .from('profiles')
+            .insert([{
+              id: userId,
+              display_name: localDisplayName,
+              preferences: localPrefs,
+            }]);
+
+          if (insertError) {
+            console.error('AuthContext: FATAL - Error manually creating profile:', insertError);
+            // Return failure here, as the account is incomplete without a profile
+            return { success: false, error: { message: 'Account erstellt, aber Profil konnte nicht angelegt werden.' } };
+          } else {
+            console.log('AuthContext: Profile manually created successfully.');
+            profileExists = true;
+          }
+        }
+      } catch (e) {
+         console.error('AuthContext: Unexpected error during profile check/creation:', e);
+         // Decide how to handle this - maybe let the user proceed but log the error?
+         // For now, return failure.
+         return { success: false, error: { message: 'Fehler bei der Profilerstellung.' } };
+      }
+      
+      // --- Final State Update --- 
+      // Rely on onAuthStateChange to set user, session, and load the profile fully.
+      // We just need to ensure onboarding state is correct.
+      if (profileExists) {
+         console.log('AuthContext: Setting onboarding complete state.');
+         setHasCompletedOnboarding(true);
+         await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
+         // The onAuthStateChange listener will call loadUserProfile.
+         return { success: true, data: { user: signUpData.user } };
+      } else {
+         // This case should ideally not be reached due to error handling above
+         console.error('AuthContext: Profile does not exist after creation attempt.');
+         return { success: false, error: { message: 'Profil konnte nicht verifiziert werden.' } };
+      }
 
     } catch (error) {
       console.error('AuthContext: Unexpected error in upgradeToFullAccount:', error);
