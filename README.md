@@ -14,6 +14,7 @@ A mobile application designed to strengthen community spirit in rural villages b
 - **Profile:** User settings and organization account options
   - Toggle between regular and organization account modes
   - Organization-specific features when in organization mode
+  - Both local (anonymous) and logged-in users can edit their display name and preferences.
   - User account management with Supabase integration
   - Preference-based content personalization
 
@@ -37,6 +38,7 @@ A mobile application designed to strengthen community spirit in rural villages b
   - AsyncStorage for local account data
   - Supabase for permanent account storage
   - Automatic preference sync across devices
+  - Local users can modify their display name and preferences directly in the Profile tab.
 - **Organization Mode:** Separate functionality for organizations to create content
 
 ## Technology Stack

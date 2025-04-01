@@ -459,8 +459,8 @@ const ProfileScreen = () => {
              <Text style={styles.roleText}>Deine Rolle: {activeOrganization?.currentUserRole === 'admin' ? 'Administrator' : 'Mitglied'}</Text>
           )}
         </View>
-        {/* Personal Profile Edit Button - only shown when NOT in org context */} 
-        {hasFullAccount && !isOrganizationActive && (
+        {/* Personal Profile Edit Button - shown for local AND logged-in users when NOT in org context */}
+        {!isOrganizationActive && (
             <TouchableOpacity 
                 style={styles.editProfileButton}
                 onPress={handleOpenProfileEdit}
@@ -468,8 +468,7 @@ const ProfileScreen = () => {
                 <Ionicons name="pencil" size={18} color="#4285F4" />
             </TouchableOpacity>
         )}
-        {/* TODO: Org Edit Button - Add later */} 
-        {/* {isOrganizationActive && activeOrganization?.currentUserRole === 'admin' && (...)} */} 
+        {/* TODO: Org Edit Button - Add later */}
       </View>
     );
   };
@@ -483,7 +482,7 @@ const ProfileScreen = () => {
         onPress={handleOpenCreateAccountModal}
       >
          <Ionicons name="person-add-outline" size={20} color="#fff" style={styles.buttonIcon} />
-         <Text style={styles.primaryButtonText}>Account erstellen / Anmelden</Text>
+         <Text style={styles.primaryButtonText}>Permanenten Account erstellen</Text>
       </TouchableOpacity>
     </View>
   );
@@ -561,12 +560,13 @@ const ProfileScreen = () => {
       
       return (
           <>
-              {/* Personal Preferences */} 
+              {/* Personal Preferences - Show for both local and logged-in */}
               <View style={styles.card}>
                   <Text style={styles.cardTitle}>Deine Interessen</Text>
-                  {preferences && preferences.length > 0 ? (
+                  {/* Use context preferences directly, works for local and logged-in */}
+                  {(preferences || []).length > 0 ? (
                     <View style={styles.preferencesContainer}>
-                      {preferences.map((prefId) => {
+                      {(preferences || []).map((prefId) => {
                          const category = categories.find(cat => cat.id === prefId);
                          return (
                            <View key={prefId} style={styles.preferenceChip}>
@@ -593,51 +593,55 @@ const ProfileScreen = () => {
                   </TouchableOpacity>
               </View>
               
-              {/* Account Settings (Email/Password) */} 
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>Account Einstellungen</Text>
-                <TouchableOpacity 
+              {/* Account Settings (Email/Password) - Show ONLY for logged-in users */}
+              {hasFullAccount && (
+                <View style={styles.card}>
+                  <Text style={styles.cardTitle}>Account Einstellungen</Text>
+                  <TouchableOpacity 
                     style={styles.settingItem} 
                     onPress={handleOpenAccountSettings}
-                >
-                    <Ionicons name="settings-outline" size={22} style={styles.settingIcon} />
-                    <Text style={styles.settingText}>E-Mail & Passwort ändern</Text>
-                    <Ionicons name="chevron-forward" size={20} color="#ccc" />
-                </TouchableOpacity>
-                 {/* Maybe add delete account later */} 
-              </View>
-              
-              {/* Organization Selection/Creation */} 
-              <View style={styles.card}>
-                  <Text style={styles.cardTitle}>Organisationen</Text>
-                  {userOrganizations && userOrganizations.length > 0 ? (
-                      <View>
-                          <Text style={styles.cardText}>Du bist Mitglied in:</Text>
-                          {userOrganizations.map(org => (
-                              <View key={org.id} style={styles.orgSelectItem}>
-                                  <Text style={styles.orgSelectName}>{org.name}</Text>
-                                  <TouchableOpacity 
-                                      style={[styles.buttonSmall, styles.switchButtonSmall]} 
-                                      onPress={() => handleSwitchToOrg(org.id)}
-                                      disabled={isOrgContextLoading}
-                                  >
-                                      {isOrgContextLoading ? <ActivityIndicator size="small" color="#4285F4" /> : <Text style={styles.buttonSmallText}>Wechseln</Text>}
-                                  </TouchableOpacity>
-                              </View>
-                          ))}
-                          <View style={styles.separator} />
-                      </View>
-                  ) : null}
-                  
-                  <Text style={styles.orgPromptText}>Du bist ein Verein, Gemeinde oder Unternehmen?</Text>
-                  <TouchableOpacity 
-                    style={styles.primaryButton} 
-                    onPress={() => navigation.navigate('OrganizationSetup')}
                   >
-                     <Ionicons name="business-outline" size={20} color="#fff" style={styles.buttonIcon} />
-                     <Text style={styles.primaryButtonText}>Organisation erstellen / beitreten</Text>
+                      <Ionicons name="settings-outline" size={22} style={styles.settingIcon} />
+                      <Text style={styles.settingText}>E-Mail & Passwort ändern</Text>
+                      <Ionicons name="chevron-forward" size={20} color="#ccc" />
                   </TouchableOpacity>
-              </View>
+                   {/* Maybe add delete account later */} 
+                </View>
+              )}
+              
+              {/* Organization Selection/Creation - Show ONLY for logged-in users */}
+              {hasFullAccount && (
+                <View style={styles.card}>
+                    <Text style={styles.cardTitle}>Organisationen</Text>
+                    {userOrganizations && userOrganizations.length > 0 ? (
+                        <View>
+                            <Text style={styles.cardText}>Du bist Mitglied in:</Text>
+                            {userOrganizations.map(org => (
+                                <View key={org.id} style={styles.orgSelectItem}>
+                                    <Text style={styles.orgSelectName}>{org.name}</Text>
+                                    <TouchableOpacity 
+                                        style={[styles.buttonSmall, styles.switchButtonSmall]} 
+                                        onPress={() => handleSwitchToOrg(org.id)}
+                                        disabled={isOrgContextLoading}
+                                    >
+                                        {isOrgContextLoading ? <ActivityIndicator size="small" color="#4285F4" /> : <Text style={styles.buttonSmallText}>Wechseln</Text>}
+                                    </TouchableOpacity>
+                                </View>
+                            ))}
+                            <View style={styles.separator} />
+                        </View>
+                    ) : null}
+                    
+                    <Text style={styles.orgPromptText}>Du bist ein Verein, Gemeinde oder Unternehmen?</Text>
+                    <TouchableOpacity 
+                      style={styles.primaryButton} 
+                      onPress={() => navigation.navigate('OrganizationSetup')}
+                    >
+                       <Ionicons name="business-outline" size={20} color="#fff" style={styles.buttonIcon} />
+                       <Text style={styles.primaryButtonText}>Organisation erstellen / beitreten</Text>
+                    </TouchableOpacity>
+                </View>
+              )}
               
           </>
       );
@@ -914,28 +918,31 @@ const ProfileScreen = () => {
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 30 }}>
       {renderHeader()}
 
-      {!hasFullAccount ? (
-         renderNoAccountSection()
+      {/* Show EITHER Org Management OR Personal Sections */}
+      {isOrganizationActive ? (
+         renderOrgManagementSection()
       ) : (
          <>
-            {/* Render Org Management Section if an org is active */}
-            {isOrganizationActive && renderOrgManagementSection()}
-
-            {/* Render Personal Profile Section if NO org is active */}
-            {!isOrganizationActive && renderPersonalProfileSection()}
+            {/* Show "Create Permanent Account" card ONLY if user has NO full account */}
+            {!hasFullAccount && renderNoAccountSection()}
+            
+            {/* Show Personal Profile Section for BOTH local and logged-in users when not in org mode */}
+            {renderPersonalProfileSection()} 
          </>
       )}
 
-      {/* Sign Out Button - Moved outside the conditional block */}
-      <View style={styles.signOutContainer}>
-        <TouchableOpacity
-          style={[styles.button, styles.signOutButton]}
-          onPress={handleSignOut}
-        >
-          <Ionicons name="log-out-outline" size={22} style={[styles.settingIcon, styles.signOutIcon]} />
-          <Text style={[styles.settingText, styles.signOutText]}>Abmelden</Text>
-        </TouchableOpacity>
-      </View>
+      {/* Sign Out Button - Show ONLY if user HAS a full account */}
+      {hasFullAccount && (
+        <View style={styles.signOutContainer}>
+          <TouchableOpacity
+            style={[styles.button, styles.signOutButton]}
+            onPress={handleSignOut}
+          >
+            <Ionicons name="log-out-outline" size={22} style={[styles.settingIcon, styles.signOutIcon]} />
+            <Text style={[styles.settingText, styles.signOutText]}>Abmelden</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Modals */}
       {renderCreateAccountModal()}
