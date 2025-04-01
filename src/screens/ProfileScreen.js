@@ -705,15 +705,25 @@ const ProfileScreen = () => {
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>Einstellungen & Account</Text>
       {hasFullAccount ? (
-        // Logged in user: Show account settings
-        <TouchableOpacity
-          style={styles.settingItem}
-          onPress={handleOpenAccountSettings}
-        >
-          <Ionicons name="settings-outline" size={24} style={styles.settingIcon} />
-          <Text style={styles.settingText}>E-Mail & Passwort ändern</Text>
-          <Ionicons name="chevron-forward" size={20} color="#ccc" />
-        </TouchableOpacity>
+        // Logged in user: Show account settings & sign out
+        <> 
+          <TouchableOpacity
+            style={styles.settingItem}
+            onPress={handleOpenAccountSettings}
+          >
+            <Ionicons name="settings-outline" size={24} style={styles.settingIcon} />
+            <Text style={styles.settingText}>E-Mail & Passwort ändern</Text>
+            <Ionicons name="chevron-forward" size={20} color="#ccc" />
+          </TouchableOpacity>
+          {/* Removed the old organization toggle */} 
+          <TouchableOpacity
+            style={[styles.settingItem, styles.signOutButton]}
+            onPress={handleSignOut}
+          >
+            <Ionicons name="log-out-outline" size={24} style={[styles.settingIcon, styles.signOutIcon]} />
+            <Text style={[styles.settingText, styles.signOutText]}>Abmelden</Text>
+          </TouchableOpacity>
+        </>
       ) : (
         // Anonymous user: Show Create Account button
         <TouchableOpacity
@@ -725,19 +735,11 @@ const ProfileScreen = () => {
           <Ionicons name="chevron-forward" size={20} color="#ccc" />
         </TouchableOpacity>
       )}
-      {/* Always show logout button */}
-      <TouchableOpacity
-        style={[styles.settingItem, styles.signOutButton]}
-        onPress={handleSignOut}
-      >
-        <Ionicons name="log-out-outline" size={24} style={[styles.settingIcon, styles.signOutIcon]} />
-        <Text style={[styles.settingText, styles.signOutText]}>Abmelden</Text>
-      </TouchableOpacity>
-      {/* Reset Onboarding for testing - maybe hide in production */}
-      {/* <TouchableOpacity style={[styles.settingItem, styles.resetButton]} onPress={handleResetOnboarding}>
-         <Ionicons name="refresh-outline" size={24} style={[styles.settingIcon, styles.resetIcon]} />
-         <Text style={[styles.settingText, styles.resetText]}>Reset Onboarding (Dev)</Text>
-      </TouchableOpacity> */}
+      {/* Reset Onboarding for testing - maybe hide in production */} 
+      {/* <TouchableOpacity style={[styles.settingItem, styles.resetButton]} onPress={handleResetOnboarding}> 
+         <Ionicons name="refresh-outline" size={24} style={[styles.settingIcon, styles.resetIcon]} /> 
+         <Text style={[styles.settingText, styles.resetText]}>Reset Onboarding (Dev)</Text> 
+      </TouchableOpacity> */} 
     </View>
   );
 

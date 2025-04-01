@@ -101,11 +101,10 @@ DROP POLICY IF EXISTS "Allow admin to manage members in their org" ON public.org
 DROP POLICY IF EXISTS "Allow users to join an organization (insert)" ON public.organization_members;
 DROP POLICY IF EXISTS "Allow users to leave an organization (delete)" ON public.organization_members;
 
--- Renamed policy and fixed recursion
-DROP POLICY IF EXISTS "Allow users to view their own membership record" ON public.organization_members;
-CREATE POLICY "Allow users to view their own membership records" ON public.organization_members
+
+CREATE POLICY "Allow members to view membership of their orgs" ON public.organization_members
   FOR SELECT TO authenticated USING (
-    user_id = auth.uid() -- User can only see their own row(s) in this table directly.
+    organization_id IN (SELECT organization_id FROM public.organization_members WHERE user_id = auth.uid())
   );
 
 -- Allow admins to manage roles or remove members (but not themselves easily via this policy)
