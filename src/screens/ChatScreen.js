@@ -9,7 +9,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const ChatScreen = ({ navigation, route }) => {
   // Use organization context to determine if add button should be shown
-  const { isOrganization } = useOrganization();
+  const { isOrganizationActive, activeOrganizationId } = useOrganization();
   const { user, displayName } = useAuth();
   
   // State for chat groups and loading
@@ -364,10 +364,13 @@ const ChatScreen = ({ navigation, route }) => {
       {/* Other chat groups */}
       {renderChatList()}
       
-      {isOrganization && user && (
+      {/* Show Add button only if an organization context is active and user logged in */} 
+      {isOrganizationActive && user && (
         <TouchableOpacity 
           style={styles.addButton}
-          onPress={() => navigation.navigate('CreateBroadcastGroup')}
+          onPress={() => navigation.navigate('CreateBroadcastGroup', {
+              organizationId: activeOrganizationId // Pass the active org ID
+          })}
         >
           <Ionicons name="add" size={24} color="#fff" />
         </TouchableOpacity>

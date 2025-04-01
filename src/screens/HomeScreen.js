@@ -7,8 +7,8 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 
 const HomeScreen = ({ navigation }) => {
-  // Use organization context to determine if add button should be shown
-  const { isOrganization } = useOrganization();
+  // Use the refactored organization context for active status
+  const { isOrganizationActive, activeOrganizationId } = useOrganization();
   const { user } = useAuth();
   
   // State for articles and loading
@@ -123,10 +123,12 @@ const HomeScreen = ({ navigation }) => {
     setSelectedFilter(filter);
   };
   
-  // Open article creation screen (for organization accounts)
+  // Open article creation screen (for active organization context)
   const handleCreateArticle = () => {
-    if (isOrganization && user) {
-      navigation.navigate('CreateArticle');
+    if (isOrganizationActive && user) {
+      navigation.navigate('CreateArticle', { 
+        organizationId: activeOrganizationId // Pass the active org ID
+      }); 
     }
   };
 
@@ -190,7 +192,8 @@ const HomeScreen = ({ navigation }) => {
         </ScrollView>
       )}
       
-      {isOrganization && user && (
+      {/* Show Add button only if an organization context is active and user logged in */} 
+      {isOrganizationActive && user && (
         <TouchableOpacity 
           style={styles.addButton}
           onPress={handleCreateArticle}

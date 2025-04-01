@@ -48,7 +48,8 @@ const CalendarScreen = ({ navigation }) => {
   
   // Get user from AuthContext
   const { user } = useAuth();
-  const { isOrganization } = useOrganization();
+  // Use organization context for active status
+  const { isOrganizationActive, activeOrganizationId } = useOrganization();
   
   // Fetch events from Supabase
   useEffect(() => {
@@ -375,12 +376,15 @@ const CalendarScreen = ({ navigation }) => {
 
   // Handle navigation to create event screen
   const handleCreateEvent = () => {
-    if (user) {
-      navigation.navigate('CreateEvent');
+    if (user && isOrganizationActive) {
+      navigation.navigate('CreateEvent', {
+          organizationId: activeOrganizationId // Pass the active org ID
+      });
+    } else if (user && !isOrganizationActive) {
+      // Optionally allow personal event creation or show a message
+      Alert.alert('Hinweis', 'Eventerstellung ist derzeit nur für Organisationen aktiviert.');
     } else {
-      // Optionally prompt user to log in or show an alert
       Alert.alert('Anmeldung erforderlich', 'Bitte melde dich an, um ein Event zu erstellen.');
-      // navigation.navigate('Profile'); // Or navigate to login/profile
     }
   };
 
@@ -530,7 +534,7 @@ const CalendarScreen = ({ navigation }) => {
         />
       </View>
       
-      {isOrganization && user && (
+      {isOrganizationActive && user && (
         <TouchableOpacity 
           style={styles.addButton}
           onPress={handleCreateEvent}

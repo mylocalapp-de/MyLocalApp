@@ -1,26 +1,35 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Switch, ScrollView, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Switch, ScrollView, Modal, TextInput, Alert, ActivityIndicator, FlatList, Clipboard } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { useOrganization } from '../context/OrganizationContext';
 import { useAuth } from '../context/AuthContext';
+import { useOrganization } from '../context/OrganizationContext';
 
 const ProfileScreen = () => {
   // DEBUG: Log component render and loading state
-  console.log(`ProfileScreen rendering - isAccountSettingsLoading: ${isAccountSettingsLoading}`);
+  // console.log(`ProfileScreen rendering - isAccountSettingsLoading: ${isAccountSettingsLoading}`);
 
   // Use navigation hook
   const navigation = useNavigation();
   
-  // Use organization context
-  const { isOrganization, toggleOrganizationStatus } = useOrganization();
-  
+  // Use the refactored Organization Context for active org state
+  const {
+    activeOrganizationId, 
+    activeOrganization,
+    isOrganizationActive, 
+    switchOrganizationContext,
+    isLoading: isOrgContextLoading, // Renamed to avoid clash
+  } = useOrganization();
+
   // Use auth context with Supabase
   const { 
     user, // Supabase auth user object (null if not logged in)
     profile, // Profile data from public.profiles (null if not loaded or doesn't exist)
     preferences, // Preferences (from profile or local storage)
     displayName, // Display name (from profile or local storage)
+    userOrganizations, // List of orgs user is member of [{id, name, role}, ...]
+    fetchOrganizationMembers, // Function to get member list
+    leaveOrganization, // Function to leave an org
     signOut, 
     upgradeToFullAccount, 
     resetOnboarding, // Keep for testing?
@@ -40,10 +49,10 @@ const ProfileScreen = () => {
   const [isCreateLoading, setIsCreateLoading] = useState(false);
   const [createFormError, setCreateFormError] = useState('');
   
-  // State for manual refresh
+  // State for manual refresh (Keep for user profile refresh)
   const [isRefreshing, setIsRefreshing] = useState(false);
   
-  // State for profile edit modal
+  // State for profile edit modal (Name and Personal Preferences)
   const [showProfileEditModal, setShowProfileEditModal] = useState(false);
   const [editDisplayName, setEditDisplayName] = useState('');
   const [editPreferences, setEditPreferences] = useState([]);
@@ -57,15 +66,21 @@ const ProfileScreen = () => {
   const [emailCurrentPassword, setEmailCurrentPassword] = useState(''); // Password required for email change
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
-  // No current password needed for password update via Supabase Auth
-  // const [currentPassword, setCurrentPassword] = useState(''); 
   const [accountSettingsError, setAccountSettingsError] = useState('');
   
   // Ensure loading state is properly initialized
   const [isAccountSettingsLoading, setIsAccountSettingsLoading] = useState(false);
+  
+  // State for Organization Management
+  const [organizationMembers, setOrganizationMembers] = useState([]);
+  const [isFetchingMembers, setIsFetchingMembers] = useState(false);
+  const [orgMgmtError, setOrgMgmtError] = useState('');
 
   // Derived state: Check if user has a full Supabase account
   const hasFullAccount = !!user?.id;
+  
+  // Combine loading states
+  const overallLoading = authLoading || isOrgContextLoading;
 
   // Categories for preferences selection
   const categories = [
@@ -73,37 +88,49 @@ const ProfileScreen = () => {
     { id: 'sport', name: 'Sport', icon: 'football-outline' },
     { id: 'verkehr', name: 'Verkehr', icon: 'car-outline' },
     { id: 'politik', name: 'Politik', icon: 'megaphone-outline' },
+    { id: 'vereine', name: 'Vereine', icon: 'people-outline' }, // Added Vereine
+    { id: 'gemeinde', name: 'Gemeinde', icon: 'business-outline' }, // Added Gemeinde
   ];
   
   // Toggle preference selection in edit modal
   const togglePreference = (id) => {
-    if (editPreferences.includes(id)) {
-      setEditPreferences(editPreferences.filter(item => item !== id));
-    } else {
-      setEditPreferences([...editPreferences, id]);
-    }
+    setEditPreferences(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
   };
   
-  // Log relevant context state changes
+  // Fetch organization members when context becomes active
+  useEffect(() => {
+    const loadMembers = async () => {
+      if (isOrganizationActive && activeOrganizationId) {
+        setIsFetchingMembers(true);
+        setOrgMgmtError('');
+        const result = await fetchOrganizationMembers(activeOrganizationId);
+        if (result.success) {
+          setOrganizationMembers(result.data || []);
+        } else {
+          setOrgMgmtError(result.error?.message || 'Mitglieder konnten nicht geladen werden.');
+          setOrganizationMembers([]);
+        }
+        setIsFetchingMembers(false);
+      }
+    };
+    loadMembers();
+  }, [isOrganizationActive, activeOrganizationId, fetchOrganizationMembers]);
+
+  // Log relevant context state changes (DEBUG)
   useEffect(() => {
     console.log('ProfileScreen - User state:', user ? `ID: ${user.id}, Email: ${user.email}` : 'No auth user');
     console.log('ProfileScreen - Profile state:', profile);
     console.log('ProfileScreen - Display Name:', displayName);
     console.log('ProfileScreen - Preferences:', preferences);
     console.log('ProfileScreen - Has Full Account:', hasFullAccount);
-    
-    // Log more detailed debugging info if there's a discrepancy
-    if (user && !profile) {
-      console.log('ProfileScreen - WARNING: User exists but profile is null!');
-      console.log('This might indicate the database trigger failed or profile wasn\'t loaded');
-    }
-    if (user && !hasFullAccount) {
-      console.log('ProfileScreen - WARNING: User exists but hasFullAccount is false!');
-      console.log('This might indicate an issue with authentication state');
-    }
-  }, [user, profile, displayName, preferences, hasFullAccount]);
+    console.log('ProfileScreen - User Organizations:', userOrganizations);
+    console.log('ProfileScreen - Is Org Active:', isOrganizationActive);
+    console.log('ProfileScreen - Active Org Details:', activeOrganization);
+  }, [user, profile, displayName, preferences, hasFullAccount, userOrganizations, isOrganizationActive, activeOrganization]);
 
-  // Open profile edit modal with current values from context
+  // Open profile edit modal with current values from context (for personal profile)
   const handleOpenProfileEdit = () => {
     setEditDisplayName(displayName || ''); // Use context displayName
     setEditPreferences(preferences || []); // Use context preferences
@@ -114,11 +141,8 @@ const ProfileScreen = () => {
   // Open account settings modal (only if user has a full account)
   const handleOpenAccountSettings = () => {
     if (!hasFullAccount) {
-      Alert.alert(
-        'Account benötigt',
-        'Bitte erstelle einen Account, um E-Mail und Passwort zu ändern.',
-        [{ text: 'OK' }, { text: 'Account erstellen', onPress: handleOpenCreateAccountModal }]
-      );
+      // This case should ideally not happen if the button isn't shown, but good failsafe
+      Alert.alert('Fehler', 'Account-Einstellungen sind nur für eingeloggte Benutzer verfügbar.');
       return;
     }
     
@@ -167,10 +191,7 @@ const ProfileScreen = () => {
       const result = await upgradeToFullAccount(createEmail, createPassword);
 
       if (result.success) {
-        console.log('Account upgrade process successful in AuthContext, user ID:', result.data?.user?.id);
-        // AuthContext's onAuthStateChange listener should now handle
-        // setting the user, loading the profile, and setting onboarding complete.
-        // This will trigger the AppNavigator to show the main app.
+        console.log('Account upgrade process successful in AuthContext');
         Alert.alert(
           'Erfolgreich',
           'Dein Account wurde erstellt. Du bist jetzt eingeloggt.'
@@ -188,20 +209,21 @@ const ProfileScreen = () => {
     }
   };
   
-  // Save profile changes (Name and Preferences)
+  // Save profile changes (Name and Preferences) - Only for PERSONAL profile
   const handleSaveProfile = async () => {
-    console.log('Saving profile changes...');
-    console.log('New display name:', editDisplayName);
-    console.log('New preferences:', editPreferences);
+    if (isOrganizationActive) return; // Prevent saving personal profile while org active
+    
+    console.log('Saving personal profile changes...');
     
     if (!editDisplayName.trim()) {
       setEditFormError('Bitte gib einen Benutzernamen ein.');
       return;
     }
-    if (editPreferences.length === 0) {
-      setEditFormError('Bitte wähle mindestens eine Präferenz aus.');
-      return;
-    }
+    // Allow zero preferences? Maybe not needed.
+    // if (editPreferences.length === 0) {
+    //   setEditFormError('Bitte wähle mindestens eine Präferenz aus.');
+    //   return;
+    // }
     
     setIsEditLoading(true);
     setEditFormError('');
@@ -218,7 +240,7 @@ const ProfileScreen = () => {
           if (!nameResult.success) {
               console.error('Failed to update display name:', nameResult.error);
               setEditFormError(nameResult.error?.message || 'Fehler beim Speichern des Namens.');
-              nameWarning = nameResult.warning; // Capture potential warning even on failure
+              nameWarning = nameResult.warning;
               nameUpdateSuccess = false;
           } else {
               nameWarning = nameResult.warning;
@@ -226,13 +248,11 @@ const ProfileScreen = () => {
       }
 
       // Update preferences if changed
-      // Simple array comparison might be insufficient for complex objects, but ok for strings
       const preferencesChanged = JSON.stringify(editPreferences.sort()) !== JSON.stringify((preferences || []).sort());
       if (preferencesChanged) {
           const prefResult = await updatePreferences(editPreferences);
           if (!prefResult.success) {
               console.error('Failed to update preferences:', prefResult.error);
-              // Append error message if name update also failed or set if it succeeded
               setEditFormError(prev => 
                   prev ? `${prev} ${prefResult.error?.message || 'Fehler beim Speichern der Präferenzen.'}` 
                   : (prefResult.error?.message || 'Fehler beim Speichern der Präferenzen.')
@@ -244,7 +264,7 @@ const ProfileScreen = () => {
           }
       }
       
-      setIsEditLoading(false); // Stop loading indicator
+      setIsEditLoading(false);
 
       if (nameUpdateSuccess && prefUpdateSuccess) {
           if (nameWarning || prefWarning) {
@@ -255,16 +275,13 @@ const ProfileScreen = () => {
           } else {
               Alert.alert('Erfolgreich', 'Profil aktualisiert.');
           }
-          setShowProfileEditModal(false); // Close modal on full success or partial success with warning
+          setShowProfileEditModal(false);
       } else {
-          // Error message is already set in the form
           if (nameWarning || prefWarning) {
               Alert.alert(
                   'Hinweis',
                   'Änderungen lokal übernommen, aber Datenbank-Update fehlgeschlagen.'
               ); 
-              // Optionally close modal even on DB failure?
-              // setShowProfileEditModal(false); 
           }
       }
 
@@ -277,70 +294,46 @@ const ProfileScreen = () => {
   
   // Handle email update
   const handleUpdateEmail = async () => {
-    console.log('Updating email...');
-    
     if (!newEmail.trim() || !newEmail.includes('@')) {
       setAccountSettingsError('Bitte gib eine gültige neue E-Mail-Adresse ein.');
       return;
     }
-    // Check if email is actually different
     if (newEmail.trim() === user?.email) {
        setAccountSettingsError('Die neue E-Mail-Adresse muss sich von der aktuellen unterscheiden.');
        return;
     }
-    if (!emailCurrentPassword) {
-      setAccountSettingsError('Bitte gib dein aktuelles Passwort ein, um die Änderung zu bestätigen.');
-      return;
-    }
+    // No password needed if confirmation disabled
+    // if (!emailCurrentPassword) {
+    //   setAccountSettingsError('Bitte gib dein aktuelles Passwort ein, um die Änderung zu bestätigen.');
+    //   return;
+    // }
     
     setIsAccountSettingsLoading(true);
     setAccountSettingsError('');
     
     try {
-      // Use the updated context function which requires the current password
       const result = await updateEmail(newEmail.trim(), emailCurrentPassword);
       
       if (result.success) {
-        // Only close modal on success
         setShowAccountSettingsModal(false);
-        if (result.needsConfirmation) {
-           Alert.alert(
-              'Bestätigung erforderlich', 
-              'Wir haben eine Bestätigungs-E-Mail an deine neue Adresse gesendet. Bitte klicke auf den Link darin, um die Änderung abzuschließen.'
-           );
-        } else {
-            Alert.alert('Erfolgreich', 'Deine E-Mail-Adresse wurde aktualisiert.');
-        }
+        Alert.alert('Erfolgreich', 'Deine E-Mail-Adresse wurde aktualisiert.');
+        // No confirmation needed now
+        // if (result.needsConfirmation) { ... } else { ... }
       } else {
         console.error('Failed to update email:', result.error);
-        // Check for specific rate-limiting error
         const errorMessage = result.error?.message || 'E-Mail konnte nicht geändert werden.';
-        if (errorMessage.includes('For security purposes')) {
-            setAccountSettingsError('Aus Sicherheitsgründen können Sie diese Anfrage erst nach kurzer Wartezeit erneut stellen. Bitte versuchen Sie es später noch einmal.');
-        } else if (errorMessage.includes('Invalid user credentials')) { // Catch incorrect password
-            setAccountSettingsError('Falsches aktuelles Passwort. Bitte versuche es erneut.');
-        } else {
-            setAccountSettingsError(errorMessage);
-        }
+        setAccountSettingsError(errorMessage);
       }
     } catch (error) {
       console.error('Unexpected error during email update:', error);
       setAccountSettingsError('Ein unerwarteter Fehler ist aufgetreten.');
     } finally {
-      // Always stop loading, regardless of success or failure
       setIsAccountSettingsLoading(false);
-      // DEBUG: Confirm state update executed
-      console.log('ProfileScreen: setIsAccountSettingsLoading(false) executed.');
     }
   };
   
   // Handle password update
   const handleUpdatePassword = async () => {
-    console.log('ProfileScreen: Attempting password update...');
-
-    // No current password needed for Supabase Auth update
-    // if (!currentPassword.trim()) { ... }
-
     if (!newPassword) {
       setAccountSettingsError('Bitte gib ein neues Passwort ein.');
       return;
@@ -358,37 +351,19 @@ const ProfileScreen = () => {
     setAccountSettingsError('');
 
     try {
-      // Use the updated context function which only needs the new password
-      console.log('ProfileScreen: Calling AuthContext.updatePassword...');
       const result = await updatePassword(newPassword);
-      console.log('ProfileScreen: AuthContext.updatePassword result:', result);
-
       if (result.success) {
-        console.log('ProfileScreen: Password update successful. Closing modal and alerting.');
-        // Only close modal on success and show alert immediately
-        // Do not wait for the background profile refresh
         setShowAccountSettingsModal(false);
-        Alert.alert(
-          'Erfolgreich',
-          'Dein Passwort wurde aktualisiert.'
-        );
-        // Setting loading false is handled by finally block
+        Alert.alert('Erfolgreich', 'Dein Passwort wurde aktualisiert.');
       } else {
-        console.error('ProfileScreen: Failed to update password:', result.error);
-        // Provide more specific feedback if possible (e.g., new password is same as old)
+        console.error('Failed to update password:', result.error);
         setAccountSettingsError(result.error?.message || 'Passwort konnte nicht geändert werden.');
-        // Setting loading false is handled by finally block
       }
     } catch (error) {
-      console.error('ProfileScreen: Unexpected error during password update:', error);
+      console.error('Unexpected error during password update:', error);
       setAccountSettingsError('Ein unerwarteter Fehler ist aufgetreten.');
-       // Setting loading false is handled by finally block
     } finally {
-      // Always stop loading, regardless of success or failure
-      console.log('ProfileScreen: Resetting loading state in finally block.');
       setIsAccountSettingsLoading(false);
-      // DEBUG: Confirm state update executed
-      console.log('ProfileScreen: setIsAccountSettingsLoading(false) executed.');
     }
   };
 
@@ -403,434 +378,275 @@ const ProfileScreen = () => {
           text: "Abmelden",
           style: "destructive",
           onPress: async () => {
-            console.log('Signing out...');
             const { success, error } = await signOut();
-            
             if (!success) {
-              console.error('Sign out failed:', error);
               Alert.alert("Fehler", `Abmeldung fehlgeschlagen: ${error?.message || 'Unbekannter Fehler'}`);
-              return;
             }
-            
-            console.log('Sign out successful, navigation will be handled by AppNavigator');
-            // No need to manually navigate - the AuthContext will set hasCompletedOnboarding to false,
-            // which will cause AppNavigator to show the WelcomeScreen
+            // Navigation handled by AppNavigator via AuthContext change
           },
         },
       ]
     );
   };
   
-  // Handle reset onboarding (for development/testing)
-  const handleResetOnboarding = async () => {
-    Alert.alert(
-      "Onboarding zurücksetzen",
-      "Möchtest du wirklich zum Willkommensbildschirm zurückkehren und lokale Daten löschen?",
-      [
-        { text: "Abbrechen", style: "cancel" },
-        {
-          text: "Zurücksetzen",
-          style: "destructive",
-          onPress: async () => {
-            await resetOnboarding();
-            // Navigation should be handled by the main App navigator
-          },
-        },
-      ]
-    );
-  };
-
-  // Add a function to manually reload the user profile
-  const handleRefreshProfile = async () => {
-    if (!user?.id) return;
-    
-    setIsRefreshing(true);
-    try {
-      console.log('Manually refreshing profile for user:', user.id);
-      await loadUserProfile(user.id);
-      Alert.alert('Aktualisiert', 'Dein Profil wurde aktualisiert.');
-    } catch (error) {
-      console.error('Error refreshing profile:', error);
-    } finally {
-      setIsRefreshing(false);
+  // Handle switch to organization context
+  const handleSwitchToOrg = async (orgId) => {
+    setIsOrgContextLoading(true); // Show loading indicator while switching
+    const result = await switchOrganizationContext(orgId);
+    setIsOrgContextLoading(false);
+    if (!result.success) {
+      Alert.alert("Fehler", result.error || "Konnte nicht zur Organisation wechseln.");
     }
+    // UI will update based on context change
   };
 
+  // Handle switch back to personal context
+  const handleSwitchToPersonal = async () => {
+     setIsOrgContextLoading(true);
+     await switchOrganizationContext(null);
+     setIsOrgContextLoading(false);
+     // UI will update based on context change
+  };
+
+  // Handle leaving an organization
+  const handleLeaveOrg = (orgId, orgName) => {
+      if (!orgId || !orgName) return;
+      Alert.alert(
+          "Organisation verlassen",
+          `Möchtest du die Organisation "${orgName}" wirklich verlassen?`,
+          [
+              { text: "Abbrechen", style: "cancel" },
+              {
+                  text: "Verlassen",
+                  style: "destructive",
+                  onPress: async () => {
+                      setIsOrgContextLoading(true);
+                      const result = await leaveOrganization(orgId);
+                      setIsOrgContextLoading(false);
+                      if (result.success) {
+                          Alert.alert("Erfolg", `Du hast "${orgName}" verlassen.`);
+                          // Context should update automatically via AuthProvider listener
+                      } else {
+                          Alert.alert("Fehler", result.error || "Verlassen fehlgeschlagen.");
+                      }
+                  },
+              },
+          ]
+      );
+  };
+  
   // --- Render Functions --- 
 
-  const renderProfileHeader = () => (
-    <View style={styles.profileHeader}>
-      <Image
-        source={require('../../assets/avatar_placeholder.png')} // Replace with actual avatar later if available
-        style={styles.avatar}
-      />
-      <View style={styles.profileInfo}>
-        <Text style={styles.displayName}>{displayName || 'Gast'}</Text>
-        {hasFullAccount ? (
-          <Text style={styles.email}>{user.email}</Text>
-        ) : (
-          <Text style={styles.accountStatus}>Lokaler Account (nicht synchronisiert)</Text>
+  const renderHeader = () => {
+    const headerTitle = isOrganizationActive ? `Organisation: ${activeOrganization?.name || '... '}` : 'Dein Profil';
+    const avatarInitial = isOrganizationActive ? (activeOrganization?.name?.charAt(0) || 'O') : (displayName?.charAt(0) || '?');
+    
+    return (
+      <View style={styles.profileHeader}>
+         <View style={[styles.avatar, isOrganizationActive && styles.orgAvatar]}>
+            <Text style={styles.avatarLetter}>{avatarInitial}</Text>
+        </View>
+        <View style={styles.profileInfo}>
+           <Text style={styles.headerTitle} numberOfLines={1}>{headerTitle}</Text>
+          {hasFullAccount && !isOrganizationActive && (
+             <Text style={styles.email}>{user?.email || ''}</Text>
+          )}
+          {!hasFullAccount && (
+            <Text style={styles.accountStatus}>Lokaler Account (nicht synchronisiert)</Text>
+          )}
+          {/* Maybe show user role within org? */} 
+          {isOrganizationActive && (
+             <Text style={styles.roleText}>Deine Rolle: {activeOrganization?.currentUserRole === 'admin' ? 'Administrator' : 'Mitglied'}</Text>
+          )}
+        </View>
+        {/* Personal Profile Edit Button - only shown when NOT in org context */} 
+        {hasFullAccount && !isOrganizationActive && (
+            <TouchableOpacity 
+                style={styles.editProfileButton}
+                onPress={handleOpenProfileEdit}
+            >
+                <Ionicons name="pencil" size={18} color="#4285F4" />
+            </TouchableOpacity>
         )}
+        {/* TODO: Org Edit Button - Add later */} 
+        {/* {isOrganizationActive && activeOrganization?.currentUserRole === 'admin' && (...)} */} 
       </View>
-      <TouchableOpacity 
-          style={styles.editProfileButton}
-          onPress={handleOpenProfileEdit}
-      >
-          <Ionicons name="pencil" size={18} color="#4285F4" />
-      </TouchableOpacity>
-      {hasFullAccount && (
-        <TouchableOpacity 
-          style={styles.refreshButton}
-          onPress={handleRefreshProfile}
-          disabled={isRefreshing}
-        >
-          {isRefreshing ? (
-            <ActivityIndicator size="small" color="#4285F4" />
-          ) : (
-            <Ionicons name="refresh-circle" size={22} color="#4285F4" />
-          )}
-        </TouchableOpacity>
-      )}
-    </View>
-  );
+    );
+  };
 
-  const renderPreferencesSection = () => (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>Deine Interessen</Text>
-      {preferences && preferences.length > 0 ? (
-        <View style={styles.preferencesContainer}>
-          {preferences.map((pref) => {
-             const category = categories.find(cat => cat.id === pref);
-             return (
-               <View key={pref} style={styles.preferenceChip}>
-                 <Ionicons 
-                    name={category?.icon || 'help-circle-outline'} 
-                    size={16} 
-                    color="#4285F4" 
-                    style={styles.preferenceIcon}
-                 />
-                 <Text style={styles.preferenceText}>{category?.name || pref}</Text>
-               </View>
-             );
-          })}
-        </View>
-      ) : (
-        <Text style={styles.noPreferencesText}>Keine Präferenzen ausgewählt.</Text>
-      )}
-      <TouchableOpacity 
-        style={styles.editButtonInline} 
-        onPress={handleOpenProfileEdit}
+  const renderNoAccountSection = () => (
+    <View style={styles.card}>
+       <Text style={styles.cardTitle}>Account erstellen</Text>
+       <Text style={styles.cardText}>Sichere deine Daten und nutze alle Funktionen, indem du einen kostenlosen Account erstellst.</Text>
+       <TouchableOpacity 
+        style={styles.primaryButton} 
+        onPress={handleOpenCreateAccountModal}
       >
-        <Text style={styles.editButtonText}>Präferenzen bearbeiten</Text>
-        <Ionicons name="chevron-forward" size={16} color="#4285F4" />
+         <Ionicons name="person-add-outline" size={20} color="#fff" style={styles.buttonIcon} />
+         <Text style={styles.primaryButtonText}>Account erstellen / Anmelden</Text>
       </TouchableOpacity>
     </View>
   );
-
-  const renderAccountSection = () => (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>Account</Text>
-      {hasFullAccount ? (
-        <TouchableOpacity 
-          style={styles.settingItem}
-          onPress={handleOpenAccountSettings}
-        >
-          <Ionicons name="settings-outline" size={24} style={styles.settingIcon} />
-          <Text style={styles.settingText}>E-Mail & Passwort ändern</Text>
-          <Ionicons name="chevron-forward" size={20} color="#ccc" />
-        </TouchableOpacity>
-      ) : (
-        <TouchableOpacity 
-          style={styles.settingItem}
-          onPress={handleOpenCreateAccountModal}
-        >
-          <Ionicons name="person-add-outline" size={24} style={styles.settingIcon} />
-          <Text style={styles.settingText}>Account erstellen & Daten sichern</Text>
-          <Ionicons name="chevron-forward" size={20} color="#ccc" />
-        </TouchableOpacity>
-      )}
-      
-      {/* Organization Toggle - Assuming this logic is separate */} 
-      <View style={styles.settingItem}>
-        <Ionicons name="business-outline" size={24} style={styles.settingIcon} />
-        <Text style={styles.settingText}>Ich bin eine Organisation</Text>
-        <Switch 
-          value={isOrganization}
-          onValueChange={toggleOrganizationStatus}
-          trackColor={{ false: "#767577", true: "#81b0ff" }}
-          thumbColor={isOrganization ? "#4285F4" : "#f4f3f4"}
-        />
-      </View>
-
-      <TouchableOpacity 
-        style={[styles.settingItem, styles.signOutButton]} 
-        onPress={handleSignOut}
-      >
-        <Ionicons name="log-out-outline" size={24} style={[styles.settingIcon, styles.signOutIcon]} />
-        <Text style={[styles.settingText, styles.signOutText]}>Abmelden</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  const renderCreateAccountModal = () => (
-    <Modal
-      visible={showCreateAccountModal}
-      animationType="slide"
-      transparent={true}
-      onRequestClose={() => setShowCreateAccountModal(false)}
-    >
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <Text style={styles.modalTitle}>Account erstellen</Text>
-          <Text style={styles.modalSubtitle}>Sichere deine Daten und nutze die App auf mehreren Geräten.</Text>
-          
-          <TextInput
-            style={styles.input}
-            placeholder="E-Mail"
-            value={createEmail}
-            onChangeText={setCreateEmail}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoComplete="email"
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Passwort (min. 6 Zeichen)"
-            value={createPassword}
-            onChangeText={setCreatePassword}
-            secureTextEntry
-            autoCapitalize="none"
-            autoComplete="new-password"
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Passwort bestätigen"
-            value={confirmCreatePassword}
-            onChangeText={setConfirmCreatePassword}
-            secureTextEntry
-            autoCapitalize="none"
-            autoComplete="new-password"
-          />
-          
-          {createFormError ? <Text style={styles.errorTextModal}>{createFormError}</Text> : null}
-          
-          <View style={styles.modalActions}>
-            <TouchableOpacity 
-              style={[styles.modalButton, styles.cancelButton]} 
-              onPress={() => setShowCreateAccountModal(false)}
-              disabled={isCreateLoading}
-            >
-              <Text style={styles.modalButtonText}>Abbrechen</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={[styles.modalButton, styles.saveButton, isCreateLoading && styles.buttonDisabled]} 
-              onPress={handleCreateAccount}
-              disabled={isCreateLoading}
-            >
-              {isCreateLoading ? 
-                 <ActivityIndicator color="#fff" size="small" /> : 
-                 <Text style={styles.modalButtonText}>Erstellen</Text>
-              }
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  );
-
-  const renderProfileEditModal = () => (
-    <Modal
-      visible={showProfileEditModal}
-      animationType="slide"
-      transparent={true}
-      onRequestClose={() => setShowProfileEditModal(false)}
-    >
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <Text style={styles.modalTitle}>Profil bearbeiten</Text>
-          
-          <Text style={styles.inputLabel}>Anzeigename</Text>
-          <TextInput
-            style={styles.input}
-            value={editDisplayName}
-            onChangeText={setEditDisplayName}
-            placeholder="Dein Name oder Spitzname"
-            autoCapitalize="words"
-          />
-          
-          <Text style={styles.inputLabel}>Interessen</Text>
-          <View style={styles.categoriesContainerModal}>
-            {categories.map((category) => (
-              <TouchableOpacity
-                key={category.id}
-                style={[
-                  styles.categoryItemModal,
-                  editPreferences.includes(category.id) && styles.categoryItemModalSelected
-                ]}
-                onPress={() => togglePreference(category.id)}
-              >
-                <Ionicons 
-                  name={category.icon} 
-                  size={20} 
-                  color={editPreferences.includes(category.id) ? '#fff' : '#4285F4'} 
-                  style={styles.categoryIconModal}
-                />
-                <Text 
-                  style={[
-                    styles.categoryTextModal,
-                    editPreferences.includes(category.id) && styles.categoryTextModalSelected
-                  ]}
-                >
-                  {category.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          
-          {editFormError ? <Text style={styles.errorTextModal}>{editFormError}</Text> : null}
-          
-          <View style={styles.modalActions}>
-            <TouchableOpacity 
-              style={[styles.modalButton, styles.cancelButton]} 
-              onPress={() => setShowProfileEditModal(false)}
-              disabled={isEditLoading}
-            >
-              <Text style={styles.modalButtonText}>Abbrechen</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={[styles.modalButton, styles.saveButton, isEditLoading && styles.buttonDisabled]} 
-              onPress={handleSaveProfile}
-              disabled={isEditLoading}
-            >
-              {isEditLoading ? 
-                 <ActivityIndicator color="#fff" size="small" /> : 
-                 <Text style={styles.modalButtonText}>Speichern</Text>
-              }
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  );
-
-  const renderAccountSettingsModal = () => (
-    <Modal
-      visible={showAccountSettingsModal}
-      animationType="slide"
-      transparent={true}
-      onRequestClose={() => setShowAccountSettingsModal(false)}
-    >
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <Text style={styles.modalTitle}>Account Einstellungen</Text>
-          
-          {/* Tabs */} 
-          <View style={styles.tabContainer}>
-             <TouchableOpacity 
-                style={[styles.tabButton, activeTab === 'email' && styles.tabButtonActive]}
-                onPress={() => {setActiveTab('email'); setAccountSettingsError('');}}
-             >
-                 <Text style={[styles.tabText, activeTab === 'email' && styles.tabTextActive]}>E-Mail ändern</Text>
-             </TouchableOpacity>
-             <TouchableOpacity 
-                style={[styles.tabButton, activeTab === 'password' && styles.tabButtonActive]}
-                onPress={() => {setActiveTab('password'); setAccountSettingsError('');}}
-             >
-                 <Text style={[styles.tabText, activeTab === 'password' && styles.tabTextActive]}>Passwort ändern</Text>
-             </TouchableOpacity>
-          </View>
-          
-          {/* Content based on active tab */} 
-          {activeTab === 'email' && (
-             <View>
-                <Text style={styles.inputLabel}>Neue E-Mail-Adresse</Text>
-                <TextInput
-                   style={styles.input}
-                   placeholder="Neue E-Mail"
-                   value={newEmail}
-                   onChangeText={setNewEmail}
-                   keyboardType="email-address"
-                   autoCapitalize="none"
-                   autoComplete="email"
-                />
-                <Text style={styles.inputLabel}>Aktuelles Passwort zur Bestätigung</Text>
-                <TextInput
-                   style={styles.input}
-                   placeholder="Aktuelles Passwort"
-                   value={emailCurrentPassword} 
-                   onChangeText={setEmailCurrentPassword}
-                   secureTextEntry
-                   autoCapitalize="none"
-                   autoComplete="current-password"
-                />
-                {accountSettingsError ? <Text style={styles.errorTextModal}>{accountSettingsError}</Text> : null}
-                <TouchableOpacity 
-                  style={[styles.modalButton, styles.saveButton, styles.singleButton, isAccountSettingsLoading && styles.buttonDisabled]} 
-                  onPress={handleUpdateEmail}
-                  disabled={isAccountSettingsLoading}
-                >
-                  {isAccountSettingsLoading ? 
-                     <ActivityIndicator color="#fff" size="small" /> : 
-                     <Text style={styles.modalButtonText}>E-Mail Aktualisieren</Text> 
-                  }
-                </TouchableOpacity>
-             </View>
-          )}
-          
-          {activeTab === 'password' && (
-             <View>
-                {/* Current password field removed as not needed for Supabase update */} 
-                <Text style={styles.inputLabel}>Neues Passwort</Text>
-                <TextInput
-                   style={styles.input}
-                   placeholder="Neues Passwort (min. 6 Zeichen)"
-                   value={newPassword}
-                   onChangeText={setNewPassword}
-                   secureTextEntry
-                   autoCapitalize="none"
-                   autoComplete="new-password"
-                />
-                <Text style={styles.inputLabel}>Neues Passwort bestätigen</Text>
-                <TextInput
-                   style={styles.input}
-                   placeholder="Neues Passwort bestätigen"
-                   value={confirmNewPassword}
-                   onChangeText={setConfirmNewPassword}
-                   secureTextEntry
-                   autoCapitalize="none"
-                   autoComplete="new-password"
-                 />
-                 {accountSettingsError ? <Text style={styles.errorTextModal}>{accountSettingsError}</Text> : null}
-                 <TouchableOpacity 
-                  style={[styles.modalButton, styles.saveButton, styles.singleButton, isAccountSettingsLoading && styles.buttonDisabled]} 
-                  onPress={handleUpdatePassword}
-                  disabled={isAccountSettingsLoading}
-                 >
-                  {isAccountSettingsLoading ? 
-                     <ActivityIndicator color="#fff" size="small" /> : 
-                     <Text style={styles.modalButtonText}>Passwort Aktualisieren</Text>
-                  }
-                 </TouchableOpacity>
-             </View>
-          )}
-          
-          <TouchableOpacity 
-            style={[styles.modalButton, styles.cancelButton, styles.marginTop]} 
-            onPress={() => setShowAccountSettingsModal(false)}
-            disabled={isAccountSettingsLoading}
-          >
-            <Text style={styles.modalButtonText}>Abbrechen</Text>
-          </TouchableOpacity>
-
-        </View>
-      </View>
-    </Modal>
-  );
-
-  // --- Main Return --- 
   
-  // Show loading indicator while auth context is initializing
-  if (authLoading) {
+  const renderOrgManagementSection = () => {
+    if (!isOrganizationActive || !activeOrganization) return null;
+    
+    const copyInviteCode = () => {
+      if (activeOrganization.invite_code) {
+        Clipboard.setString(activeOrganization.invite_code);
+        Alert.alert("Kopiert!", "Einladungscode wurde in die Zwischenablage kopiert.");
+      }
+    };
+
+    return (
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Organisationsdetails</Text>
+        {activeOrganization.invite_code && (
+            <View style={styles.inviteCodeContainer}>
+                <Text style={styles.inviteLabel}>Einladungscode:</Text>
+                <Text style={styles.inviteCodeText}>{activeOrganization.invite_code}</Text>
+                <TouchableOpacity onPress={copyInviteCode} style={styles.copyButton}>
+                    <Ionicons name="copy-outline" size={20} color="#4285F4" />
+                </TouchableOpacity>
+            </View>
+        )}
+        
+        <Text style={styles.membersTitle}>Mitglieder ({organizationMembers.length})</Text>
+        {isFetchingMembers ? (
+            <ActivityIndicator color="#4285F4" style={{ marginVertical: 10 }}/>
+        ) : orgMgmtError ? (
+            <Text style={styles.errorText}>{orgMgmtError}</Text>
+        ) : organizationMembers.length > 0 ? (
+            <FlatList
+                data={organizationMembers}
+                keyExtractor={(item) => item.user_id}
+                renderItem={({ item }) => (
+                    <View style={styles.memberItem}>
+                        <Text style={styles.memberName}>{item.profiles?.display_name || 'Unbekannter Benutzer'}</Text>
+                        <Text style={styles.memberRole}>{item.role === 'admin' ? 'Admin' : 'Mitglied'}</Text>
+                        {/* TODO: Add remove/role change buttons for admins */} 
+                    </View>
+                )}
+                style={styles.memberList}
+            />
+        ) : (
+             <Text style={styles.noMembersText}>Keine Mitglieder gefunden.</Text>
+        )}
+        
+        {/* --- Action Buttons for Active Org --- */} 
+        <TouchableOpacity 
+            style={[styles.button, styles.switchButton]} 
+            onPress={handleSwitchToPersonal}
+            disabled={isOrgContextLoading}
+        >
+            {isOrgContextLoading ? <ActivityIndicator size="small" color="#4285F4" /> : <Text style={styles.switchButtonText}>Zu persönlichem Account wechseln</Text>}
+        </TouchableOpacity>
+        
+        {/* TODO: Add Edit Organization Button */} 
+        
+        <TouchableOpacity 
+            style={[styles.button, styles.leaveButton]} 
+            onPress={() => handleLeaveOrg(activeOrganizationId, activeOrganization.name)}
+            disabled={isOrgContextLoading}
+        >
+            {isOrgContextLoading ? <ActivityIndicator size="small" color="#dc3545" /> : <Text style={styles.leaveButtonText}>Organisation verlassen</Text>}
+        </TouchableOpacity>
+
+      </View>
+    );
+  };
+  
+  const renderPersonalProfileSection = () => {
+      if (isOrganizationActive) return null; // Don't show personal stuff when org active
+      
+      return (
+          <>
+              {/* Personal Preferences */} 
+              <View style={styles.card}>
+                  <Text style={styles.cardTitle}>Deine Interessen</Text>
+                  {preferences && preferences.length > 0 ? (
+                    <View style={styles.preferencesContainer}>
+                      {preferences.map((prefId) => {
+                         const category = categories.find(cat => cat.id === prefId);
+                         return (
+                           <View key={prefId} style={styles.preferenceChip}>
+                             <Ionicons 
+                                name={category?.icon || 'help-circle-outline'} 
+                                size={16} 
+                                color="#4285F4" 
+                                style={styles.preferenceIcon}
+                             />
+                             <Text style={styles.preferenceText}>{category?.name || prefId}</Text>
+                           </View>
+                         );
+                      })}
+                    </View>
+                  ) : (
+                    <Text style={styles.noPreferencesText}>Keine Präferenzen ausgewählt.</Text>
+                  )}
+                  <TouchableOpacity 
+                    style={styles.editButtonInline} 
+                    onPress={handleOpenProfileEdit}
+                  >
+                    <Text style={styles.editButtonText}>Name & Interessen bearbeiten</Text>
+                    <Ionicons name="chevron-forward" size={16} color="#4285F4" />
+                  </TouchableOpacity>
+              </View>
+              
+              {/* Account Settings (Email/Password) */} 
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Account Einstellungen</Text>
+                <TouchableOpacity 
+                    style={styles.settingItem} 
+                    onPress={handleOpenAccountSettings}
+                >
+                    <Ionicons name="settings-outline" size={22} style={styles.settingIcon} />
+                    <Text style={styles.settingText}>E-Mail & Passwort ändern</Text>
+                    <Ionicons name="chevron-forward" size={20} color="#ccc" />
+                </TouchableOpacity>
+                 {/* Maybe add delete account later */} 
+              </View>
+              
+              {/* Organization Selection/Creation */} 
+              <View style={styles.card}>
+                  <Text style={styles.cardTitle}>Organisationen</Text>
+                  {userOrganizations && userOrganizations.length > 0 ? (
+                      <View>
+                          <Text style={styles.cardText}>Du bist Mitglied in:</Text>
+                          {userOrganizations.map(org => (
+                              <View key={org.id} style={styles.orgSelectItem}>
+                                  <Text style={styles.orgSelectName}>{org.name}</Text>
+                                  <TouchableOpacity 
+                                      style={[styles.buttonSmall, styles.switchButtonSmall]} 
+                                      onPress={() => handleSwitchToOrg(org.id)}
+                                      disabled={isOrgContextLoading}
+                                  >
+                                      {isOrgContextLoading ? <ActivityIndicator size="small" color="#4285F4" /> : <Text style={styles.buttonSmallText}>Wechseln</Text>}
+                                  </TouchableOpacity>
+                              </View>
+                          ))}
+                          <View style={styles.separator} />
+                      </View>
+                  ) : null}
+                  
+                  <Text style={styles.orgPromptText}>Du bist ein Verein, Gemeinde oder Unternehmen?</Text>
+                  <TouchableOpacity 
+                    style={styles.primaryButton} 
+                    onPress={() => navigation.navigate('OrganizationSetup')}
+                  >
+                     <Ionicons name="business-outline" size={20} color="#fff" style={styles.buttonIcon} />
+                     <Text style={styles.primaryButtonText}>Organisation erstellen / beitreten</Text>
+                  </TouchableOpacity>
+              </View>
+              
+          </>
+      );
+  };
+
+  // --- MAIN RETURN --- 
+  
+  // Show loading indicator during initial auth check or context switching
+  if (overallLoading) {
       return (
           <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color="#4285F4" />
@@ -839,24 +655,304 @@ const ProfileScreen = () => {
   }
 
   return (
-    <ScrollView style={styles.container}>
-      {renderProfileHeader()}
-      {renderPreferencesSection()}
-      {renderAccountSection()}
+    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 30 }}>
+      {renderHeader()} 
+      
+      {!hasFullAccount ? (
+         renderNoAccountSection()
+      ) : (
+         <> 
+            {/* Render Org Management Section if an org is active */} 
+            {isOrganizationActive && renderOrgManagementSection()}
+            
+            {/* Render Personal Profile Section if NO org is active */} 
+            {!isOrganizationActive && renderPersonalProfileSection()}
+            
+            {/* Sign Out Button - Always show if logged in */} 
+             <View style={styles.signOutContainer}>
+               <TouchableOpacity 
+                  style={[styles.button, styles.signOutButton]} 
+                  onPress={handleSignOut}
+                >
+                  <Ionicons name="log-out-outline" size={22} style={[styles.settingIcon, styles.signOutIcon]} />
+                  <Text style={[styles.settingText, styles.signOutText]}>Abmelden</Text>
+               </TouchableOpacity>
+            </View>
+         </>
+      )}
       
       {/* Modals */} 
-      {renderCreateAccountModal()}
-      {renderProfileEditModal()}
+      {renderCreateAccountModal()} 
+      {renderProfileEditModal()} 
       {renderAccountSettingsModal()} 
     </ScrollView>
   );
 };
 
+// --- Render Modal Functions (Keep as they are, just ensure they are called correctly) --- 
+
+// Add renderCreateAccountModal, renderProfileEditModal, renderAccountSettingsModal 
+// (Copied from the original provided code - assumed unchanged for brevity)
+const renderCreateAccountModal = () => (
+  <Modal
+    visible={showCreateAccountModal}
+    animationType="slide"
+    transparent={true}
+    onRequestClose={() => setShowCreateAccountModal(false)}
+  >
+    <View style={styles.modalOverlay}>
+      <View style={styles.modalContent}>
+        <Text style={styles.modalTitle}>Account erstellen</Text>
+        <Text style={styles.modalSubtitle}>Sichere deine Daten und nutze die App auf mehreren Geräten.</Text>
+        
+        <TextInput
+          style={styles.input}
+          placeholder="E-Mail"
+          value={createEmail}
+          onChangeText={setCreateEmail}
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoComplete="email"
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Passwort (min. 6 Zeichen)"
+          value={createPassword}
+          onChangeText={setCreatePassword}
+          secureTextEntry
+          autoCapitalize="none"
+          autoComplete="new-password"
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Passwort bestätigen"
+          value={confirmCreatePassword}
+          onChangeText={setConfirmCreatePassword}
+          secureTextEntry
+          autoCapitalize="none"
+          autoComplete="new-password"
+        />
+        
+        {createFormError ? <Text style={styles.errorTextModal}>{createFormError}</Text> : null}
+        
+        <View style={styles.modalActions}>
+          <TouchableOpacity 
+            style={[styles.modalButton, styles.cancelButton]} 
+            onPress={() => setShowCreateAccountModal(false)}
+            disabled={isCreateLoading}
+          >
+            <Text style={styles.modalButtonText}>Abbrechen</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.modalButton, styles.saveButton, isCreateLoading && styles.buttonDisabled]} 
+            onPress={handleCreateAccount}
+            disabled={isCreateLoading}
+          >
+            {isCreateLoading ? 
+               <ActivityIndicator color="#fff" size="small" /> : 
+               <Text style={styles.modalButtonText}>Erstellen</Text>
+            }
+          </TouchableOpacity>
+        </View>
+      </View>
+    </View>
+  </Modal>
+);
+
+const renderProfileEditModal = () => (
+  <Modal
+    visible={showProfileEditModal}
+    animationType="slide"
+    transparent={true}
+    onRequestClose={() => setShowProfileEditModal(false)}
+  >
+    <View style={styles.modalOverlay}>
+      <View style={styles.modalContent}>
+        <Text style={styles.modalTitle}>Profil bearbeiten</Text>
+        
+        <Text style={styles.inputLabel}>Anzeigename</Text>
+        <TextInput
+          style={styles.input}
+          value={editDisplayName}
+          onChangeText={setEditDisplayName}
+          placeholder="Dein Name oder Spitzname"
+          autoCapitalize="words"
+        />
+        
+        <Text style={styles.inputLabel}>Interessen</Text>
+        <View style={styles.categoriesContainerModal}>
+          {categories.map((category) => (
+            <TouchableOpacity
+              key={category.id}
+              style={[
+                styles.categoryItemModal,
+                editPreferences.includes(category.id) && styles.categoryItemModalSelected
+              ]}
+              onPress={() => togglePreference(category.id)}
+            >
+              <Ionicons 
+                name={category.icon} 
+                size={20} 
+                color={editPreferences.includes(category.id) ? '#fff' : '#4285F4'} 
+                style={styles.categoryIconModal}
+              />
+              <Text 
+                style={[
+                  styles.categoryTextModal,
+                  editPreferences.includes(category.id) && styles.categoryTextModalSelected
+                ]}
+              >
+                {category.name}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        
+        {editFormError ? <Text style={styles.errorTextModal}>{editFormError}</Text> : null}
+        
+        <View style={styles.modalActions}>
+          <TouchableOpacity 
+            style={[styles.modalButton, styles.cancelButton]} 
+            onPress={() => setShowProfileEditModal(false)}
+            disabled={isEditLoading}
+          >
+            <Text style={styles.modalButtonText}>Abbrechen</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.modalButton, styles.saveButton, isEditLoading && styles.buttonDisabled]} 
+            onPress={handleSaveProfile}
+            disabled={isEditLoading}
+          >
+            {isEditLoading ? 
+               <ActivityIndicator color="#fff" size="small" /> : 
+               <Text style={styles.modalButtonText}>Speichern</Text>
+            }
+          </TouchableOpacity>
+        </View>
+      </View>
+    </View>
+  </Modal>
+);
+
+const renderAccountSettingsModal = () => (
+  <Modal
+    visible={showAccountSettingsModal}
+    animationType="slide"
+    transparent={true}
+    onRequestClose={() => setShowAccountSettingsModal(false)}
+  >
+    <View style={styles.modalOverlay}>
+      <View style={styles.modalContent}>
+        <Text style={styles.modalTitle}>Account Einstellungen</Text>
+        
+        {/* Tabs */} 
+        <View style={styles.tabContainer}>
+           <TouchableOpacity 
+              style={[styles.tabButton, activeTab === 'email' && styles.tabButtonActive]}
+              onPress={() => {setActiveTab('email'); setAccountSettingsError('');}}
+           >
+               <Text style={[styles.tabText, activeTab === 'email' && styles.tabTextActive]}>E-Mail ändern</Text>
+           </TouchableOpacity>
+           <TouchableOpacity 
+              style={[styles.tabButton, activeTab === 'password' && styles.tabButtonActive]}
+              onPress={() => {setActiveTab('password'); setAccountSettingsError('');}}
+           >
+               <Text style={[styles.tabText, activeTab === 'password' && styles.tabTextActive]}>Passwort ändern</Text>
+           </TouchableOpacity>
+        </View>
+        
+        {/* Content based on active tab */} 
+        {activeTab === 'email' && (
+           <View>
+              <Text style={styles.inputLabel}>Neue E-Mail-Adresse</Text>
+              <TextInput
+                 style={styles.input}
+                 placeholder="Neue E-Mail"
+                 value={newEmail}
+                 onChangeText={setNewEmail}
+                 keyboardType="email-address"
+                 autoCapitalize="none"
+                 autoComplete="email"
+              />
+              <Text style={styles.inputLabel}>Aktuelles Passwort zur Bestätigung</Text>
+              <TextInput
+                 style={styles.input}
+                 placeholder="Aktuelles Passwort"
+                 value={emailCurrentPassword} 
+                 onChangeText={setEmailCurrentPassword}
+                 secureTextEntry
+                 autoCapitalize="none"
+                 autoComplete="current-password"
+              />
+              {accountSettingsError ? <Text style={styles.errorTextModal}>{accountSettingsError}</Text> : null}
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.saveButton, styles.singleButton, isAccountSettingsLoading && styles.buttonDisabled]} 
+                onPress={handleUpdateEmail}
+                disabled={isAccountSettingsLoading}
+              >
+                {isAccountSettingsLoading ? 
+                   <ActivityIndicator color="#fff" size="small" /> : 
+                   <Text style={styles.modalButtonText}>E-Mail Aktualisieren</Text> 
+                }
+              </TouchableOpacity>
+           </View>
+        )}
+        
+        {activeTab === 'password' && (
+           <View>
+              {/* Current password field removed as not needed for Supabase update */} 
+              <Text style={styles.inputLabel}>Neues Passwort</Text>
+              <TextInput
+                 style={styles.input}
+                 placeholder="Neues Passwort (min. 6 Zeichen)"
+                 value={newPassword}
+                 onChangeText={setNewPassword}
+                 secureTextEntry
+                 autoCapitalize="none"
+                 autoComplete="new-password"
+              />
+              <Text style={styles.inputLabel}>Neues Passwort bestätigen</Text>
+              <TextInput
+                 style={styles.input}
+                 placeholder="Neues Passwort bestätigen"
+                 value={confirmNewPassword}
+                 onChangeText={setConfirmNewPassword}
+                 secureTextEntry
+                 autoCapitalize="none"
+                 autoComplete="new-password"
+               />
+               {accountSettingsError ? <Text style={styles.errorTextModal}>{accountSettingsError}</Text> : null}
+               <TouchableOpacity 
+                style={[styles.modalButton, styles.saveButton, styles.singleButton, isAccountSettingsLoading && styles.buttonDisabled]} 
+                onPress={handleUpdatePassword}
+                disabled={isAccountSettingsLoading}
+               >
+                {isAccountSettingsLoading ? 
+                   <ActivityIndicator color="#fff" size="small" /> : 
+                   <Text style={styles.modalButtonText}>Passwort Aktualisieren</Text>
+                }
+               </TouchableOpacity>
+           </View>
+        )}
+        
+        <TouchableOpacity 
+          style={[styles.modalButton, styles.cancelButton, styles.marginTop]} 
+          onPress={() => setShowAccountSettingsModal(false)}
+          disabled={isAccountSettingsLoading}
+        >
+          <Text style={styles.modalButtonText}>Abbrechen</Text>
+        </TouchableOpacity>
+
+      </View>
+    </View>
+  </Modal>
+);
+
 // --- Styles --- 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#f0f4f8', // Slightly different background
   },
   loadingContainer: {
       flex: 1,
@@ -868,21 +964,38 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: 20,
+    paddingTop: Platform.OS === 'ios' ? 50 : 20, // Adjust for safe area
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },
   avatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    width: 55,
+    height: 55,
+    borderRadius: 27.5,
     marginRight: 15,
-    backgroundColor: '#e0e0e0', // Placeholder background
+    backgroundColor: '#4285F4', 
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  orgAvatar: {
+      backgroundColor: '#34A853', // Different color for orgs
+  },
+  avatarLetter: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: 'bold',
   },
   profileInfo: {
     flex: 1,
   },
-  displayName: {
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 2,
+  },
+  displayName: { // Keep if needed elsewhere, headerTitle is primary now
     fontSize: 20,
     fontWeight: 'bold',
     color: '#333',
@@ -892,30 +1005,113 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
   },
+  roleText: {
+      fontSize: 13,
+      color: '#555',
+      fontStyle: 'italic',
+  },
   accountStatus: {
       fontSize: 14,
       color: '#888',
       fontStyle: 'italic',
   },
   editProfileButton: {
-      padding: 8, // Add padding to make it easier to tap
+      padding: 8,
       marginLeft: 10,
   },
-  section: {
-    marginTop: 15,
-    backgroundColor: '#fff',
-    paddingVertical: 15,
-    paddingHorizontal: 20,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+  card: {
+      backgroundColor: '#fff',
+      borderRadius: 8,
+      padding: 20,
+      marginHorizontal: 15,
+      marginTop: 20,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.08,
+      shadowRadius: 3,
+      elevation: 2,
   },
-  sectionTitle: {
-    fontSize: 16,
+  cardTitle: {
+    fontSize: 17,
     fontWeight: '600',
-    color: '#555',
+    color: '#333',
     marginBottom: 15,
+  },
+  cardText: {
+      fontSize: 14,
+      color: '#555',
+      lineHeight: 20,
+      marginBottom: 15,
+  },
+  primaryButton: {
+      flexDirection: 'row',
+      backgroundColor: '#4285F4',
+      paddingVertical: 12,
+      paddingHorizontal: 20,
+      borderRadius: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 10,
+  },
+  primaryButtonText: {
+      color: '#fff',
+      fontSize: 16,
+      fontWeight: 'bold',
+      marginLeft: 10,
+  },
+   button: { // General button styling for reuse
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 15,
+    borderRadius: 8,
+    marginVertical: 8,
+  },
+  buttonIcon: {
+      marginRight: 8,
+  },
+  buttonSmall: {
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+      borderRadius: 5,
+  },
+  buttonSmallText: {
+      fontSize: 13,
+      fontWeight: '600',
+  },
+  switchButton: {
+      backgroundColor: '#e7f0fe',
+  },
+  switchButtonText: {
+      color: '#4285F4',
+      fontWeight: '600',
+  },
+   switchButtonSmall: {
+      backgroundColor: '#e7f0fe',
+  },
+  leaveButton: {
+      backgroundColor: '#fdeded',
+  },
+  leaveButtonText: {
+      color: '#dc3545',
+      fontWeight: '600',
+  },
+  signOutButton: {
+    backgroundColor: '#fff', // Changed background
+    borderWidth: 1,
+    borderColor: '#ddd', 
+  },
+  signOutContainer: {
+     marginTop: 30, 
+     paddingHorizontal: 15,
+  },
+  signOutText: {
+    color: '#dc3545', // Red color for sign out
+    fontWeight: '600',
+  },
+  signOutIcon: {
+      color: '#dc3545',
   },
   preferencesContainer: {
     flexDirection: 'row',
@@ -925,7 +1121,7 @@ const styles = StyleSheet.create({
   preferenceChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#e7f0fe', // Light blue background
+    backgroundColor: '#e7f0fe',
     borderRadius: 15,
     paddingVertical: 6,
     paddingHorizontal: 12,
@@ -937,7 +1133,7 @@ const styles = StyleSheet.create({
   },
   preferenceText: {
     fontSize: 13,
-    color: '#4285F4', // Blue text
+    color: '#4285F4',
   },
   noPreferencesText: {
     fontSize: 14,
@@ -948,20 +1144,21 @@ const styles = StyleSheet.create({
   editButtonInline: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start', // Don't stretch full width
-    marginTop: 5,
+    alignSelf: 'flex-start',
+    marginTop: 10,
   },
   editButtonText: {
     color: '#4285F4',
     fontSize: 14,
     marginRight: 3,
+    fontWeight: '500',
   },
   settingItem: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderTopWidth: 1, // Add border top for separation
+    borderTopColor: '#f0f0f0',
   },
   settingIcon: {
     marginRight: 15,
@@ -972,33 +1169,94 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#333',
   },
-  signOutButton: {
-    borderBottomWidth: 0, // No border for the last item
-    marginTop: 10,
+  orgSelectItem: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingVertical: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: '#eee',
   },
-  signOutIcon: {
-    color: '#dc3545', // Red color for sign out
+  orgSelectName: {
+      fontSize: 15,
+      color: '#444',
+      flex: 1, // Allow name to take space
+      marginRight: 10,
   },
-  signOutText: {
-    color: '#dc3545', // Red color for sign out
-    fontWeight: '600',
+  separator: {
+      height: 1,
+      backgroundColor: '#e0e0e0',
+      marginVertical: 15,
   },
-  resetButton: {
-      borderBottomWidth: 0,
-      marginTop: 10,
-      borderTopWidth: 1,
-      borderTopColor: '#eee',
-      paddingTop: 15,
+  orgPromptText: {
+      fontSize: 15,
+      color: '#555',
+      textAlign: 'center',
+      marginTop: 10, // Add margin if separator exists
+      marginBottom: 15,
   },
-  resetIcon: {
-      color: '#ffc107', // Warning color
+  inviteCodeContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: '#f0f0f0',
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      borderRadius: 6,
+      marginBottom: 20,
   },
-  resetText: {
-      color: '#ffc107', // Warning color
+  inviteLabel: {
+      fontSize: 14,
+      color: '#666',
+      marginRight: 5,
+  },
+  inviteCodeText: {
+      fontSize: 14,
+      fontWeight: 'bold',
+      color: '#333',
+      flex: 1, // Take available space
+  },
+  copyButton: {
+      padding: 5,
+  },
+  membersTitle: {
+      fontSize: 15,
       fontWeight: '600',
+      color: '#444',
+      marginBottom: 10,
   },
-  
-  // Modal Styles
+  memberList: {
+      maxHeight: 150, // Limit height if many members
+      marginBottom: 15,
+  },
+  memberItem: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      paddingVertical: 8,
+      borderBottomWidth: 1,
+      borderBottomColor: '#f5f5f5',
+  },
+  memberName: {
+      fontSize: 14,
+      color: '#555',
+  },
+  memberRole: {
+      fontSize: 13,
+      color: '#888',
+      fontStyle: 'italic',
+  },
+   noMembersText: {
+      fontSize: 14,
+      color: '#888',
+      fontStyle: 'italic',
+      textAlign: 'center',
+      marginVertical: 10,
+  },
+  errorText: {
+      color: '#dc3545',
+      fontSize: 14,
+      textAlign: 'center',
+      marginVertical: 10,
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -1081,15 +1339,6 @@ const styles = StyleSheet.create({
    buttonDisabled: {
     opacity: 0.7,
   },
-  singleButton: {
-      marginHorizontal: 0, // No horizontal margin when it's the only button
-      marginTop: 10,
-  },
-  marginTop: {
-      marginTop: 10,
-  },
-
-  // Styles for Preferences in Modal
   categoriesContainerModal: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1122,8 +1371,6 @@ const styles = StyleSheet.create({
   categoryTextModalSelected: {
     color: '#fff',
   },
-  
-  // Tab Styles for Account Settings Modal
   tabContainer: {
       flexDirection: 'row',
       marginBottom: 20,
@@ -1148,9 +1395,12 @@ const styles = StyleSheet.create({
       color: '#4285F4',
       fontWeight: 'bold',
   },
-  refreshButton: {
-    padding: 8,
-    marginLeft: 10,
+  singleButton: {
+      marginHorizontal: 0, // No horizontal margin when it's the only button
+      marginTop: 10,
+  },
+  marginTop: {
+      marginTop: 10,
   },
 });
 

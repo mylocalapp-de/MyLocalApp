@@ -22,6 +22,7 @@ import WelcomeScreen from '../screens/WelcomeScreen';
 import CreateBroadcastGroupScreen from '../screens/CreateBroadcastGroupScreen';
 import CreateEventScreen from '../screens/CreateEventScreen';
 import EditEventScreen from '../screens/EditEventScreen';
+import OrganizationSetupScreen from '../screens/OrganizationSetupScreen';
 
 const Tab = createBottomTabNavigator();
 const ChatStack = createStackNavigator();
@@ -182,6 +183,10 @@ const AppNavigator = () => {
             options={{ gestureEnabled: false }}
           />
         )}
+        <RootStack.Screen 
+            name="OrganizationSetup" 
+            component={OrganizationSetupScreen}
+        />
       </RootStack.Navigator>
     </NavigationContainer>
   );

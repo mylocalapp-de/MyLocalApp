@@ -9,17 +9,20 @@ const AuthContext = createContext();
 // Auth provider component
 export const AuthProvider = ({ children }) => {
   const [session, setSession] = useState(null);
-  const [user, setUser] = useState(null); // This will store the Supabase Auth user object
-  const [profile, setProfile] = useState(null); // This will store data from our public.profiles table
-  const [loading, setLoading] = useState(true);
-  const [preferences, setPreferences] = useState([]); // Still managed locally first
-  const [displayName, setDisplayName] = useState(''); // Still managed locally first
+  const [user, setUser] = useState(null); // Supabase Auth user object
+  const [profile, setProfile] = useState(null); // Public profile data
+  const [preferences, setPreferences] = useState([]); // Local/Profile preferences
+  const [displayName, setDisplayName] = useState(''); // Local/Profile display name
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
+  const [userOrganizations, setUserOrganizations] = useState([]); // NEW: Store user's org memberships
+  const [loading, setLoading] = useState(true);
+  const [loadingProfile, setLoadingProfile] = useState(true); // Separate loading for profile/orgs
+  const [loadingAuth, setLoadingAuth] = useState(true); // Separate loading for auth state
 
   // --- Session Management ---
   useEffect(() => {
     const fetchSession = async () => {
-      setLoading(true);
+      setLoadingAuth(true);
       try {
         // Check Async Storage for onboarding status and local data first
         const onboardingStatus = await AsyncStorage.getItem('hasCompletedOnboarding');
@@ -38,13 +41,16 @@ export const AuthProvider = ({ children }) => {
         setUser(currentSession?.user ?? null);
 
         if (currentSession?.user) {
-          await loadUserProfile(currentSession.user.id);
+          await loadUserProfileAndOrgs(currentSession.user.id); // Use combined loading function
+        } else {
+          setLoadingProfile(false); // No user, so profile/org loading is done (nothing to load)
         }
 
       } catch (error) {
         console.error("AuthContext: Error fetching initial session or local data:", error);
+        setLoadingProfile(false); // Ensure loading stops on error
       } finally {
-        setLoading(false);
+        setLoadingAuth(false);
       }
     };
 
@@ -53,63 +59,48 @@ export const AuthProvider = ({ children }) => {
     // Set up Supabase auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, newSession) => {
+        setLoadingAuth(true); // Indicate auth state change processing
         console.log(`AuthContext: Auth state changed event: ${_event}`, newSession ? 'New session' : 'No session');
         
         const currentUser = newSession?.user ?? null;
         const currentUserId = currentUser?.id;
         const previousUserId = session?.user?.id;
-
-        // Explicitly compare IDs, handling nulls
         const userIdChanged = previousUserId !== currentUserId;
 
-        console.log(`AuthContext: User ID check - Previous: ${previousUserId}, Current: ${currentUserId}, Changed: ${userIdChanged}`); // DEBUG log
+        console.log(`AuthContext: User ID check - Prev: ${previousUserId}, Curr: ${currentUserId}, Changed: ${userIdChanged}`);
 
-        const wasAlreadyLoggedIn = !!previousUserId; // Use previousUserId for this check
-
-        setSession(newSession); 
-        // Only update the main user state if the user ID actually changed 
-        // or if it's not a USER_UPDATED event (e.g., SIGNED_IN, INITIAL_SESSION).
-        // Avoids unnecessary re-renders/navigation triggers just for metadata updates.
+        setSession(newSession);
         if (userIdChanged || _event !== 'USER_UPDATED') {
             console.log('AuthContext: Updating user state object.');
             setUser(currentUser);
         } else {
-            console.log('AuthContext: Skipping user state object update for USER_UPDATED event with same user ID.');
+            console.log('AuthContext: Skipping user state object update for USER_UPDATED event.');
         }
-        // setLoading(false); // This setLoading might be causing issues if set too early?
 
         if (currentUser) {
-          // User logged in, session restored, or user updated
-          
-          // Only set onboarding complete on initial sign-in/session recovery, 
-          // not on simple user updates if already logged in.
-          if (!wasAlreadyLoggedIn || _event !== 'USER_UPDATED') {
-             console.log('AuthContext: Setting onboarding complete status (Initial session or non-update event).');
+          if (!previousUserId || userIdChanged) { // Set onboarding on first login or user change
+             console.log('AuthContext: Setting onboarding complete status.');
              setHasCompletedOnboarding(true);
              await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
-          } else {
-             console.log('AuthContext: Skipping onboarding state set for USER_UPDATED event while already logged in.');
           }
           
-          // Reload profile *unless* it's just a user update (like password change) for the *same* user.
           if (_event !== 'USER_UPDATED' || userIdChanged) {
-            console.log('AuthContext: Loading profile due to event type or user change.');
-            await loadUserProfile(currentUser.id);
+            console.log('AuthContext: Loading profile & orgs due to event type or user change.');
+            await loadUserProfileAndOrgs(currentUser.id);
           } else {
-            console.log('AuthContext: Skipping profile reload for USER_UPDATED event with same user ID.');
+            console.log('AuthContext: Skipping profile/org reload for USER_UPDATED.');
+            setLoadingProfile(false); // Ensure profile loading is false if skipped
           }
 
         } else {
           // User logged out
           setProfile(null);
-          // Keep local displayName/preferences if user signs out? Or clear them?
-          // Let's keep them for now, they might log back in.
-          // Consider clearing if resetOnboarding is called explicitly.
-          // Also ensure onboarding is marked false if logged out.
-          // setHasCompletedOnboarding(false); // We handle this explicitly in signOut now
+          setUserOrganizations([]); // Clear orgs on logout
+          // Keep local displayName/preferences?
+          // Onboarding is reset in signOut explicitly
+          setLoadingProfile(false); // No user, profile/org loading is done
         }
-        // Set loading false AFTER potentially async operations inside the if(currentUser) block
-        setLoading(false);
+        setLoadingAuth(false); // Auth state processing finished
       }
     );
 
@@ -118,40 +109,76 @@ export const AuthProvider = ({ children }) => {
       subscription?.unsubscribe();
     };
   }, []);
+  
+   // Update overall loading state
+  useEffect(() => {
+    setLoading(loadingAuth || loadingProfile);
+  }, [loadingAuth, loadingProfile]);
 
-  // --- Profile Management ---
-  const loadUserProfile = useCallback(async (userId) => {
+  // --- Profile & Organization Loading ---
+  const loadUserProfileAndOrgs = useCallback(async (userId) => {
     if (!userId) {
       setProfile(null);
+      setUserOrganizations([]);
+      setLoadingProfile(false);
       return;
     }
-    console.log('AuthContext: Loading profile for user ID:', userId);
+    console.log('AuthContext: Loading profile & orgs for user ID:', userId);
+    setLoadingProfile(true);
     try {
-      const { data, error, status } = await supabase
-        .from('profiles')
-        .select(`display_name, preferences, updated_at`)
-        .eq('id', userId)
-        .single();
+      // Fetch profile and organizations concurrently
+      const [profileResult, orgsResult] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select(`display_name, preferences, updated_at`)
+          .eq('id', userId)
+          .maybeSingle(), // Use maybeSingle to handle not found gracefully
+        supabase
+          .from('organization_members')
+          .select(`
+            role,
+            organizations ( id, name )
+          `)
+          .eq('user_id', userId)
+      ]);
 
-      if (error && status !== 406) { // 406 means no row found, which is handled
-        console.error('AuthContext: Error loading user profile:', error);
-        setProfile(null); // Clear profile on error
-      } else if (data) {
-        console.log('AuthContext: Profile loaded:', data);
-        setProfile(data);
-        // Update local state with profile data if available
-        if (data.display_name) setDisplayName(data.display_name);
-        if (data.preferences) setPreferences(data.preferences);
-        // Optionally save to AsyncStorage as well? Depends on strategy.
-        await AsyncStorage.setItem('userDisplayName', data.display_name || '');
-        await AsyncStorage.setItem('userPreferences', JSON.stringify(data.preferences || []));
+      // Handle profile result
+      if (profileResult.error && profileResult.status !== 406) {
+        console.error('AuthContext: Error loading user profile:', profileResult.error);
+        setProfile(null);
+      } else if (profileResult.data) {
+        console.log('AuthContext: Profile loaded:', profileResult.data);
+        setProfile(profileResult.data);
+        if (profileResult.data.display_name) setDisplayName(profileResult.data.display_name);
+        if (profileResult.data.preferences) setPreferences(profileResult.data.preferences);
+        await AsyncStorage.setItem('userDisplayName', profileResult.data.display_name || '');
+        await AsyncStorage.setItem('userPreferences', JSON.stringify(profileResult.data.preferences || []));
       } else {
-        console.log('AuthContext: No profile found for user, might be created by trigger shortly.');
-        setProfile(null); // Explicitly set to null if no profile exists
+        console.log('AuthContext: No profile found for user.');
+        setProfile(null);
       }
+
+      // Handle organizations result
+      if (orgsResult.error) {
+        console.error('AuthContext: Error loading user organizations:', orgsResult.error);
+        setUserOrganizations([]);
+      } else {
+        const orgData = orgsResult.data || [];
+        const formattedOrgs = orgData.map(m => ({ 
+            id: m.organizations.id, 
+            name: m.organizations.name, 
+            role: m.role 
+        }));
+        console.log('AuthContext: User organizations loaded:', formattedOrgs);
+        setUserOrganizations(formattedOrgs);
+      }
+
     } catch (error) {
-      console.error("AuthContext: Unexpected error in loadUserProfile:", error);
+      console.error("AuthContext: Unexpected error in loadUserProfileAndOrgs:", error);
       setProfile(null);
+      setUserOrganizations([]);
+    } finally {
+      setLoadingProfile(false);
     }
   }, []);
 
@@ -164,8 +191,9 @@ export const AuthProvider = ({ children }) => {
       setPreferences(selectedPreferences);
       setDisplayName(userDisplayName);
       setHasCompletedOnboarding(true);
-      setUser(null); // Ensure no Supabase user is set for local-only state
-      setProfile(null); // Ensure no profile is set
+      setUser(null); 
+      setProfile(null);
+      setUserOrganizations([]); // Clear orgs for local
       console.log('AuthContext: Local account created/set.');
       return { success: true };
     } catch (error) {
@@ -176,7 +204,7 @@ export const AuthProvider = ({ children }) => {
 
   // --- Account Creation / Upgrade ---
   const upgradeToFullAccount = async (email, password) => {
-    setLoading(true);
+    setLoading(true); // Use overall loading
     try {
       console.log('AuthContext: Attempting to upgrade to full account:', email);
 
@@ -277,13 +305,11 @@ export const AuthProvider = ({ children }) => {
       }
       
       // --- Final State Update --- 
-      // Rely on onAuthStateChange to set user, session, and load the profile fully.
-      // We just need to ensure onboarding state is correct.
       if (profileExists) {
          console.log('AuthContext: Setting onboarding complete state.');
          setHasCompletedOnboarding(true);
          await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
-         // The onAuthStateChange listener will call loadUserProfile.
+         // The onAuthStateChange listener will call loadUserProfileAndOrgs.
          return { success: true, data: { user: signUpData.user } };
       } else {
          // This case should ideally not be reached due to error handling above
@@ -320,7 +346,7 @@ export const AuthProvider = ({ children }) => {
       }
 
       console.log('AuthContext: SignIn successful, user:', data.user.id);
-      // onAuthStateChange listener will handle setting state and loading profile.
+      // onAuthStateChange listener handles loading profile & orgs.
       return { success: true, data: { user: data.user } };
 
     } catch (error) {
@@ -341,11 +367,16 @@ export const AuthProvider = ({ children }) => {
         return { success: false, error };
       }
       console.log('AuthContext: SignOut successful.');
-      // onAuthStateChange listener handles clearing state (user, profile, session)
-      // Reset onboarding state to trigger navigation back to WelcomeScreen
+      // onAuthStateChange handles clearing user, profile, session
+      // Clear local data as well on explicit sign out
       setHasCompletedOnboarding(false);
-      // Also update AsyncStorage to maintain consistent state
-      await AsyncStorage.setItem('hasCompletedOnboarding', 'false');
+      setPreferences([]);
+      setDisplayName('');
+      setUserOrganizations([]); // Clear orgs state
+      await AsyncStorage.removeItem('hasCompletedOnboarding');
+      await AsyncStorage.removeItem('userPreferences');
+      await AsyncStorage.removeItem('userDisplayName');
+      await AsyncStorage.removeItem('activeOrganizationId'); // Also clear active org
       return { success: true };
     } catch (error) {
       console.error('AuthContext: Unexpected error during signOut:', error);
@@ -474,7 +505,7 @@ export const AuthProvider = ({ children }) => {
        // The onAuthStateChange listener should eventually update the user object in the context.
        // Reload the profile manually IF the user object doesn't update quickly enough via listener.
        // This provides faster feedback in the UI.
-       setTimeout(() => loadUserProfile(user.id), 500); // Trigger profile reload
+       setTimeout(() => loadUserProfileAndOrgs(user.id), 500); // Trigger profile reload
 
        return { success: true }; // Indicate success to the ProfileScreen
 
@@ -521,6 +552,202 @@ export const AuthProvider = ({ children }) => {
       return result; // Return the captured result
    };
 
+  // --- Organization Actions --- 
+  const createOrganization = async (name) => {
+      if (!user) return { success: false, error: { message: 'Nicht angemeldet.' } };
+      if (!name || name.trim().length < 3) {
+          return { success: false, error: { message: 'Organisationsname muss mind. 3 Zeichen haben.' } };
+      }
+      setLoading(true);
+      try {
+          // Insert the new organization
+          const { data: newOrg, error: insertError } = await supabase
+              .from('organizations')
+              .insert({ name: name.trim(), admin_id: user.id })
+              .select('id, name') // Select the needed fields from the result
+              .single(); // Expect a single row back
+
+          if (insertError) {
+              console.error("AuthContext: Error inserting organization:", insertError);
+              return { success: false, error: { message: insertError.message || 'Fehler beim Erstellen.' } };
+          }
+
+          // Trigger handle_new_organization adds the creator as admin member automatically
+          console.log('AuthContext: Organization created:', newOrg);
+          
+          // Refetch user organizations to update the context state
+          await loadUserProfileAndOrgs(user.id);
+          
+          return { success: true, data: newOrg };
+
+      } catch (error) {
+          console.error("AuthContext: Unexpected error creating organization:", error);
+          return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+      } finally {
+          setLoading(false);
+      }
+  };
+
+  const joinOrganizationByInviteCode = async (inviteCode) => {
+      if (!user) return { success: false, error: { message: 'Nicht angemeldet.' } };
+      if (!inviteCode || inviteCode.trim() === '') {
+           return { success: false, error: { message: 'Einladungscode benötigt.' } };
+      }
+      setLoading(true);
+      try {
+          // 1. Find the organization by invite code
+          const { data: org, error: findError } = await supabase
+              .from('organizations')
+              .select('id, name')
+              .eq('invite_code', inviteCode.trim())
+              .maybeSingle();
+
+          if (findError) {
+              console.error("AuthContext: Error finding organization by invite code:", findError);
+              return { success: false, error: { message: findError.message || 'Fehler bei Codesuche.' } };
+          }
+          if (!org) {
+              return { success: false, error: { message: 'Ungültiger oder abgelaufener Einladungscode.' } };
+          }
+
+          // 2. Add the user as a member
+          const { error: joinError } = await supabase
+              .from('organization_members')
+              .insert({ organization_id: org.id, user_id: user.id, role: 'member' }); 
+              // Use default role 'member'. ON CONFLICT DO NOTHING can be added in DB if preferred
+
+          if (joinError) {
+               // Handle potential duplicate entry if user is already a member
+               if (joinError.code === '23505') { // Unique violation code
+                   console.warn('AuthContext: User is already a member of this organization.');
+                   // Refetch anyway to ensure state is up-to-date
+                   await loadUserProfileAndOrgs(user.id);
+                   return { success: true, data: org }; // Treat as success, already joined
+               } else {
+                   console.error("AuthContext: Error joining organization:", joinError);
+                   return { success: false, error: { message: joinError.message || 'Fehler beim Beitreten.' } };
+               }
+          }
+          
+          console.log(`AuthContext: User ${user.id} joined organization ${org.name} (${org.id})`);
+          
+          // Refetch user organizations to update the context state
+          await loadUserProfileAndOrgs(user.id);
+
+          return { success: true, data: org };
+
+      } catch (error) {
+          console.error("AuthContext: Unexpected error joining organization:", error);
+          return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+      } finally {
+          setLoading(false);
+      }
+  };
+
+  const leaveOrganization = async (organizationId) => {
+      if (!user) return { success: false, error: { message: 'Nicht angemeldet.' } };
+      if (!organizationId) return { success: false, error: { message: 'Organisations-ID benötigt.' } };
+      
+      // TODO: Add check - prevent last admin from leaving? Requires extra logic.
+      // Example check (pseudo-code):
+      // const { data: members, error: memberCheckErr } = await supabase.from...
+      // if (members.length === 1 && members[0].role === 'admin') {
+      //    return { success: false, error: { message: 'Letzter Admin kann Organisation nicht verlassen.' } };
+      // }
+      
+      setLoading(true);
+      try {
+          const { error } = await supabase
+              .from('organization_members')
+              .delete()
+              .eq('organization_id', organizationId)
+              .eq('user_id', user.id);
+
+          if (error) {
+              console.error("AuthContext: Error leaving organization:", error);
+              return { success: false, error: { message: error.message || 'Fehler beim Verlassen.' } };
+          }
+          
+          console.log(`AuthContext: User ${user.id} left organization ${organizationId}`);
+          
+          // Refetch user organizations
+          await loadUserProfileAndOrgs(user.id);
+          
+          // Check if the left org was the active one - handled by OrganizationContext via user change?
+          // Let OrganizationContext handle clearing active state if needed based on userOrganizations change.
+          
+          return { success: true };
+
+      } catch (error) {
+          console.error("AuthContext: Unexpected error leaving organization:", error);
+          return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+      } finally {
+          setLoading(false);
+      }
+  };
+
+  const fetchOrganizationMembers = async (organizationId) => {
+      if (!organizationId) return { success: false, error: { message: 'Organisations-ID benötigt.' } };
+      // RLS should ensure only members of the org can fetch this? Check policy.
+      try {
+          const { data, error } = await supabase
+              .from('organization_members')
+              .select(`
+                  user_id,
+                  role,
+                  profiles ( display_name )
+              `)
+              .eq('organization_id', organizationId);
+
+          if (error) {
+              console.error("AuthContext: Error fetching organization members:", error);
+              return { success: false, error: { message: error.message || 'Fehler beim Laden der Mitglieder.' } };
+          }
+          
+          return { success: true, data };
+
+      } catch (error) {
+          console.error("AuthContext: Unexpected error fetching members:", error);
+          return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+      }
+  };
+
+  const updateOrganizationDetails = async (organizationId, details) => {
+       if (!user) return { success: false, error: { message: 'Nicht angemeldet.' } };
+       if (!organizationId) return { success: false, error: { message: 'Organisations-ID benötigt.' } };
+       // RLS Policy "Allow admin to manage their organization" should handle authz
+       
+       setLoading(true);
+       try {
+           const { data, error } = await supabase
+               .from('organizations')
+               .update({ 
+                   name: details.name, // Only allow updating specific fields
+                   // logo_url: details.logo_url, // Example
+                   updated_at: new Date() 
+               })
+               .eq('id', organizationId)
+               .select('id, name') // Return updated data
+               .single();
+
+           if (error) {
+               console.error("AuthContext: Error updating organization details:", error);
+               return { success: false, error: { message: error.message || 'Fehler beim Aktualisieren.' } };
+           }
+           
+           // Refetch user's org list in case name changed
+           await loadUserProfileAndOrgs(user.id);
+           // Optionally, update the activeOrganization in OrganizationContext if this was the active org
+
+           return { success: true, data };
+
+       } catch (error) {
+           console.error("AuthContext: Unexpected error updating org details:", error);
+           return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+       } finally {
+           setLoading(false);
+       }
+  };
 
   // --- Reset Onboarding (for testing/dev) ---
   const resetOnboarding = async () => {
@@ -528,14 +755,15 @@ export const AuthProvider = ({ children }) => {
       await AsyncStorage.removeItem('hasCompletedOnboarding');
       await AsyncStorage.removeItem('userPreferences');
       await AsyncStorage.removeItem('userDisplayName');
+      await AsyncStorage.removeItem('activeOrganizationId'); // Clear active org
       setHasCompletedOnboarding(false);
       setPreferences([]);
       setDisplayName('');
-      // Also sign out the Supabase user if they were logged in
+      setUserOrganizations([]); // Clear orgs state
+      // Sign out the Supabase user if they were logged in
       if (user) {
-        await signOut();
+        await signOut(); // signOut now handles clearing other local data
       } else {
-         // Ensure user/profile state is clear if no Supabase user existed
          setUser(null);
          setProfile(null);
          setSession(null);
@@ -551,12 +779,13 @@ export const AuthProvider = ({ children }) => {
   // --- Context Value ---
   const value = {
     session,
-    user, // Supabase auth user
-    profile, // Public profile data
+    user,
+    profile,
     loading,
-    preferences, // From profile or local storage
-    displayName, // From profile or local storage
+    preferences,
+    displayName,
     hasCompletedOnboarding,
+    userOrganizations, // Expose the list of organizations
     supabase, // Keep exporting supabase client instance
     createLocalAccount,
     upgradeToFullAccount,
@@ -567,7 +796,13 @@ export const AuthProvider = ({ children }) => {
     updatePreferences,
     updateEmail,
     updatePassword,
-    loadUserProfile // Expose profile loading if needed externally
+    loadUserProfile: loadUserProfileAndOrgs, // Expose combined loading function
+    // Organization Functions
+    createOrganization,
+    joinOrganizationByInviteCode,
+    leaveOrganization,
+    fetchOrganizationMembers,
+    updateOrganizationDetails
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
