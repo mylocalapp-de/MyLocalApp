@@ -254,8 +254,10 @@ export const AuthProvider = ({ children }) => {
       }
       console.log('AuthContext: SignOut successful.');
       // onAuthStateChange listener handles clearing state (user, profile, session)
-      // Reset onboarding state if needed for the flow.
-      // setHasCompletedOnboarding(false); // Decide if sign out resets onboarding
+      // Reset onboarding state to trigger navigation back to WelcomeScreen
+      setHasCompletedOnboarding(false);
+      // Also update AsyncStorage to maintain consistent state
+      await AsyncStorage.setItem('hasCompletedOnboarding', 'false');
       return { success: true };
     } catch (error) {
       console.error('AuthContext: Unexpected error during signOut:', error);

@@ -1,10 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, Switch, ScrollView, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import { useOrganization } from '../context/OrganizationContext';
 import { useAuth } from '../context/AuthContext';
 
 const ProfileScreen = () => {
+  // Use navigation hook
+  const navigation = useNavigation();
+  
   // Use organization context
   const { isOrganization, toggleOrganizationStatus } = useOrganization();
   
@@ -353,11 +357,18 @@ const ProfileScreen = () => {
           text: "Abmelden",
           style: "destructive",
           onPress: async () => {
+            console.log('Signing out...');
             const { success, error } = await signOut();
+            
             if (!success) {
+              console.error('Sign out failed:', error);
               Alert.alert("Fehler", `Abmeldung fehlgeschlagen: ${error?.message || 'Unbekannter Fehler'}`);
+              return;
             }
-            // Navigation should be handled by the main App navigator listening to auth state
+            
+            console.log('Sign out successful, navigation will be handled by AppNavigator');
+            // No need to manually navigate - the AuthContext will set hasCompletedOnboarding to false,
+            // which will cause AppNavigator to show the WelcomeScreen
           },
         },
       ]
