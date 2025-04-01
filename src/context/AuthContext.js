@@ -116,7 +116,7 @@ export const AuthProvider = ({ children }) => {
   }, [loadingAuth, loadingProfile]);
 
   // --- Profile & Organization Loading ---
-  const loadUserProfileAndOrgs = useCallback(async (userId) => {
+  const loadUserProfileAndOrgs = async (userId) => {
     if (!userId) {
       setProfile(null);
       setUserOrganizations([]);
@@ -180,7 +180,7 @@ export const AuthProvider = ({ children }) => {
     } finally {
       setLoadingProfile(false);
     }
-  }, []);
+  };
 
   // --- Local Onboarding Flow ---
   const createLocalAccount = async (selectedPreferences, userDisplayName) => {
