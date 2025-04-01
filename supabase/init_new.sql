@@ -359,62 +359,135 @@ CREATE OR REPLACE VIEW public.event_attendees_with_users AS
   FROM public.event_attendees a
   LEFT JOIN public.profiles p ON a.user_id = p.id ORDER BY a.created_at;
 
+-- ====================================================================
+-- == Helper Functions for RLS (SECURITY DEFINER to bypass recursion) ==
+-- ====================================================================
+
+CREATE OR REPLACE FUNCTION public.is_org_member(_user_id uuid, _organization_id uuid)
+RETURNS boolean AS $$
+BEGIN
+  -- Check if a membership row exists for the given user and organization
+  RETURN EXISTS (
+    SELECT 1
+    FROM public.organization_members mem
+    WHERE mem.user_id = _user_id AND mem.organization_id = _organization_id
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+COMMENT ON FUNCTION public.is_org_member(uuid, uuid) IS 'Checks if a user is a member of an organization. SECURITY DEFINER bypasses RLS.';
+
+CREATE OR REPLACE FUNCTION public.is_org_member_admin(_user_id uuid, _organization_id uuid)
+RETURNS boolean AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1
+    FROM public.organization_members mem
+    WHERE mem.user_id = _user_id
+      AND mem.organization_id = _organization_id
+      AND mem.role = 'admin'
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+COMMENT ON FUNCTION public.is_org_member_admin(uuid, uuid) IS 'Checks if a user is an admin of an organization. SECURITY DEFINER bypasses RLS.';
+
 -- 8. Enable RLS and Define Policies
 -- Profiles
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+-- Drop existing profile policies if needed (optional, for cleanliness)
+DROP POLICY IF EXISTS "Users can view all profiles" ON public.profiles;
+DROP POLICY IF EXISTS "Users can insert their own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Users can update their own profile" ON public.profiles;
+-- Recreate profile policies
 CREATE POLICY "Users can view all profiles" ON public.profiles FOR SELECT USING (true);
 CREATE POLICY "Users can insert their own profile" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
 CREATE POLICY "Users can update their own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id) WITH CHECK (auth.uid() = id);
 
 -- Organizations
 ALTER TABLE public.organizations ENABLE ROW LEVEL SECURITY;
+
+-- Drop potentially problematic policies first
+DROP POLICY IF EXISTS "Allow members to read their organization details" ON public.organizations;
+DROP POLICY IF EXISTS "Allow admin to manage their organization" ON public.organizations;
+DROP POLICY IF EXISTS "Allow authenticated users to create organizations" ON public.organizations; -- Also drop insert policy
+
+-- Revised SELECT Policy (Using SECURITY DEFINER function)
 CREATE POLICY "Allow members to read their organization details" ON public.organizations
-  FOR SELECT TO authenticated USING (id IN (SELECT organization_id FROM public.organization_members WHERE user_id = auth.uid()));
+  FOR SELECT TO authenticated
+  USING (public.is_org_member(auth.uid(), id)); -- Use function
+
+-- Revised UPDATE Policy (Using SECURITY DEFINER function)
 CREATE POLICY "Allow admin to manage their organization" ON public.organizations
-  FOR UPDATE TO authenticated USING (id IN (SELECT organization_id FROM public.organization_members WHERE user_id = auth.uid() AND role = 'admin'))
-  WITH CHECK (id IN (SELECT organization_id FROM public.organization_members WHERE user_id = auth.uid() AND role = 'admin'));
+  FOR UPDATE TO authenticated
+  USING (public.is_org_member_admin(auth.uid(), id)) -- Use admin function
+  WITH CHECK (public.is_org_member_admin(auth.uid(), id)); -- Use admin function
+
+-- Recreate INSERT policy (no change in logic needed here)
 CREATE POLICY "Allow authenticated users to create organizations" ON public.organizations
   FOR INSERT TO authenticated WITH CHECK (admin_id = auth.uid()); -- Check creator is admin
 
 -- Organization Members
 ALTER TABLE public.organization_members ENABLE ROW LEVEL SECURITY;
+
+-- Drop potentially problematic policies first
+DROP POLICY IF EXISTS "Allow members to view membership of their orgs" ON public.organization_members;
+DROP POLICY IF EXISTS "Allow admin to manage members in their org" ON public.organization_members;
+DROP POLICY IF EXISTS "Allow users to join an organization (insert)" ON public.organization_members;
+DROP POLICY IF EXISTS "Allow users to leave an organization (delete)" ON public.organization_members;
+
+-- Revised SELECT Policy (Using SECURITY DEFINER function)
 CREATE POLICY "Allow members to view membership of their orgs" ON public.organization_members
-  FOR SELECT TO authenticated USING (organization_id IN (SELECT organization_id FROM public.organization_members WHERE user_id = auth.uid()));
+    FOR SELECT TO authenticated
+    USING (public.is_org_member(auth.uid(), organization_id)); -- Use function
+
+-- Revised UPDATE Policy (Using SECURITY DEFINER function)
 CREATE POLICY "Allow admin to manage members in their org" ON public.organization_members
-  FOR UPDATE TO authenticated USING (organization_id IN (SELECT organization_id FROM public.organization_members WHERE user_id = auth.uid() AND role = 'admin') AND user_id != auth.uid())
-  WITH CHECK (organization_id IN (SELECT organization_id FROM public.organization_members WHERE user_id = auth.uid() AND role = 'admin'));
+  FOR UPDATE TO authenticated
+  USING (public.is_org_member_admin(auth.uid(), organization_id) AND user_id != auth.uid()) -- Use admin function
+  WITH CHECK (public.is_org_member_admin(auth.uid(), organization_id)); -- Use admin function
+
+-- Recreate INSERT policy (no change needed)
 CREATE POLICY "Allow users to join an organization (insert)" ON public.organization_members
   FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid()); -- User can only insert themselves
+-- Recreate DELETE policy (no change needed)
 CREATE POLICY "Allow users to leave an organization (delete)" ON public.organization_members
   FOR DELETE TO authenticated USING (user_id = auth.uid()); -- User can only delete themselves
 
 -- Articles
 ALTER TABLE public.articles ENABLE ROW LEVEL SECURITY;
+-- Drop old article policies (optional, for cleanliness)
+DROP POLICY IF EXISTS "Anyone can view published articles" ON public.articles;
+DROP POLICY IF EXISTS "Allow insert if user is author or org member" ON public.articles;
+DROP POLICY IF EXISTS "Allow update if user is author or org member" ON public.articles;
+DROP POLICY IF EXISTS "Allow delete if user is author or org member" ON public.articles;
+-- Recreate article policies
 CREATE POLICY "Anyone can view published articles" ON public.articles FOR SELECT USING (is_published = true);
 CREATE POLICY "Allow insert if user is author or org member" ON public.articles FOR INSERT TO authenticated WITH CHECK (
     ( author_id = auth.uid() AND organization_id IS NULL ) OR -- Personal post
-    ( organization_id IS NOT NULL AND author_id = auth.uid() AND EXISTS ( -- Org post, user must be member
-        SELECT 1 FROM public.organization_members mem WHERE mem.organization_id = articles.organization_id AND mem.user_id = auth.uid()
-    ))
+    -- Use helper function for organization check
+    ( organization_id IS NOT NULL AND author_id = auth.uid() AND public.is_org_member(auth.uid(), organization_id) )
 );
 CREATE POLICY "Allow update if user is author or org member" ON public.articles FOR UPDATE TO authenticated USING (
-    ( author_id = auth.uid() AND organization_id IS NULL ) OR ( organization_id IS NOT NULL AND EXISTS (
-        SELECT 1 FROM public.organization_members mem WHERE mem.organization_id = articles.organization_id AND mem.user_id = auth.uid()
-    ))
+    ( author_id = auth.uid() AND organization_id IS NULL ) OR
+    -- Use helper function for organization check
+    ( organization_id IS NOT NULL AND public.is_org_member(auth.uid(), organization_id) )
 ) WITH CHECK (
-    ( author_id = auth.uid() AND organization_id IS NULL ) OR ( organization_id IS NOT NULL AND EXISTS (
-        SELECT 1 FROM public.organization_members mem WHERE mem.organization_id = articles.organization_id AND mem.user_id = auth.uid()
-    ))
+    ( author_id = auth.uid() AND organization_id IS NULL ) OR
+    -- Use helper function for organization check
+    ( organization_id IS NOT NULL AND author_id = auth.uid() AND public.is_org_member(auth.uid(), organization_id) )
 );
 CREATE POLICY "Allow delete if user is author or org member" ON public.articles FOR DELETE TO authenticated USING (
-    ( author_id = auth.uid() AND organization_id IS NULL ) OR ( organization_id IS NOT NULL AND EXISTS (
-        SELECT 1 FROM public.organization_members mem WHERE mem.organization_id = articles.organization_id AND mem.user_id = auth.uid()
-        -- Consider adding AND mem.role = 'admin' if only admins can delete org posts
-    ))
+    ( author_id = auth.uid() AND organization_id IS NULL ) OR
+    -- Use helper function for organization check (maybe check admin role here?)
+    ( organization_id IS NOT NULL AND public.is_org_member(auth.uid(), organization_id) )
+    -- Consider: ( organization_id IS NOT NULL AND public.is_org_member_admin(auth.uid(), organization_id) )
 );
 
 -- Article Comments
 ALTER TABLE public.article_comments ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Anyone can view comments" ON public.article_comments;
+DROP POLICY IF EXISTS "Authenticated users can create comments" ON public.article_comments;
+DROP POLICY IF EXISTS "Users can update their own comments" ON public.article_comments;
+DROP POLICY IF EXISTS "Users can delete their own comments" ON public.article_comments;
 CREATE POLICY "Anyone can view comments" ON public.article_comments FOR SELECT USING (true);
 CREATE POLICY "Authenticated users can create comments" ON public.article_comments FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
 CREATE POLICY "Users can update their own comments" ON public.article_comments FOR UPDATE TO authenticated USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
@@ -422,55 +495,69 @@ CREATE POLICY "Users can delete their own comments" ON public.article_comments F
 
 -- Article Reactions
 ALTER TABLE public.article_reactions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Anyone can view reactions" ON public.article_reactions;
+DROP POLICY IF EXISTS "Authenticated users can create reactions" ON public.article_reactions;
+DROP POLICY IF EXISTS "Users can delete their own reactions" ON public.article_reactions;
 CREATE POLICY "Anyone can view reactions" ON public.article_reactions FOR SELECT USING (true);
 CREATE POLICY "Authenticated users can create reactions" ON public.article_reactions FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
 CREATE POLICY "Users can delete their own reactions" ON public.article_reactions FOR DELETE TO authenticated USING (user_id = auth.uid());
 
--- Chat Groups (Assuming personal open groups are deprecated/removed)
+-- Chat Groups
 ALTER TABLE public.chat_groups ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow members/admins to view their org groups" ON public.chat_groups;
+DROP POLICY IF EXISTS "Anon can view public groups" ON public.chat_groups;
+DROP POLICY IF EXISTS "Allow org members/admins to create broadcast groups for org" ON public.chat_groups;
 CREATE POLICY "Allow members/admins to view their org groups" ON public.chat_groups FOR SELECT TO authenticated USING (
-    (type = 'bot') OR -- Bots are public? Maybe not needed if anon policy covers it. Let's keep for specific auth logic if any.
-    (organization_id IS NOT NULL AND EXISTS ( -- Org group, user must be member
-        SELECT 1 FROM public.organization_members mem WHERE mem.organization_id = chat_groups.organization_id AND mem.user_id = auth.uid()
-    ))
+    (type = 'bot') OR
+    -- Use helper function for organization check
+    (organization_id IS NOT NULL AND public.is_org_member(auth.uid(), organization_id))
 );
--- Add policy for anonymous users to view public groups
 CREATE POLICY "Anon can view public groups" ON public.chat_groups FOR SELECT TO anon USING (
-    type IN ('broadcast', 'bot') AND is_active = true -- Allow anon to see active broadcast and bot groups
+    type IN ('broadcast', 'bot') AND is_active = true
 );
 CREATE POLICY "Allow org members/admins to create broadcast groups for org" ON public.chat_groups FOR INSERT TO authenticated WITH CHECK (
-    type = 'broadcast' AND organization_id IS NOT NULL AND EXISTS (
-      SELECT 1 FROM public.organization_members mem WHERE mem.organization_id = chat_groups.organization_id AND mem.user_id = auth.uid()
-      -- Consider adding AND mem.role = 'admin'
-    )
+    type = 'broadcast' AND organization_id IS NOT NULL AND
+    -- Use helper function (maybe check admin role?)
+    public.is_org_member(auth.uid(), organization_id)
+    -- Consider: public.is_org_member_admin(auth.uid(), organization_id)
 );
--- Add UPDATE/DELETE policies for chat_groups based on org membership/role if needed
 
--- Chat Messages (RLS depends heavily on group access)
+-- Chat Messages
 ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow members to view messages in groups they can access" ON public.chat_messages;
+DROP POLICY IF EXISTS "Anon can view messages in public groups" ON public.chat_messages;
+DROP POLICY IF EXISTS "Allow members to send messages in groups they can access" ON public.chat_messages;
+DROP POLICY IF EXISTS "Allow users to delete their own messages" ON public.chat_messages;
 CREATE POLICY "Allow members to view messages in groups they can access" ON public.chat_messages FOR SELECT TO authenticated USING (
-    chat_group_id IN (SELECT id FROM public.chat_groups) -- Relies on chat_groups SELECT policy
+    chat_group_id IN (SELECT id FROM public.chat_groups) -- Relies on chat_groups SELECT policy using helper function now
 );
--- Add policy for anonymous users to view messages in public groups
 CREATE POLICY "Anon can view messages in public groups" ON public.chat_messages FOR SELECT TO anon USING (
     chat_group_id IN (SELECT id FROM public.chat_groups WHERE type IN ('broadcast', 'bot') AND is_active = true)
 );
 CREATE POLICY "Allow members to send messages in groups they can access" ON public.chat_messages FOR INSERT TO authenticated WITH CHECK (
     user_id = auth.uid() AND
-    chat_group_id IN (SELECT id FROM public.chat_groups) -- Simplistic check, relies on group policy. Needs refinement based on group type/role.
+    chat_group_id IN (SELECT id FROM public.chat_groups)
     -- Add specific checks for broadcast (only org admins?) vs open groups if they exist
+    -- Example check for broadcast:
+    -- AND (
+    --    (SELECT type FROM public.chat_groups WHERE id = chat_group_id) != 'broadcast' OR
+    --    public.is_org_member_admin(auth.uid(), (SELECT organization_id FROM public.chat_groups WHERE id = chat_group_id))
+    -- )
 );
 CREATE POLICY "Allow users to delete their own messages" ON public.chat_messages FOR DELETE TO authenticated USING (user_id = auth.uid());
 
--- Message Comments (Only for broadcast groups, viewable by members)
+-- Message Comments
 ALTER TABLE public.message_comments ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow users to view comments in accessible broadcast groups" ON public.message_comments;
+DROP POLICY IF EXISTS "Anon can view comments in public groups" ON public.message_comments;
+DROP POLICY IF EXISTS "Allow users to comment on broadcast messages in accessible groups" ON public.message_comments;
+DROP POLICY IF EXISTS "Allow users to delete their own comments" ON public.message_comments;
 CREATE POLICY "Allow users to view comments in accessible broadcast groups" ON public.message_comments FOR SELECT TO authenticated USING (
     message_id IN (
       SELECT m.id FROM public.chat_messages m JOIN public.chat_groups g ON m.chat_group_id = g.id
-      WHERE g.type = 'broadcast' AND m.chat_group_id IN (SELECT id FROM public.chat_groups) -- Check group access
+      WHERE g.type = 'broadcast' AND m.chat_group_id IN (SELECT id FROM public.chat_groups) -- Relies on chat_groups policy
     )
 );
--- Add policy for anonymous users to view comments in public groups
 CREATE POLICY "Anon can view comments in public groups" ON public.message_comments FOR SELECT TO anon USING (
     message_id IN (
         SELECT m.id FROM public.chat_messages m JOIN public.chat_groups g ON m.chat_group_id = g.id
@@ -480,17 +567,20 @@ CREATE POLICY "Anon can view comments in public groups" ON public.message_commen
 CREATE POLICY "Allow users to comment on broadcast messages in accessible groups" ON public.message_comments FOR INSERT TO authenticated WITH CHECK (
     user_id = auth.uid() AND message_id IN (
       SELECT m.id FROM public.chat_messages m JOIN public.chat_groups g ON m.chat_group_id = g.id
-      WHERE g.type = 'broadcast' AND m.chat_group_id IN (SELECT id FROM public.chat_groups)
+      WHERE g.type = 'broadcast' AND m.chat_group_id IN (SELECT id FROM public.chat_groups) -- Relies on chat_groups policy
     )
 );
 CREATE POLICY "Allow users to delete their own comments" ON public.message_comments FOR DELETE TO authenticated USING (user_id = auth.uid());
 
 -- Message Reactions
 ALTER TABLE public.message_reactions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow users to view reactions in accessible groups" ON public.message_reactions;
+DROP POLICY IF EXISTS "Anon can view reactions in public groups" ON public.message_reactions;
+DROP POLICY IF EXISTS "Allow users to add reactions in accessible groups" ON public.message_reactions;
+DROP POLICY IF EXISTS "Allow users to delete their own reactions" ON public.message_reactions;
 CREATE POLICY "Allow users to view reactions in accessible groups" ON public.message_reactions FOR SELECT TO authenticated USING (
     message_id IN (SELECT id FROM public.chat_messages) -- Relies on chat_messages SELECT policy
 );
--- Add policy for anonymous users to view reactions in public groups
 CREATE POLICY "Anon can view reactions in public groups" ON public.message_reactions FOR SELECT TO anon USING (
     message_id IN (
         SELECT m.id FROM public.chat_messages m JOIN public.chat_groups g ON m.chat_group_id = g.id
@@ -504,31 +594,38 @@ CREATE POLICY "Allow users to delete their own reactions" ON public.message_reac
 
 -- Events
 ALTER TABLE public.events ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Anyone can view published events" ON public.events;
+DROP POLICY IF EXISTS "Allow insert if user is organizer or org member" ON public.events;
+DROP POLICY IF EXISTS "Allow update if user is organizer or org member" ON public.events;
+DROP POLICY IF EXISTS "Allow delete if user is organizer or org member" ON public.events;
 CREATE POLICY "Anyone can view published events" ON public.events FOR SELECT USING (is_published = true);
 CREATE POLICY "Allow insert if user is organizer or org member" ON public.events FOR INSERT TO authenticated WITH CHECK (
     ( organizer_id = auth.uid() AND organization_id IS NULL ) OR -- Personal event
-    ( organization_id IS NOT NULL AND organizer_id = auth.uid() AND EXISTS ( -- Org event, user must be member
-        SELECT 1 FROM public.organization_members mem WHERE mem.organization_id = events.organization_id AND mem.user_id = auth.uid()
-    ))
+    -- Use helper function for organization check
+    ( organization_id IS NOT NULL AND organizer_id = auth.uid() AND public.is_org_member(auth.uid(), organization_id) )
 );
 CREATE POLICY "Allow update if user is organizer or org member" ON public.events FOR UPDATE TO authenticated USING (
-    ( organizer_id = auth.uid() AND organization_id IS NULL ) OR ( organization_id IS NOT NULL AND EXISTS (
-        SELECT 1 FROM public.organization_members mem WHERE mem.organization_id = events.organization_id AND mem.user_id = auth.uid()
-    ))
+    ( organizer_id = auth.uid() AND organization_id IS NULL ) OR
+    -- Use helper function for organization check
+    ( organization_id IS NOT NULL AND public.is_org_member(auth.uid(), organization_id) )
 ) WITH CHECK (
-    ( organizer_id = auth.uid() AND organization_id IS NULL ) OR ( organization_id IS NOT NULL AND EXISTS (
-        SELECT 1 FROM public.organization_members mem WHERE mem.organization_id = events.organization_id AND mem.user_id = auth.uid()
-    ))
+    ( organizer_id = auth.uid() AND organization_id IS NULL ) OR
+    -- Use helper function for organization check
+    ( organization_id IS NOT NULL AND organizer_id = auth.uid() AND public.is_org_member(auth.uid(), organization_id) )
 );
 CREATE POLICY "Allow delete if user is organizer or org member" ON public.events FOR DELETE TO authenticated USING (
-    ( organizer_id = auth.uid() AND organization_id IS NULL ) OR ( organization_id IS NOT NULL AND EXISTS (
-        SELECT 1 FROM public.organization_members mem WHERE mem.organization_id = events.organization_id AND mem.user_id = auth.uid()
-        -- Consider adding AND mem.role = 'admin' if only admins can delete org events
-    ))
+    ( organizer_id = auth.uid() AND organization_id IS NULL ) OR
+    -- Use helper function for organization check (maybe check admin role here?)
+    ( organization_id IS NOT NULL AND public.is_org_member(auth.uid(), organization_id) )
+    -- Consider: ( organization_id IS NOT NULL AND public.is_org_member_admin(auth.uid(), organization_id) )
 );
 
 -- Event Comments
 ALTER TABLE public.event_comments ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Anyone can view event comments" ON public.event_comments;
+DROP POLICY IF EXISTS "Authenticated users can add event comments" ON public.event_comments;
+DROP POLICY IF EXISTS "Users can update their own event comments" ON public.event_comments;
+DROP POLICY IF EXISTS "Users can delete their own event comments" ON public.event_comments;
 CREATE POLICY "Anyone can view event comments" ON public.event_comments FOR SELECT USING (true);
 CREATE POLICY "Authenticated users can add event comments" ON public.event_comments FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
 CREATE POLICY "Users can update their own event comments" ON public.event_comments FOR UPDATE TO authenticated USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
@@ -536,12 +633,19 @@ CREATE POLICY "Users can delete their own event comments" ON public.event_commen
 
 -- Event Reactions
 ALTER TABLE public.event_reactions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Anyone can view event reactions" ON public.event_reactions;
+DROP POLICY IF EXISTS "Authenticated users can add event reactions" ON public.event_reactions;
+DROP POLICY IF EXISTS "Users can delete their own event reactions" ON public.event_reactions;
 CREATE POLICY "Anyone can view event reactions" ON public.event_reactions FOR SELECT USING (true);
 CREATE POLICY "Authenticated users can add event reactions" ON public.event_reactions FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
 CREATE POLICY "Users can delete their own event reactions" ON public.event_reactions FOR DELETE TO authenticated USING (user_id = auth.uid());
 
 -- Event Attendees
 ALTER TABLE public.event_attendees ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow users to view attendance" ON public.event_attendees;
+DROP POLICY IF EXISTS "Authenticated users to set their attendance" ON public.event_attendees;
+DROP POLICY IF EXISTS "Users can update their own attendance" ON public.event_attendees;
+DROP POLICY IF EXISTS "Users can delete their own attendance" ON public.event_attendees;
 CREATE POLICY "Allow users to view attendance" ON public.event_attendees FOR SELECT USING (true); -- Assuming public lists
 CREATE POLICY "Authenticated users to set their attendance" ON public.event_attendees FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
 CREATE POLICY "Users can update their own attendance" ON public.event_attendees FOR UPDATE TO authenticated USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
@@ -551,6 +655,10 @@ CREATE POLICY "Users can delete their own attendance" ON public.event_attendees 
 -- Grant basic usage
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
 GRANT USAGE ON SCHEMA auth TO anon, authenticated; -- Important for auth functions
+
+-- Grant execute on new helper functions
+GRANT EXECUTE ON FUNCTION public.is_org_member(uuid, uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_org_member_admin(uuid, uuid) TO authenticated;
 
 -- Grant table permissions (RLS enforces row access)
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.profiles TO authenticated;
@@ -606,7 +714,6 @@ GRANT EXECUTE ON FUNCTION public.generate_unique_invite_code() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_event_attendees(UUID) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.handle_new_user() TO postgres; -- Trigger needs elevated rights
 GRANT EXECUTE ON FUNCTION public.handle_new_organization() TO postgres; -- Trigger needs elevated rights
-
 
 -- ====================================================================
 -- End of script

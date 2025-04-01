@@ -132,14 +132,15 @@ export const AuthProvider = ({ children }) => {
           .from('profiles')
           .select(`display_name, preferences, updated_at`)
           .eq('id', userId)
-          .maybeSingle(), // Use maybeSingle to handle not found gracefully
+          .maybeSingle(),
         supabase
-          .from('organization_members')
+          .from('organizations')
           .select(`
-            role,
-            organizations ( id, name )
+            id, 
+            name,
+            organization_members!inner ( role )
           `)
-          .eq('user_id', userId)
+          .eq('organization_members.user_id', userId)
       ]);
 
       // Handle profile result
@@ -160,16 +161,16 @@ export const AuthProvider = ({ children }) => {
 
       // Handle organizations result
       if (orgsResult.error) {
-        console.error('AuthContext: Error loading user organizations:', orgsResult.error);
+        console.error('AuthContext: Error loading user organizations:', JSON.stringify(orgsResult.error, null, 2));
         setUserOrganizations([]);
       } else {
         const orgData = orgsResult.data || [];
-        const formattedOrgs = orgData.map(m => ({ 
-            id: m.organizations.id, 
-            name: m.organizations.name, 
-            role: m.role 
+        const formattedOrgs = orgData.map(org => ({
+            id: org.id,
+            name: org.name,
+            role: org.organization_members[0]?.role || 'member'
         }));
-        console.log('AuthContext: User organizations loaded:', formattedOrgs);
+        console.log('AuthContext: User organizations loaded (revised query):', formattedOrgs);
         setUserOrganizations(formattedOrgs);
       }
 
