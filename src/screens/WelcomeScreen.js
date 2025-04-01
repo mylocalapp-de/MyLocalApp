@@ -15,9 +15,8 @@ import { useAuth } from '../context/AuthContext';
 
 const WelcomeScreen = ({ navigation }) => {
   const { createLocalAccount, signIn } = useAuth();
-  const [step, setStep] = useState('welcome'); // 'welcome', 'preferences', 'displayName', 'login'
+  const [step, setStep] = useState('welcome'); // 'welcome', 'preferences', 'login'
   const [selectedPreferences, setSelectedPreferences] = useState([]);
-  const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -50,15 +49,14 @@ const WelcomeScreen = ({ navigation }) => {
     try {
       console.log('Creating local account with preferences:', selectedPreferences);
       console.log('Display name: Neuer Account');
-      const { success, error } = await createLocalAccount(selectedPreferences, "Neuer Account");
+      const { success, error: contextError } = await createLocalAccount(selectedPreferences, "Neuer Account");
       
       if (success) {
-        console.log('Local account created successfully, navigating to MainApp');
+        console.log('Local account created successfully, navigating to MainApp via context update.');
         // Let AuthContext handle navigation by updating hasCompletedOnboarding
-        // No need to explicitly navigate here
       } else {
-        console.error('Error creating local account:', error);
-        setError('Es gab ein Problem. Bitte versuche es erneut.');
+        console.error('Error creating local account:', contextError);
+        setError(contextError?.message || 'Es gab ein Problem. Bitte versuche es erneut.');
       }
     } catch (err) {
       console.error('Unexpected error in handleCreateLocalAccount:', err);
@@ -70,8 +68,8 @@ const WelcomeScreen = ({ navigation }) => {
 
   const handleLoginSubmit = async () => {
     // Validation
-    if (!email.trim()) {
-      setError('Bitte gib eine E-Mail-Adresse ein');
+    if (!email.trim() || !email.includes('@')) {
+      setError('Bitte gib eine gültige E-Mail-Adresse ein');
       return;
     }
     
@@ -80,8 +78,8 @@ const WelcomeScreen = ({ navigation }) => {
       return;
     }
     
-    // Check password length
-    if (password.length < 6) {
+    // Password length check might be handled by Supabase Auth, but keep client-side check
+    if (password.length < 6) { 
       setError('Das Passwort muss mindestens 6 Zeichen lang sein');
       return;
     }
@@ -95,29 +93,15 @@ const WelcomeScreen = ({ navigation }) => {
       
       if (result.success) {
         console.log('Login successful, navigating to main app');
-        // Explicitly navigate to the main app
+        // Explicitly navigate to the main app after successful Supabase sign-in
         navigation.reset({
           index: 0,
           routes: [{ name: 'MainApp' }],
         });
       } else {
         console.error('Login failed:', result.error);
-        
-        // Handle specific error codes
-        switch (result.error?.code) {
-          case 'invalid_credentials':
-            setError('Falsche E-Mail oder Passwort');
-            break;
-          case 'user_fetch_error':
-            setError('Benutzer konnte nicht geladen werden');
-            break;
-          case 'signin_error':
-            setError('Anmeldung fehlgeschlagen');
-            break;
-          default:
-            setError(result.error?.message || 'Anmeldung fehlgeschlagen. Bitte versuche es erneut.');
-            break;
-        }
+        // Use Supabase error message directly
+        setError(result.error?.message || 'Anmeldung fehlgeschlagen. Bitte überprüfe deine Eingaben.');
       }
     } catch (err) {
       console.error('Unexpected error during login:', err);
@@ -257,59 +241,6 @@ const WelcomeScreen = ({ navigation }) => {
     </View>
   );
 
-  const renderDisplayNameForm = () => (
-    <View style={styles.contentContainer}>
-      <Text style={styles.preferencesTitle}>Wie möchtest du genannt werden?</Text>
-      <Text style={styles.preferencesText}>
-        Gib deinen Namen oder einen Benutzernamen ein.
-      </Text>
-      
-      <View style={styles.formContainer}>
-        <View style={styles.inputContainer}>
-          <Text style={styles.inputLabel}>Benutzername</Text>
-          <TextInput
-            style={styles.textInput}
-            value={displayName}
-            onChangeText={setDisplayName}
-            placeholder="Dein Name"
-            autoCapitalize="words"
-            autoCorrect={false}
-          />
-        </View>
-        
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
-      </View>
-      
-      <View style={styles.actionsContainer}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => {
-            setStep('preferences');
-            setError('');
-          }}
-        >
-          <Ionicons name="arrow-back" size={20} color="#666" />
-          <Text style={styles.backButtonText}>Zurück</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={[
-            styles.continueButton,
-            loading && styles.buttonDisabled
-          ]}
-          onPress={handleCreateLocalAccount}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#fff" size="small" />
-          ) : (
-            <Text style={styles.continueButtonText}>Fertig</Text>
-          )}
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-
   const renderLoginForm = () => (
     <View style={styles.contentContainer}>
       <Text style={styles.preferencesTitle}>Anmelden</Text>
@@ -380,7 +311,6 @@ const WelcomeScreen = ({ navigation }) => {
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         {step === 'welcome' && renderWelcome()}
         {step === 'preferences' && renderPreferences()}
-        {step === 'displayName' && renderDisplayNameForm()}
         {step === 'login' && renderLoginForm()}
       </ScrollView>
     </SafeAreaView>
