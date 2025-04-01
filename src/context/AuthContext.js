@@ -554,30 +554,40 @@ export const AuthProvider = ({ children }) => {
 
   // --- Organization Actions --- 
   const createOrganization = async (name) => {
-      if (!user) return { success: false, error: { message: 'Nicht angemeldet.' } };
-      if (!name || name.trim().length < 3) {
-          return { success: false, error: { message: 'Organisationsname muss mind. 3 Zeichen haben.' } };
+      if (!user) return { success: false, error: { message: 'Nicht angemeldet.' } }; // Still check context user for initial guard
+      if (!name || name.trim() === '') {
+          return { success: false, error: { message: 'Organisationsname benötigt.' } };
       }
       setLoading(true);
       try {
-          // Insert the new organization
+          // Explicitly get the current authenticated user from Supabase NOW
+          const { data: { user: currentUser }, error: userError } = await supabase.auth.getUser();
+
+          if (userError || !currentUser) {
+              console.error("AuthContext: Error fetching current user before creating org:", userError);
+              return { success: false, error: { message: 'Benutzer konnte nicht bestätigt werden. Bitte erneut anmelden.' } };
+          }
+
+          // Use the ID from the freshly fetched currentUser
           const { data: newOrg, error: insertError } = await supabase
               .from('organizations')
-              .insert({ name: name.trim(), admin_id: user.id })
+              .insert({ name: name.trim(), admin_id: currentUser.id }) // Use currentUser.id
               .select('id, name') // Select the needed fields from the result
               .single(); // Expect a single row back
 
           if (insertError) {
               console.error("AuthContext: Error inserting organization:", insertError);
+              // Log the IDs for debugging if the error persists
+              console.error(`Debug Info - Context User ID: ${user?.id}, CurrentUser ID: ${currentUser?.id}`);
               return { success: false, error: { message: insertError.message || 'Fehler beim Erstellen.' } };
           }
 
           // Trigger handle_new_organization adds the creator as admin member automatically
           console.log('AuthContext: Organization created:', newOrg);
-          
-          // Refetch user organizations to update the context state
-          await loadUserProfileAndOrgs(user.id);
-          
+
+          // Refetch user organizations to update the context state using the confirmed currentUser ID
+          await loadUserProfileAndOrgs(currentUser.id);
+
           return { success: true, data: newOrg };
 
       } catch (error) {
