@@ -307,7 +307,13 @@ const ProfileScreen = () => {
         setShowAccountSettingsModal(false);
       } else {
         console.error('Failed to update email:', result.error);
-        setAccountSettingsError(result.error?.message || 'E-Mail konnte nicht geändert werden.');
+        // Check for specific rate-limiting error
+        const errorMessage = result.error?.message || 'E-Mail konnte nicht geändert werden.';
+        if (errorMessage.includes('For security purposes')) {
+            setAccountSettingsError('Aus Sicherheitsgründen können Sie diese Anfrage erst nach kurzer Wartezeit erneut stellen. Bitte versuchen Sie es später noch einmal.');
+        } else {
+            setAccountSettingsError(errorMessage);
+        }
       }
     } catch (error) {
       console.error('Unexpected error during email update:', error);
@@ -753,7 +759,7 @@ const ProfileScreen = () => {
                 >
                   {isAccountSettingsLoading ? 
                      <ActivityIndicator color="#fff" size="small" /> : 
-                     <Text style={styles.modalButtonText}>E-Mail Aktualisieren</Text>
+                     <Text style={styles.modalButtonText}>E-Mail Aktualisieren</Text> 
                   }
                 </TouchableOpacity>
              </View>
@@ -781,7 +787,7 @@ const ProfileScreen = () => {
                    secureTextEntry
                    autoCapitalize="none"
                    autoComplete="new-password"
-                />
+                 />
                  {accountSettingsError ? <Text style={styles.errorTextModal}>{accountSettingsError}</Text> : null}
                  <TouchableOpacity 
                   style={[styles.modalButton, styles.saveButton, styles.singleButton, isAccountSettingsLoading && styles.buttonDisabled]} 
@@ -1043,7 +1049,6 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   modalButton: {
-    flex: 1,
     paddingVertical: 12,
     borderRadius: 5,
     alignItems: 'center',

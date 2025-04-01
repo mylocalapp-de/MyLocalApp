@@ -54,23 +54,46 @@ export const AuthProvider = ({ children }) => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, newSession) => {
         console.log(`AuthContext: Auth state changed event: ${_event}`, newSession ? 'New session' : 'No session');
-        setSession(newSession);
+        
         const currentUser = newSession?.user ?? null;
-        setUser(currentUser);
+        const wasAlreadyLoggedIn = !!session?.user; // Check if there was a user before this event
+        const userIdChanged = session?.user?.id !== currentUser?.id; // Check if user ID actually changed
+
+        setSession(newSession); 
+        // Only update the main user state if the user ID actually changed 
+        // or if it's not a USER_UPDATED event (e.g., SIGNED_IN, INITIAL_SESSION).
+        // Avoids unnecessary re-renders/navigation triggers just for metadata updates.
+        if (userIdChanged || _event !== 'USER_UPDATED') {
+            console.log('AuthContext: Updating user state object.');
+            setUser(currentUser);
+        } else {
+            console.log('AuthContext: Skipping user state object update for USER_UPDATED event with same user ID.');
+        }
         setLoading(false);
 
         if (currentUser) {
-          // User logged in or session restored
+          // User logged in, session restored, or user updated
+          
+          // Only set onboarding complete on initial sign-in/session recovery, 
+          // not on simple user updates if already logged in.
+          if (!wasAlreadyLoggedIn || _event !== 'USER_UPDATED') {
+             console.log('AuthContext: Setting onboarding complete status (Initial session or non-update event).');
+             setHasCompletedOnboarding(true);
+             await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
+          } else {
+             console.log('AuthContext: Skipping onboarding state set for USER_UPDATED event while already logged in.');
+          }
+          
+          // Always load/reload profile if a user exists
           await loadUserProfile(currentUser.id);
-          // Mark onboarding as complete if they have a session
-          setHasCompletedOnboarding(true);
-          await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
         } else {
           // User logged out
           setProfile(null);
           // Keep local displayName/preferences if user signs out? Or clear them?
           // Let's keep them for now, they might log back in.
           // Consider clearing if resetOnboarding is called explicitly.
+          // Also ensure onboarding is marked false if logged out.
+          // setHasCompletedOnboarding(false); // We handle this explicitly in signOut now
         }
       }
     );
@@ -407,60 +430,44 @@ export const AuthProvider = ({ children }) => {
      if (!user) {
        return { success: false, error: { message: 'Nicht angemeldet.' } };
      }
-     // Basic validation
-     if (!newEmail || !newEmail.includes('@') || !password) {
-        return { success: false, error: { message: 'Neue E-Mail und aktuelles Passwort benötigt.' } };
+     if (!newEmail || !newEmail.includes('@')) {
+        return { success: false, error: { message: 'Neue E-Mail benötigt.' } };
      }
+     // Temporarily remove password requirement for email change if confirmation is off
+     // if (!password) {
+     //    return { success: false, error: { message: 'Aktuelles Passwort benötigt.' } };
+     // }
 
      setLoading(true);
      try {
-       // 1. Verify current password - Supabase doesn't have a direct verify method,
-       // so we attempt a sign-in with the current email and provided password.
-       // This is a workaround and not ideal.
-       console.log('AuthContext: Verifying password before email change...');
-       const { error: verifyError } = await supabase.auth.signInWithPassword({
-         email: user.email,
-         password: password,
-       });
+       // Removed the problematic password verification step
 
-       if (verifyError) {
-         console.error("AuthContext: Password verification failed:", verifyError);
-         // Attempting to sign in again immediately might cause issues if the initial sign-in is still processing.
-         // Re-sign in the user if verification 'failed' (as signIn logs them out on failure)
-         // await supabase.auth.signInWithPassword({ email: user.email, password: currentPassword }); // Requires storing currentPassword securely? Risky.
-         // Best approach is to ask user to re-login or handle this flow differently.
-         // For now, return error.
-         return { success: false, error: { message: 'Aktuelles Passwort ist nicht korrekt.' } };
-       }
-       console.log("AuthContext: Password verified (via sign-in attempt).");
-
-
-       // 2. Update email using Supabase Auth
+       // Update email using Supabase Auth
        console.log('AuthContext: Attempting to update email via Supabase Auth...');
        const { data, error: updateError } = await supabase.auth.updateUser({
          email: newEmail
-         // Password needs to be re-provided for email change confirmation usually,
-         // but Supabase handles this via a confirmation email by default.
-         // If `secure_email_change_enabled` is true (default), Supabase sends a confirmation email.
        });
 
        if (updateError) {
          console.error("AuthContext: Supabase updateUser (email) error:", updateError);
+         // Handle specific errors if needed (e.g., email already exists)
          return { success: false, error: { message: updateError.message || 'E-Mail konnte nicht geändert werden.' } };
        }
 
-       console.log("AuthContext: Email update initiated successfully. Check email for confirmation.", data);
-       // The user object in state will update automatically via onAuthStateChange *after* confirmation.
-       // Inform the user they need to confirm via email.
-       return { success: true, needsConfirmation: true };
+       console.log("AuthContext: Email update successful via API.", data);
+       // Since email confirmation is disabled in project settings, treat as immediate success.
+       // The onAuthStateChange listener should eventually update the user object in the context.
+       // Reload the profile manually IF the user object doesn't update quickly enough via listener.
+       // This provides faster feedback in the UI.
+       setTimeout(() => loadUserProfile(user.id), 500); // Trigger profile reload
+
+       return { success: true }; // Indicate success to the ProfileScreen
 
      } catch (error) {
        console.error("AuthContext: Unexpected error updating email:", error);
        return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
      } finally {
        setLoading(false);
-       // Re-sign in the user after password verification attempt? Complex due to potential state changes.
-       // Best to rely on the existing session or prompt re-login if needed.
      }
    };
 

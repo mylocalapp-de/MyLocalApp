@@ -98,8 +98,14 @@ const WelcomeScreen = ({ navigation }) => {
         // which triggers AppNavigator to switch to MainApp.
       } else {
         console.error('Login failed:', result.error);
-        // Use Supabase error message directly
-        setError(result.error?.message || 'Anmeldung fehlgeschlagen. Bitte überprüfe deine Eingaben.');
+        // Check for specific invalid credentials error
+        const errorMessage = result.error?.message || 'Anmeldung fehlgeschlagen. Bitte überprüfe deine Eingaben.';
+        if (errorMessage.toLowerCase().includes('invalid login credentials')) {
+            setError('Ungültige Anmeldedaten. Bitte überprüfe deine E-Mail und dein Passwort.');
+        } else {
+            // Use Supabase error message directly for other cases
+            setError(errorMessage);
+        }
       }
     } catch (err) {
       console.error('Unexpected error during login:', err);
