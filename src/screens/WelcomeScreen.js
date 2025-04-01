@@ -92,12 +92,10 @@ const WelcomeScreen = ({ navigation }) => {
       const result = await signIn(email, password);
       
       if (result.success) {
-        console.log('Login successful, navigating to main app');
-        // Explicitly navigate to the main app after successful Supabase sign-in
-        navigation.reset({
-          index: 0,
-          routes: [{ name: 'MainApp' }],
-        });
+        console.log('Login successful, AppNavigator will handle navigation via AuthContext state.');
+        // No manual navigation needed here.
+        // AuthContext's onAuthStateChange listener sets hasCompletedOnboarding=true,
+        // which triggers AppNavigator to switch to MainApp.
       } else {
         console.error('Login failed:', result.error);
         // Use Supabase error message directly

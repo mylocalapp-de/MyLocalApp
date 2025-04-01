@@ -153,31 +153,24 @@ const ProfileScreen = () => {
       setCreateFormError('Die Passwörter stimmen nicht überein.');
       return;
     }
-    
+
     setIsCreateLoading(true);
     setCreateFormError('');
-    
+
     try {
       console.log(`Attempting account upgrade for email: ${createEmail}`);
       const result = await upgradeToFullAccount(createEmail, createPassword);
-      
+
       if (result.success) {
-        console.log('Account successfully created, user ID:', result.data?.user?.id);
-        
-        // Force a UI refresh
-        setTimeout(() => {
-          // Check if user data is set properly after account creation
-          console.log('Account creation completed, checking account status:');
-          console.log('- User:', user ? `ID: ${user.id}` : 'No user set');
-          console.log('- Profile:', profile ? 'Profile exists' : 'No profile');
-          console.log('- Has full account:', !!user?.id);
-          
-          Alert.alert(
-            'Erfolgreich',
-            'Dein Account wurde erstellt. Du bist jetzt eingeloggt.'
-          );
-          setShowCreateAccountModal(false);
-        }, 500);
+        console.log('Account upgrade process successful in AuthContext, user ID:', result.data?.user?.id);
+        // AuthContext's onAuthStateChange listener should now handle
+        // setting the user, loading the profile, and setting onboarding complete.
+        // This will trigger the AppNavigator to show the main app.
+        Alert.alert(
+          'Erfolgreich',
+          'Dein Account wurde erstellt. Du bist jetzt eingeloggt.'
+        );
+        setShowCreateAccountModal(false);
       } else {
         console.error('Account upgrade failed:', result.error);
         setCreateFormError(result.error?.message || 'Account konnte nicht erstellt werden.');
