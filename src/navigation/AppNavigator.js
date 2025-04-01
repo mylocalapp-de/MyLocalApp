@@ -22,14 +22,12 @@ import WelcomeScreen from '../screens/WelcomeScreen';
 import CreateBroadcastGroupScreen from '../screens/CreateBroadcastGroupScreen';
 import CreateEventScreen from '../screens/CreateEventScreen';
 import EditEventScreen from '../screens/EditEventScreen';
-import OrganizationOnboardingScreen from '../screens/OrganizationOnboardingScreen';
 
 const Tab = createBottomTabNavigator();
 const ChatStack = createStackNavigator();
 const HomeStack = createStackNavigator();
 const CalendarStack = createStackNavigator();
 const RootStack = createStackNavigator();
-const ProfileStack = createStackNavigator();
 
 // Chat stack navigator
 const ChatStackNavigator = () => {
@@ -79,20 +77,6 @@ const CalendarStackNavigator = () => {
   );
 };
 
-// Profile stack navigator
-const ProfileStackNavigator = () => {
-  return (
-    <ProfileStack.Navigator
-      screenOptions={{
-        headerShown: false,
-      }}
-    >
-      <ProfileStack.Screen name="ProfileMain" component={ProfileScreen} />
-      <ProfileStack.Screen name="OrganizationOnboarding" component={OrganizationOnboardingScreen} />
-    </ProfileStack.Navigator>
-  );
-};
-
 // Main tab navigator
 const TabNavigator = () => {
   return (
@@ -109,7 +93,7 @@ const TabNavigator = () => {
             iconName = focused ? 'calendar' : 'calendar-outline';
           } else if (route.name === 'Map') {
             iconName = focused ? 'map' : 'map-outline';
-          } else if (route.name === 'ProfileNav') {
+          } else if (route.name === 'Profile') {
             iconName = focused ? 'person' : 'person-outline';
           }
 
@@ -159,8 +143,8 @@ const TabNavigator = () => {
         options={{ tabBarLabel: 'Karte' }}
       />
       <Tab.Screen 
-        name="ProfileNav"
-        component={ProfileStackNavigator} 
+        name="Profile" 
+        component={ProfileScreen} 
         options={{ tabBarLabel: 'Profil' }}
       />
     </Tab.Navigator>
