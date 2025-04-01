@@ -20,7 +20,7 @@ DROP FUNCTION IF EXISTS public.verify_custom_password(TEXT, TEXT);
 -- Drop other potentially related custom functions if they exist
 
 -- 3. Create the 'profiles' table linked to auth.users
-CREATE TABLE public.profiles (
+CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   display_name TEXT,
   preferences TEXT[] DEFAULT '{}',
@@ -34,14 +34,17 @@ COMMENT ON TABLE public.profiles IS 'Stores public profile information for authe
 -- 4. Set up RLS for the profiles table
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view all profiles" ON public.profiles;
 CREATE POLICY "Users can view all profiles"
   ON public.profiles FOR SELECT
   USING (true); -- Or restrict as needed, e.g., (auth.role() = 'authenticated')
 
+DROP POLICY IF EXISTS "Users can insert their own profile" ON public.profiles;
 CREATE POLICY "Users can insert their own profile"
   ON public.profiles FOR INSERT
   WITH CHECK (auth.uid() = id);
 
+DROP POLICY IF EXISTS "Users can update their own profile" ON public.profiles;
 CREATE POLICY "Users can update their own profile"
   ON public.profiles FOR UPDATE
   USING (auth.uid() = id)
@@ -143,7 +146,8 @@ DROP POLICY IF EXISTS "Anyone can view published articles" ON public.articles;
 CREATE POLICY "Anyone can view published articles" ON public.articles
   FOR SELECT USING (is_published = true);
 
-DROP POLICY IF EXISTS "Anyone can create articles" ON public.articles;
+DROP POLICY IF EXISTS "Authenticated users can create articles" ON public.articles;
+DROP POLICY IF EXISTS "Anyone can create articles" ON public.articles; -- Drop old policy name if it exists
 CREATE POLICY "Authenticated users can create articles" ON public.articles
   FOR INSERT TO authenticated WITH CHECK (author_id = auth.uid()); -- Ensure author is the logged-in user
 
