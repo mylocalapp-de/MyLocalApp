@@ -429,10 +429,14 @@ CREATE POLICY "Users can delete their own reactions" ON public.article_reactions
 -- Chat Groups (Assuming personal open groups are deprecated/removed)
 ALTER TABLE public.chat_groups ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow members/admins to view their org groups" ON public.chat_groups FOR SELECT TO authenticated USING (
-    (type = 'bot') OR -- Bots are public?
+    (type = 'bot') OR -- Bots are public? Maybe not needed if anon policy covers it. Let's keep for specific auth logic if any.
     (organization_id IS NOT NULL AND EXISTS ( -- Org group, user must be member
         SELECT 1 FROM public.organization_members mem WHERE mem.organization_id = chat_groups.organization_id AND mem.user_id = auth.uid()
     ))
+);
+-- Add policy for anonymous users to view public groups
+CREATE POLICY "Anon can view public groups" ON public.chat_groups FOR SELECT TO anon USING (
+    type IN ('broadcast', 'bot') AND is_active = true -- Allow anon to see active broadcast and bot groups
 );
 CREATE POLICY "Allow org members/admins to create broadcast groups for org" ON public.chat_groups FOR INSERT TO authenticated WITH CHECK (
     type = 'broadcast' AND organization_id IS NOT NULL AND EXISTS (
@@ -446,6 +450,10 @@ CREATE POLICY "Allow org members/admins to create broadcast groups for org" ON p
 ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow members to view messages in groups they can access" ON public.chat_messages FOR SELECT TO authenticated USING (
     chat_group_id IN (SELECT id FROM public.chat_groups) -- Relies on chat_groups SELECT policy
+);
+-- Add policy for anonymous users to view messages in public groups
+CREATE POLICY "Anon can view messages in public groups" ON public.chat_messages FOR SELECT TO anon USING (
+    chat_group_id IN (SELECT id FROM public.chat_groups WHERE type IN ('broadcast', 'bot') AND is_active = true)
 );
 CREATE POLICY "Allow members to send messages in groups they can access" ON public.chat_messages FOR INSERT TO authenticated WITH CHECK (
     user_id = auth.uid() AND
@@ -462,6 +470,13 @@ CREATE POLICY "Allow users to view comments in accessible broadcast groups" ON p
       WHERE g.type = 'broadcast' AND m.chat_group_id IN (SELECT id FROM public.chat_groups) -- Check group access
     )
 );
+-- Add policy for anonymous users to view comments in public groups
+CREATE POLICY "Anon can view comments in public groups" ON public.message_comments FOR SELECT TO anon USING (
+    message_id IN (
+        SELECT m.id FROM public.chat_messages m JOIN public.chat_groups g ON m.chat_group_id = g.id
+        WHERE g.type IN ('broadcast', 'bot') AND g.is_active = true
+    )
+);
 CREATE POLICY "Allow users to comment on broadcast messages in accessible groups" ON public.message_comments FOR INSERT TO authenticated WITH CHECK (
     user_id = auth.uid() AND message_id IN (
       SELECT m.id FROM public.chat_messages m JOIN public.chat_groups g ON m.chat_group_id = g.id
@@ -474,6 +489,13 @@ CREATE POLICY "Allow users to delete their own comments" ON public.message_comme
 ALTER TABLE public.message_reactions ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow users to view reactions in accessible groups" ON public.message_reactions FOR SELECT TO authenticated USING (
     message_id IN (SELECT id FROM public.chat_messages) -- Relies on chat_messages SELECT policy
+);
+-- Add policy for anonymous users to view reactions in public groups
+CREATE POLICY "Anon can view reactions in public groups" ON public.message_reactions FOR SELECT TO anon USING (
+    message_id IN (
+        SELECT m.id FROM public.chat_messages m JOIN public.chat_groups g ON m.chat_group_id = g.id
+        WHERE g.type IN ('broadcast', 'bot') AND g.is_active = true
+    )
 );
 CREATE POLICY "Allow users to add reactions in accessible groups" ON public.message_reactions FOR INSERT TO authenticated WITH CHECK (
     user_id = auth.uid() AND message_id IN (SELECT id FROM public.chat_messages)
@@ -544,10 +566,14 @@ GRANT INSERT, UPDATE, DELETE ON public.article_comments TO authenticated;
 GRANT SELECT ON public.article_reactions TO anon, authenticated;
 GRANT INSERT, DELETE ON public.article_reactions TO authenticated;
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.chat_groups TO authenticated; -- Granting broadly, RLS controls access
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.chat_messages TO authenticated;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.message_comments TO authenticated;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.message_reactions TO authenticated;
+GRANT SELECT ON public.chat_groups TO anon, authenticated; -- Added anon SELECT
+GRANT INSERT, UPDATE, DELETE ON public.chat_groups TO authenticated; -- Granting broadly, RLS controls access
+GRANT SELECT ON public.chat_messages TO anon, authenticated; -- Added anon SELECT
+GRANT INSERT, UPDATE, DELETE ON public.chat_messages TO authenticated;
+GRANT SELECT ON public.message_comments TO anon, authenticated; -- Added anon SELECT
+GRANT INSERT, UPDATE, DELETE ON public.message_comments TO authenticated;
+GRANT SELECT ON public.message_reactions TO anon, authenticated; -- Added anon SELECT
+GRANT INSERT, UPDATE, DELETE ON public.message_reactions TO authenticated; -- Note: Original had INSERT,UPDATE,DELETE here, corrected to match others
 
 GRANT SELECT ON public.events TO anon, authenticated;
 GRANT INSERT, UPDATE, DELETE ON public.events TO authenticated;
@@ -565,9 +591,9 @@ GRANT SELECT ON public.event_reaction_counts TO anon, authenticated;
 GRANT SELECT ON public.event_attendee_counts TO anon, authenticated;
 GRANT SELECT ON public.article_listings TO anon, authenticated;
 GRANT SELECT ON public.article_comments_with_users TO anon, authenticated;
-GRANT SELECT ON public.chat_group_listings TO authenticated; -- RLS on underlying tables controls rows
-GRANT SELECT ON public.chat_messages_with_users TO authenticated;
-GRANT SELECT ON public.message_comments_with_users TO authenticated;
+GRANT SELECT ON public.chat_group_listings TO authenticated; -- RLS on underlying tables controls rows. Anon will see rows based on underlying table RLS.
+GRANT SELECT ON public.chat_messages_with_users TO anon, authenticated; -- Added anon SELECT
+GRANT SELECT ON public.message_comments_with_users TO anon, authenticated; -- Added anon SELECT
 GRANT SELECT ON public.event_listings TO anon, authenticated;
 GRANT SELECT ON public.event_comments_with_users TO anon, authenticated;
 GRANT SELECT ON public.event_attendees_with_users TO anon, authenticated;

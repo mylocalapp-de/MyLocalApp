@@ -923,19 +923,19 @@ const ProfileScreen = () => {
 
             {/* Render Personal Profile Section if NO org is active */}
             {!isOrganizationActive && renderPersonalProfileSection()}
-
-            {/* Sign Out Button - Always show, removed hasFullAccount check */}
-             <View style={styles.signOutContainer}>
-               <TouchableOpacity
-                  style={[styles.button, styles.signOutButton]}
-                  onPress={handleSignOut}
-                >
-                  <Ionicons name="log-out-outline" size={22} style={[styles.settingIcon, styles.signOutIcon]} />
-                  <Text style={[styles.settingText, styles.signOutText]}>Abmelden</Text>
-               </TouchableOpacity>
-            </View>
          </>
       )}
+
+      {/* Sign Out Button - Moved outside the conditional block */}
+      <View style={styles.signOutContainer}>
+        <TouchableOpacity
+          style={[styles.button, styles.signOutButton]}
+          onPress={handleSignOut}
+        >
+          <Ionicons name="log-out-outline" size={22} style={[styles.settingIcon, styles.signOutIcon]} />
+          <Text style={[styles.settingText, styles.signOutText]}>Abmelden</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Modals */}
       {renderCreateAccountModal()}
