@@ -715,6 +715,36 @@ GRANT EXECUTE ON FUNCTION public.get_event_attendees(UUID) TO anon, authenticate
 GRANT EXECUTE ON FUNCTION public.handle_new_user() TO postgres; -- Trigger needs elevated rights
 GRANT EXECUTE ON FUNCTION public.handle_new_organization() TO postgres; -- Trigger needs elevated rights
 
+-- NEW FUNCTION: Securely create an organization
+CREATE OR REPLACE FUNCTION public.create_new_organization(org_name TEXT)
+RETURNS TABLE(id uuid, name text) -- Define the return type to match select
+LANGUAGE plpgsql
+SECURITY DEFINER -- IMPORTANT: Runs with function owner privileges, bypassing RLS for the insert itself
+SET search_path = public -- Ensure it operates in the public schema
+AS $$
+DECLARE
+  _user_id uuid := auth.uid(); -- Get the currently authenticated user's ID
+  _new_org_id uuid;
+BEGIN
+  -- Check if user is authenticated (should always be true if called via authenticated client)
+  IF _user_id IS NULL THEN
+    RAISE EXCEPTION 'User must be authenticated to create an organization.';
+  END IF;
+
+  -- Insert the new organization
+  INSERT INTO public.organizations (name, admin_id)
+  VALUES (org_name, _user_id)
+  RETURNING organizations.id INTO _new_org_id; -- Get the new ID
+
+  -- Return the ID and name of the newly created org
+  RETURN QUERY SELECT o.id, o.name FROM public.organizations o WHERE o.id = _new_org_id;
+END;
+$$;
+COMMENT ON FUNCTION public.create_new_organization(TEXT) IS 'Creates a new organization, ensuring the creator is set as admin_id. SECURITY DEFINER bypasses INSERT RLS.';
+
+-- Grant execute on new create organization function
+GRANT EXECUTE ON FUNCTION public.create_new_organization(TEXT) TO authenticated;
+
 -- ====================================================================
 -- End of script
 -- ====================================================================

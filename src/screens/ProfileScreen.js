@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Switch, ScrollView, Modal, TextInput, Alert, ActivityIndicator, FlatList, Clipboard, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Switch, ScrollView, Modal, TextInput, Alert, ActivityIndicator, Clipboard, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
@@ -20,6 +20,9 @@ const ProfileScreen = () => {
     switchOrganizationContext,
     isLoading: isOrgContextLoading, // Renamed to avoid clash
   } = useOrganization();
+
+  // **** ADDED LOGGING: Inspect the function from context ****
+  console.log(`%%%% ProfileScreen: Inspected switchOrganizationContext from useOrganization: Type = ${typeof switchOrganizationContext}, Value =`, switchOrganizationContext);
 
   // Use auth context with Supabase
   const { 
@@ -367,37 +370,69 @@ const ProfileScreen = () => {
     }
   };
 
-  // Handle sign out
+  // Handle sign out / reset
   const handleSignOut = async () => {
-    Alert.alert(
-      "Abmelden",
-      "Möchtest du dich wirklich abmelden?",
-      [
-        { text: "Abbrechen", style: "cancel" },
-        {
-          text: "Abmelden",
-          style: "destructive",
-          onPress: async () => {
-            const { success, error } = await signOut();
-            if (!success) {
-              Alert.alert("Fehler", `Abmeldung fehlgeschlagen: ${error?.message || 'Unbekannter Fehler'}`);
-            }
-            // Navigation handled by AppNavigator via AuthContext change
+    if (hasFullAccount) {
+      // Existing logic for logged-in users
+      Alert.alert(
+        "Abmelden",
+        "Möchtest du dich wirklich abmelden?",
+        [
+          { text: "Abbrechen", style: "cancel" },
+          {
+            text: "Abmelden",
+            style: "destructive",
+            onPress: async () => {
+              const { success, error } = await signOut();
+              if (!success) {
+                Alert.alert("Fehler", `Abmeldung fehlgeschlagen: ${error?.message || 'Unbekannter Fehler'}`);
+              }
+              // Navigation handled by AppNavigator via AuthContext change
+            },
           },
-        },
-      ]
-    );
+        ]
+      );
+    } else {
+      // Logic for local users (reset onboarding)
+      Alert.alert(
+        "App Zurücksetzen",
+        "Möchtest du die App wirklich zurücksetzen und alle lokalen Daten löschen?",
+        [
+          { text: "Abbrechen", style: "cancel" },
+          {
+            text: "Zurücksetzen",
+            style: "destructive",
+            onPress: async () => {
+              const { success, error } = await resetOnboarding();
+              if (!success) {
+                Alert.alert("Fehler", `Zurücksetzen fehlgeschlagen: ${error?.message || 'Unbekannter Fehler'}`);
+              }
+              // Navigation should react to hasCompletedOnboarding becoming false
+            },
+          },
+        ]
+      );
+    }
   };
   
   // Handle switch to organization context
-  const handleSwitchToOrg = async (orgId) => {
-    setIsOrgContextLoading(true); // Show loading indicator while switching
-    const result = await switchOrganizationContext(orgId);
-    setIsOrgContextLoading(false);
-    if (!result.success) {
-      Alert.alert("Fehler", result.error || "Konnte nicht zur Organisation wechseln.");
-    }
-    // UI will update based on context change
+  const handleSwitchToOrg = (orgId) => {
+    // **** ADDED LOGGING ****
+    console.log(`%%%% ProfileScreen: handleSwitchToOrg CALLED with orgId: ${orgId} %%%%`);
+
+    //setIsOrgContextLoading(true); // Temporarily disable loading state changes
+    
+    // **** MODIFIED: Call function without await/result handling ****
+    console.log(`ProfileScreen: Calling switchOrganizationContext (from OrganizationContext) for orgId: ${orgId} - WITHOUT AWAIT`);
+    switchOrganizationContext(orgId); // Call directly
+    
+    console.log(`ProfileScreen: Call to switchOrganizationContext initiated (without await).`);
+
+    //setIsOrgContextLoading(false); // Temporarily disable
+    // if (!result.success) { // Temporarily disable result check
+    //   Alert.alert("Fehler", result.error || "Konnte nicht zur Organisation wechseln.");
+    // }
+    // UI will update based on context change (hopefully)
   };
 
   // Handle switch back to personal context
@@ -516,18 +551,15 @@ const ProfileScreen = () => {
         ) : orgMgmtError ? (
             <Text style={styles.errorText}>{orgMgmtError}</Text>
         ) : organizationMembers.length > 0 ? (
-            <FlatList
-                data={organizationMembers}
-                keyExtractor={(item) => item.user_id}
-                renderItem={({ item }) => (
-                    <View style={styles.memberItem}>
-                        <Text style={styles.memberName}>{item.profiles?.display_name || 'Unbekannter Benutzer'}</Text>
-                        <Text style={styles.memberRole}>{item.role === 'admin' ? 'Admin' : 'Mitglied'}</Text>
-                        {/* TODO: Add remove/role change buttons for admins */} 
-                    </View>
-                )}
-                style={styles.memberList}
-            />
+            <View style={styles.memberListContainer}> 
+              {organizationMembers.map(item => (
+                  <View key={item.user_id} style={styles.memberItem}>
+                      <Text style={styles.memberName}>{item.profiles?.display_name || 'Unbekannter Benutzer'}</Text>
+                      <Text style={styles.memberRole}>{item.role === 'admin' ? 'Admin' : 'Mitglied'}</Text>
+                      {/* TODO: Add remove/role change buttons for admins */} 
+                  </View>
+              ))}
+            </View>
         ) : (
              <Text style={styles.noMembersText}>Keine Mitglieder gefunden.</Text>
         )}
@@ -931,18 +963,19 @@ const ProfileScreen = () => {
          </>
       )}
 
-      {/* Sign Out Button - Show ONLY if user HAS a full account */}
-      {hasFullAccount && (
-        <View style={styles.signOutContainer}>
-          <TouchableOpacity
-            style={[styles.button, styles.signOutButton]}
-            onPress={handleSignOut}
-          >
-            <Ionicons name="log-out-outline" size={22} style={[styles.settingIcon, styles.signOutIcon]} />
-            <Text style={[styles.settingText, styles.signOutText]}>Abmelden</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      {/* Sign Out Button - *** MODIFIED: Always show *** */}
+      <View style={styles.signOutContainer}>
+        <TouchableOpacity
+          style={[styles.button, styles.signOutButton]}
+          onPress={handleSignOut}
+        >
+          <Ionicons name="log-out-outline" size={22} style={[styles.settingIcon, styles.signOutIcon]} />
+          {/* Change text based on whether user is logged in or local */}
+          <Text style={[styles.settingText, styles.signOutText]}>
+            {hasFullAccount ? 'Abmelden' : 'App Zurücksetzen'}
+          </Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Modals */}
       {renderCreateAccountModal()}
@@ -1228,9 +1261,8 @@ const styles = StyleSheet.create({
       color: '#444',
       marginBottom: 10,
   },
-  memberList: {
-      maxHeight: 150, // Limit height if many members
-      marginBottom: 15,
+  memberListContainer: {
+    marginBottom: 15,
   },
   memberItem: {
       flexDirection: 'row',

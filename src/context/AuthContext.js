@@ -60,47 +60,101 @@ export const AuthProvider = ({ children }) => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, newSession) => {
         setLoadingAuth(true); // Indicate auth state change processing
-        console.log(`AuthContext: Auth state changed event: ${_event}`, newSession ? 'New session' : 'No session');
-        
-        const currentUser = newSession?.user ?? null;
-        const currentUserId = currentUser?.id;
-        const previousUserId = session?.user?.id;
-        const userIdChanged = previousUserId !== currentUserId;
+        console.log(`AuthContext: Auth state changed event: ${_event}`, newSession ? `Session User: ${newSession.user.id}` : 'No session');
 
-        console.log(`AuthContext: User ID check - Prev: ${previousUserId}, Curr: ${currentUserId}, Changed: ${userIdChanged}`);
+        const newSupabaseUser = newSession?.user ?? null;
+        const previousSupabaseUser = session?.user ?? null; // Use previous session state
+        const userIdChanged = newSupabaseUser?.id !== previousSupabaseUser?.id;
 
+        console.log(`AuthContext: User ID check - Prev: ${previousSupabaseUser?.id}, New: ${newSupabaseUser?.id}, Changed: ${userIdChanged}`);
+
+        // Update session state regardless of event type
         setSession(newSession);
-        if (userIdChanged || _event !== 'USER_UPDATED') {
-            console.log('AuthContext: Updating user state object.');
-            setUser(currentUser);
+
+        // Update user state IF the user object itself has changed identity
+        // This prevents unnecessary updates for events like TOKEN_REFRESHED where user ID is the same
+        if (userIdChanged) {
+            console.log('AuthContext: Updating user context state object due to ID change.');
+            setUser(newSupabaseUser);
         } else {
-            console.log('AuthContext: Skipping user state object update for USER_UPDATED event.');
+            console.log('AuthContext: Skipping user context state object update (ID unchanged).');
         }
 
-        if (currentUser) {
-          if (!previousUserId || userIdChanged) { // Set onboarding on first login or user change
-             console.log('AuthContext: Setting onboarding complete status.');
-             setHasCompletedOnboarding(true);
-             await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
-          }
-          
-          if (_event !== 'USER_UPDATED' || userIdChanged) {
-            console.log('AuthContext: Loading profile & orgs due to event type or user change.');
-            await loadUserProfileAndOrgs(currentUser.id);
-          } else {
-            console.log('AuthContext: Skipping profile/org reload for USER_UPDATED.');
-            setLoadingProfile(false); // Ensure profile loading is false if skipped
-          }
+        // Handle different event types
+        switch (_event) {
+            case 'SIGNED_IN':
+            case 'INITIAL_SESSION': // Treat initial session like sign in if user exists
+                if (newSupabaseUser) {
+                    console.log(`AuthContext: ${_event} event - Loading profile/orgs for user:`, newSupabaseUser.id);
+                    await loadUserProfileAndOrgs(newSupabaseUser.id);
+                    // Ensure onboarding is marked complete on sign-in or initial load with user
+                    if (!hasCompletedOnboarding) {
+                        console.log('AuthContext: Setting onboarding complete status from auth listener.');
+                        setHasCompletedOnboarding(true);
+                        await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
+                    }
+                } else {
+                    // INITIAL_SESSION with no user (logged out state)
+                    console.log('AuthContext: INITIAL_SESSION with no user.');
+                    setProfile(null);
+                    setUserOrganizations([]);
+                    setLoadingProfile(false);
+                }
+                break;
 
-        } else {
-          // User logged out
-          setProfile(null);
-          setUserOrganizations([]); // Clear orgs on logout
-          // Keep local displayName/preferences?
-          // Onboarding is reset in signOut explicitly
-          setLoadingProfile(false); // No user, profile/org loading is done
+            case 'SIGNED_OUT':
+                console.log('AuthContext: SIGNED_OUT event.');
+                // State clearing (user, profile, orgs) is handled by the userIdChanged logic above
+                // and the explicit signOut function clears local storage.
+                setProfile(null);
+                setUserOrganizations([]);
+                setLoadingProfile(false);
+                break;
+
+            case 'TOKEN_REFRESHED':
+                if (newSupabaseUser && userIdChanged) {
+                    // If token refresh somehow resulted in a different user ID (unlikely but possible)
+                    console.log('AuthContext: TOKEN_REFRESHED with user ID change - Reloading profile/orgs for user:', newSupabaseUser.id);
+                    await loadUserProfileAndOrgs(newSupabaseUser.id);
+                } else if (newSupabaseUser) {
+                    // Normal token refresh, user is the same, no need to reload profile/orgs
+                    console.log('AuthContext: TOKEN_REFRESHED, user unchanged, skipping profile reload.');
+                    setLoadingProfile(false); // Ensure loading stops if it was somehow triggered
+                } else {
+                    // Token refresh resulted in no user?
+                    console.log('AuthContext: TOKEN_REFRESHED resulted in no user.');
+                    setProfile(null);
+                    setUserOrganizations([]);
+                    setLoadingProfile(false);
+                }
+                break;
+
+            case 'USER_UPDATED':
+                // User metadata (like email verification status) updated
+                if (newSupabaseUser) {
+                    console.log('AuthContext: USER_UPDATED - potentially reload profile if needed or update user object partially');
+                    // Optionally update the user state if specific metadata is needed immediately
+                    setUser(prevUser => ({ ...prevUser, ...newSupabaseUser }));
+                    // Generally, profile reload isn't needed unless email changed etc.
+                    // Consider reloading profile specifically if email was updated and verified.
+                    setLoadingProfile(false);
+                } else {
+                    setLoadingProfile(false);
+                }
+                break;
+
+            case 'PASSWORD_RECOVERY':
+                console.log('AuthContext: PASSWORD_RECOVERY event.');
+                // Usually handled by UI flow, no immediate context change needed
+                setLoadingProfile(false);
+                break;
+
+            default:
+                console.log(`AuthContext: Unhandled auth event: ${_event}`);
+                setLoadingProfile(false); // Ensure loading stops for unhandled cases
         }
-        setLoadingAuth(false); // Auth state processing finished
+
+        setLoadingAuth(false); // Auth state processing finished for this event
       }
     );
 
@@ -117,13 +171,18 @@ export const AuthProvider = ({ children }) => {
 
   // --- Profile & Organization Loading ---
   const loadUserProfileAndOrgs = async (userId) => {
+    const callTimestamp = Date.now();
+    console.log(`AuthContext: [${callTimestamp}] START loadUserProfileAndOrgs for user ID:`, userId);
+
     if (!userId) {
+      console.log(`AuthContext: [${callTimestamp}] loadUserProfileAndOrgs - No userId provided. Clearing profile/orgs.`);
       setProfile(null);
       setUserOrganizations([]);
       setLoadingProfile(false);
+      console.log(`AuthContext: [${callTimestamp}] END loadUserProfileAndOrgs (no user ID).`);
       return;
     }
-    console.log('AuthContext: Loading profile & orgs for user ID:', userId);
+    console.log(`AuthContext: [${callTimestamp}] loadUserProfileAndOrgs - Setting loadingProfile true for user ID:`, userId);
     setLoadingProfile(true);
     try {
       // Fetch profile and organizations concurrently
@@ -145,24 +204,24 @@ export const AuthProvider = ({ children }) => {
 
       // Handle profile result
       if (profileResult.error && profileResult.status !== 406) {
-        console.error('AuthContext: Error loading user profile:', profileResult.error);
+        console.error(`AuthContext: [${callTimestamp}] Error loading user profile for ID ${userId}:`, profileResult.error);
         setProfile(null);
       } else if (profileResult.data) {
-        console.log('AuthContext: Profile loaded:', profileResult.data);
+        console.log(`AuthContext: [${callTimestamp}] Profile loaded for ID ${userId}:`, profileResult.data);
         setProfile(profileResult.data);
         if (profileResult.data.display_name) setDisplayName(profileResult.data.display_name);
         if (profileResult.data.preferences) setPreferences(profileResult.data.preferences);
         await AsyncStorage.setItem('userDisplayName', profileResult.data.display_name || '');
         await AsyncStorage.setItem('userPreferences', JSON.stringify(profileResult.data.preferences || []));
       } else {
-        console.log('AuthContext: No profile found for user.');
+        console.log(`AuthContext: [${callTimestamp}] No profile found for user ID ${userId}.`);
         setProfile(null);
       }
 
       // Handle organizations result
       if (orgsResult.error) {
-        console.error('AuthContext: Error loading user organizations:', JSON.stringify(orgsResult.error, null, 2));
-        setUserOrganizations([]);
+        console.error(`AuthContext: [${callTimestamp}] Error loading user organizations for ID ${userId}:`, JSON.stringify(orgsResult.error, null, 2));
+        setUserOrganizations([]); // Clear on error
       } else {
         const orgData = orgsResult.data || [];
         const formattedOrgs = orgData.map(org => ({
@@ -170,16 +229,17 @@ export const AuthProvider = ({ children }) => {
             name: org.name,
             role: org.organization_members[0]?.role || 'member'
         }));
-        console.log('AuthContext: User organizations loaded (revised query):', formattedOrgs);
+        console.log(`AuthContext: [${callTimestamp}] User organizations loaded successfully for ID ${userId}:`, formattedOrgs);
         setUserOrganizations(formattedOrgs);
       }
 
     } catch (error) {
-      console.error("AuthContext: Unexpected error in loadUserProfileAndOrgs:", error);
+      console.error(`AuthContext: [${callTimestamp}] Unexpected error in loadUserProfileAndOrgs for ID ${userId}:`, error);
       setProfile(null);
-      setUserOrganizations([]);
+      setUserOrganizations([]); // Clear on error
     } finally {
       setLoadingProfile(false);
+      console.log(`AuthContext: [${callTimestamp}] END loadUserProfileAndOrgs for ID ${userId}. loadingProfile set to false.`);
     }
   };
 
@@ -347,7 +407,14 @@ export const AuthProvider = ({ children }) => {
       }
 
       console.log('AuthContext: SignIn successful, user:', data.user.id);
+
+      // Explicitly set onboarding complete on successful sign-in
+      console.log('AuthContext: Explicitly setting onboarding complete status after sign-in.');
+      setHasCompletedOnboarding(true); // <-- Ensure state is set
+      await AsyncStorage.setItem('hasCompletedOnboarding', 'true'); // <-- Ensure storage is set
+
       // onAuthStateChange listener handles loading profile & orgs.
+      // The listener will still run, but this ensures the state is true beforehand.
       return { success: true, data: { user: data.user } };
 
     } catch (error) {
@@ -555,44 +622,42 @@ export const AuthProvider = ({ children }) => {
 
   // --- Organization Actions --- 
   const createOrganization = async (name) => {
-      if (!user) return { success: false, error: { message: 'Nicht angemeldet.' } }; // Still check context user for initial guard
+      if (!user) return { success: false, error: { message: 'Nicht angemeldet.' } };
       if (!name || name.trim() === '') {
           return { success: false, error: { message: 'Organisationsname benötigt.' } };
       }
       setLoading(true);
+      let newOrg = null; // Variable to hold the new org data
       try {
-          // Explicitly get the current authenticated user from Supabase NOW
-          const { data: { user: currentUser }, error: userError } = await supabase.auth.getUser();
+          // Call the RPC function instead of direct insert
+          console.log(`AuthContext: Calling RPC create_new_organization for name: ${name.trim()}`);
+          const { data: rpcData, error: rpcError } = await supabase.rpc(
+              'create_new_organization',
+              { org_name: name.trim() } // Pass arguments as an object
+          );
 
-          if (userError || !currentUser) {
-              console.error("AuthContext: Error fetching current user before creating org:", userError);
-              return { success: false, error: { message: 'Benutzer konnte nicht bestätigt werden. Bitte erneut anmelden.' } };
+          if (rpcError) {
+              console.error("AuthContext: Error calling create_new_organization RPC:", rpcError);
+              return { success: false, error: { message: rpcError.message || 'Fehler beim Erstellen über RPC.' } };
           }
 
-          // Use the ID from the freshly fetched currentUser
-          const { data: newOrg, error: insertError } = await supabase
-              .from('organizations')
-              .insert({ name: name.trim(), admin_id: currentUser.id }) // Use currentUser.id
-              .select('id, name') // Select the needed fields from the result
-              .single(); // Expect a single row back
-
-          if (insertError) {
-              console.error("AuthContext: Error inserting organization:", insertError);
-              // Log the IDs for debugging if the error persists
-              console.error(`Debug Info - Context User ID: ${user?.id}, CurrentUser ID: ${currentUser?.id}`);
-              return { success: false, error: { message: insertError.message || 'Fehler beim Erstellen.' } };
+          if (!rpcData || rpcData.length === 0) {
+              console.error("AuthContext: create_new_organization RPC returned no data.");
+              return { success: false, error: { message: 'RPC zur Erstellung fehlgeschlagen.' } };
           }
 
-          // Trigger handle_new_organization adds the creator as admin member automatically
-          console.log('AuthContext: Organization created:', newOrg);
+          newOrg = rpcData[0]; // Get the newly created org data
+          console.log('AuthContext: Organization created via RPC:', newOrg);
 
-          // Refetch user organizations to update the context state using the confirmed currentUser ID
-          await loadUserProfileAndOrgs(currentUser.id);
+          // Refetch user organizations to update the context state
+          console.log('AuthContext: Refetching user profile and orgs after creation...');
+          await loadUserProfileAndOrgs(user.id);
+          console.log('AuthContext: User profile and orgs refetched.');
 
           return { success: true, data: newOrg };
 
       } catch (error) {
-          console.error("AuthContext: Unexpected error creating organization:", error);
+          console.error("AuthContext: Unexpected error creating organization via RPC:", error);
           return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
       } finally {
           setLoading(false);
