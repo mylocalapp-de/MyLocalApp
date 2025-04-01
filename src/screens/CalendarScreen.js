@@ -55,6 +55,19 @@ const CalendarScreen = ({ navigation }) => {
     fetchEvents();
   }, []);
 
+  // Refresh events when screen comes into focus
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      // Add a small delay to ensure component is mounted before fetching
+      setTimeout(() => {
+        console.log('CalendarScreen focused - refreshing events');
+        fetchEvents();
+      }, 100);
+    });
+    
+    return unsubscribe;
+  }, [navigation]);
+
   const fetchEvents = async () => {
     try {
       setIsLoading(true);
@@ -94,39 +107,24 @@ const CalendarScreen = ({ navigation }) => {
         });
         setSelectedDates(initialMarkedDates);
         
-        // Pre-select a date range if events are available
-        if (formattedEvents.length > 0) {
-          // Sort events by date to find the earliest one
-          const sortedEvents = [...formattedEvents].sort((a, b) => 
-            new Date(a.date) - new Date(b.date)
-          );
-          
-          const earliestEventDate = sortedEvents[0].date;
-          // Get the date 5 days later for the range
-          const laterDate = new Date(earliestEventDate);
-          laterDate.setDate(laterDate.getDate() + 5);
-          const laterDateString = laterDate.toISOString().split('T')[0];
-          
-          setDateRange({ startDate: earliestEventDate, endDate: laterDateString });
-          createDateRange(earliestEventDate, laterDateString);
-        } else {
-          // If no events, select current date as default
-          const today = new Date().toISOString().split('T')[0];
-          setDateRange({ startDate: today, endDate: '' });
-          
-          // Set marked dates with just today highlighted
-          const newSelectedDates = { ...initialMarkedDates };
-          newSelectedDates[today] = {
-            ...(newSelectedDates[today] || {}),
-            selected: true,
-            startingDay: true,
-            color: '#4285F4',
-            textColor: 'white',
-            dotColor: newSelectedDates[today]?.marked ? 'white' : undefined
-          };
-          
-          setSelectedDates(newSelectedDates);
-        }
+        // Calculate the start and end of the current week (Monday - Sunday)
+        const today = new Date();
+        const currentDayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+        const diffToMonday = currentDayOfWeek === 0 ? -6 : 1 - currentDayOfWeek; // Adjust for Sunday
+        const monday = new Date(today);
+        monday.setDate(today.getDate() + diffToMonday);
+        
+        const sunday = new Date(monday);
+        sunday.setDate(monday.getDate() + 6);
+
+        const mondayString = monday.toISOString().split('T')[0];
+        const sundayString = sunday.toISOString().split('T')[0];
+
+        // Set the initial date range to the current week
+        setDateRange({ startDate: mondayString, endDate: sundayString });
+        
+        // Mark the current week in the calendar
+        createDateRange(mondayString, sundayString);
       }
     } catch (err) {
       console.error('Unexpected error fetching events:', err);
