@@ -912,22 +912,22 @@ const ProfileScreen = () => {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 30 }}>
-      {renderHeader()} 
-      
+      {renderHeader()}
+
       {!hasFullAccount ? (
          renderNoAccountSection()
       ) : (
-         <> 
-            {/* Render Org Management Section if an org is active */} 
+         <>
+            {/* Render Org Management Section if an org is active */}
             {isOrganizationActive && renderOrgManagementSection()}
-            
-            {/* Render Personal Profile Section if NO org is active */} 
+
+            {/* Render Personal Profile Section if NO org is active */}
             {!isOrganizationActive && renderPersonalProfileSection()}
-            
-            {/* Sign Out Button - Always show if logged in */} 
+
+            {/* Sign Out Button - Always show, removed hasFullAccount check */}
              <View style={styles.signOutContainer}>
-               <TouchableOpacity 
-                  style={[styles.button, styles.signOutButton]} 
+               <TouchableOpacity
+                  style={[styles.button, styles.signOutButton]}
                   onPress={handleSignOut}
                 >
                   <Ionicons name="log-out-outline" size={22} style={[styles.settingIcon, styles.signOutIcon]} />
@@ -936,11 +936,11 @@ const ProfileScreen = () => {
             </View>
          </>
       )}
-      
-      {/* Modals */} 
-      {renderCreateAccountModal()} 
-      {renderProfileEditModal()} 
-      {renderAccountSettingsModal()} 
+
+      {/* Modals */}
+      {renderCreateAccountModal()}
+      {renderProfileEditModal()}
+      {renderAccountSettingsModal()}
     </ScrollView>
   );
 };
