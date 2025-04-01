@@ -11,11 +11,17 @@ import {
   Platform,
   FlatList,
   ActivityIndicator,
-  Alert
+  Alert,
+  ActionSheetIOS,
+  Dimensions
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+import { Menu, Provider } from 'react-native-paper';
+
+const { height } = Dimensions.get('window');
+const androidPaddingTop = height * 0.05; // 3% of screen height for better scaling
 
 const ArticleDetailScreen = ({ route, navigation }) => {
   const { articleId } = route.params;
@@ -25,6 +31,8 @@ const ArticleDetailScreen = ({ route, navigation }) => {
   const [article, setArticle] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [authorName, setAuthorName] = useState('Redaktion');
+  const [isAuthor, setIsAuthor] = useState(false);
   
   // State for comments and reactions
   const [comment, setComment] = useState('');
@@ -34,6 +42,14 @@ const ArticleDetailScreen = ({ route, navigation }) => {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [addingReaction, setAddingReaction] = useState(false);
   const [addingComment, setAddingComment] = useState(false);
+  
+  // State for options menu
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  
+  // Show and hide menu for Android
+  const openMenu = () => setMenuVisible(true);
+  const closeMenu = () => setMenuVisible(false);
   
   // Load article, comments, and reactions on component mount
   useEffect(() => {
@@ -46,10 +62,15 @@ const ArticleDetailScreen = ({ route, navigation }) => {
       setLoading(true);
       setError(null);
       
-      // Fetch the article
+      // Fetch the article with author info
       const { data: articleData, error: articleError } = await supabase
         .from('articles')
-        .select('*')
+        .select(`
+          *,
+          app_users:author_id (
+            display_name
+          )
+        `)
         .eq('id', articleId)
         .single();
       
@@ -73,6 +94,16 @@ const ArticleDetailScreen = ({ route, navigation }) => {
         ...articleData,
         date: formattedDate
       });
+      
+      // Set author name
+      if (articleData.app_users && articleData.app_users.display_name) {
+        setAuthorName(articleData.app_users.display_name);
+      }
+      
+      // Check if current user is the author
+      if (user && articleData.author_id === user.id) {
+        setIsAuthor(true);
+      }
       
       // Fetch comments
       fetchComments();
@@ -252,6 +283,78 @@ const ArticleDetailScreen = ({ route, navigation }) => {
     }
   };
   
+  // Handle article deletion
+  const handleDeleteArticle = async () => {
+    if (!user || !isAuthor) {
+      Alert.alert('Fehler', 'Du bist nicht berechtigt, diesen Artikel zu löschen.');
+      return;
+    }
+    
+    Alert.alert(
+      'Artikel löschen',
+      'Möchtest du diesen Artikel wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.',
+      [
+        { text: 'Abbrechen', style: 'cancel' },
+        { 
+          text: 'Löschen', 
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setIsDeleting(true);
+              
+              // Use RPC to bypass RLS policies
+              const { data, error } = await supabase
+                .rpc('delete_article', {
+                  p_article_id: articleId,
+                  p_author_id: user.id
+                });
+              
+              if (error) {
+                console.error('Error deleting article with RPC:', error);
+                
+                // Fallback to direct delete if RPC fails
+                const { error: directError } = await supabase
+                  .from('articles')
+                  .delete()
+                  .eq('id', articleId)
+                  .eq('author_id', user.id);
+                
+                if (directError) {
+                  console.error('Error with direct delete:', directError);
+                  Alert.alert('Fehler', 'Artikel konnte nicht gelöscht werden.');
+                  return;
+                }
+              }
+              
+              Alert.alert(
+                'Erfolg',
+                'Dein Artikel wurde erfolgreich gelöscht.',
+                [{ text: 'OK', onPress: () => navigation.navigate('HomeList') }]
+              );
+            } catch (err) {
+              console.error('Unexpected error deleting article:', err);
+              Alert.alert('Fehler', 'Ein unerwarteter Fehler ist aufgetreten.');
+            } finally {
+              setIsDeleting(false);
+              closeMenu();
+            }
+          }
+        }
+      ]
+    );
+  };
+  
+  // Handle article editing
+  const handleEditArticle = () => {
+    if (!user || !isAuthor) {
+      Alert.alert('Fehler', 'Du bist nicht berechtigt, diesen Artikel zu bearbeiten.');
+      return;
+    }
+    
+    navigation.navigate('EditArticle', { articleId });
+    closeMenu();
+  };
+  
   const emojiOptions = ['👍', '❤️', '😮', '👏', '🤔', '😢'];
   
   const renderReactions = () => {
@@ -308,6 +411,31 @@ const ArticleDetailScreen = ({ route, navigation }) => {
     );
   };
   
+  // Show options menu based on platform
+  const showOptions = () => {
+    if (Platform.OS === 'ios') {
+      // Use ActionSheet on iOS
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Abbrechen', 'Artikel bearbeiten', 'Artikel löschen'],
+          destructiveButtonIndex: 2,
+          cancelButtonIndex: 0,
+          userInterfaceStyle: 'light'
+        },
+        (buttonIndex) => {
+          if (buttonIndex === 1) {
+            handleEditArticle();
+          } else if (buttonIndex === 2) {
+            handleDeleteArticle();
+          }
+        }
+      );
+    } else {
+      // Show Android menu
+      openMenu();
+    }
+  };
+  
   if (loading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
@@ -333,93 +461,139 @@ const ArticleDetailScreen = ({ route, navigation }) => {
   }
   
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color="#4285F4" />
-        </TouchableOpacity>
-        <View style={styles.headerTitle}>
-          <Text style={styles.headerType}>{article.type}</Text>
-        </View>
-      </View>
-      
-      <ScrollView
-        style={styles.content}
-        contentContainerStyle={styles.contentContainer}
-        showsVerticalScrollIndicator={false}
-      >
-        <Text style={styles.title}>{article.title}</Text>
-        <Text style={styles.date}>{article.date}</Text>
-        
-        <Text style={styles.articleContent}>{article.content}</Text>
-        
-        <View style={styles.divider} />
-        
-        {renderReactions()}
-        
-        <View style={styles.actionBar}>
-          <TouchableOpacity 
-            style={styles.actionButton}
-            onPress={() => setShowEmojiPicker(!showEmojiPicker)}
-          >
-            <Ionicons name="happy-outline" size={20} color="#4285F4" />
-            <Text style={styles.actionText}>Reaktion</Text>
+    <Provider>
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+            <Ionicons name="arrow-back" size={24} color="#4285F4" />
           </TouchableOpacity>
-          
-          {renderEmojiPicker()}
-        </View>
-        
-        <View style={styles.commentsSection}>
-          <Text style={styles.commentsHeader}>Kommentare ({comments.length})</Text>
-          
-          {loadingComments ? (
-            <ActivityIndicator size="small" color="#4285F4" style={styles.commentsLoading} />
-          ) : (
-            <FlatList
-              data={comments}
-              renderItem={renderComment}
-              keyExtractor={item => item.id.toString()}
-              scrollEnabled={false}
-              ListEmptyComponent={
-                <Text style={styles.emptyCommentsText}>
-                  Noch keine Kommentare. Sei der Erste, der einen Kommentar hinterlässt!
-                </Text>
+          <View style={styles.headerTitle}>
+            <Text style={styles.headerType}>{article.type}</Text>
+          </View>
+          {isAuthor && (
+            <Menu
+              visible={menuVisible}
+              onDismiss={closeMenu}
+              anchor={
+                <TouchableOpacity 
+                  style={styles.optionsButton}
+                  onPress={showOptions}
+                >
+                  <Ionicons name="ellipsis-vertical" size={20} color="#666" />
+                </TouchableOpacity>
               }
-            />
+            >
+              <Menu.Item 
+                onPress={() => {
+                  closeMenu();
+                  handleEditArticle();
+                }}
+                icon="pencil"
+                title="Artikel bearbeiten"
+              />
+              <Menu.Item 
+                onPress={() => {
+                  closeMenu();
+                  handleDeleteArticle();
+                }}
+                icon="delete"
+                title="Artikel löschen"
+                titleStyle={{ color: '#ff3b30' }}
+              />
+            </Menu>
           )}
         </View>
-      </ScrollView>
-      
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 90}
-        style={styles.inputContainer}
-      >
-        <View style={styles.inputRow}>
-          <TextInput
-            style={styles.input}
-            placeholder="Schreibe einen Kommentar..."
-            value={comment}
-            onChangeText={setComment}
-            multiline
-          />
-          <TouchableOpacity 
-            style={[
-              styles.sendButton, 
-              (comment.trim() === '' || addingComment) && styles.sendButtonDisabled
-            ]} 
-            onPress={addComment}
-            disabled={comment.trim() === '' || addingComment}
-          >
-            {addingComment ? (
-              <ActivityIndicator size="small" color="#fff" />
+        
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={styles.contentContainer}
+          showsVerticalScrollIndicator={false}
+        >
+          <Text style={styles.title}>{article.title}</Text>
+          <View style={styles.articleMeta}>
+            <Text style={styles.date}>{article.date}</Text>
+            <Text style={authorName === 'Redaktion' ? styles.redaktionAuthor : styles.author}>
+              {authorName}
+            </Text>
+          </View>
+          
+          <Text style={styles.articleContent}>{article.content}</Text>
+          
+          <View style={styles.divider} />
+          
+          {renderReactions()}
+          
+          <View style={styles.actionBar}>
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={() => setShowEmojiPicker(!showEmojiPicker)}
+            >
+              <Ionicons name="happy-outline" size={20} color="#4285F4" />
+              <Text style={styles.actionText}>Reaktion</Text>
+            </TouchableOpacity>
+            
+            {renderEmojiPicker()}
+          </View>
+          
+          <View style={styles.commentsSection}>
+            <Text style={styles.commentsHeader}>Kommentare ({comments.length})</Text>
+            
+            {loadingComments ? (
+              <ActivityIndicator size="small" color="#4285F4" style={styles.commentsLoading} />
             ) : (
-              <Ionicons name="send" size={20} color={comment.trim() === '' ? "#ccc" : "#fff"} />
+              <FlatList
+                data={comments}
+                renderItem={renderComment}
+                keyExtractor={item => item.id.toString()}
+                scrollEnabled={false}
+                ListEmptyComponent={
+                  <Text style={styles.emptyCommentsText}>
+                    Noch keine Kommentare. Sei der Erste, der einen Kommentar hinterlässt!
+                  </Text>
+                }
+              />
             )}
-          </TouchableOpacity>
-        </View>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+          </View>
+        </ScrollView>
+        
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 90}
+          style={styles.inputContainer}
+        >
+          <View style={styles.inputRow}>
+            <TextInput
+              style={styles.input}
+              placeholder="Schreibe einen Kommentar..."
+              value={comment}
+              onChangeText={setComment}
+              multiline
+            />
+            <TouchableOpacity 
+              style={[
+                styles.sendButton, 
+                (comment.trim() === '' || addingComment) && styles.sendButtonDisabled
+              ]} 
+              onPress={addComment}
+              disabled={comment.trim() === '' || addingComment}
+            >
+              {addingComment ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Ionicons name="send" size={20} color={comment.trim() === '' ? "#ccc" : "#fff"} />
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+        
+        {isDeleting && (
+          <View style={styles.deleteOverlay}>
+            <ActivityIndicator size="large" color="#fff" />
+            <Text style={styles.deleteText}>Artikel wird gelöscht...</Text>
+          </View>
+        )}
+      </SafeAreaView>
+    </Provider>
   );
 };
 
@@ -459,6 +633,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     padding: 15,
+    paddingTop: Platform.OS === 'android' ? androidPaddingTop : 10,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
@@ -475,6 +650,9 @@ const styles = StyleSheet.create({
     color: '#4285F4',
     fontWeight: 'bold',
   },
+  optionsButton: {
+    padding: 8,
+  },
   content: {
     flex: 1,
   },
@@ -488,10 +666,25 @@ const styles = StyleSheet.create({
     color: '#333',
     marginBottom: 8,
   },
+  articleMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 15,
+  },
   date: {
     fontSize: 12,
     color: '#888',
-    marginBottom: 15,
+  },
+  author: {
+    fontSize: 12,
+    color: '#4285F4',
+    fontWeight: 'bold',
+  },
+  redaktionAuthor: {
+    fontSize: 12,
+    color: '#888',
+    fontStyle: 'italic',
   },
   articleContent: {
     fontSize: 16,
@@ -629,6 +822,26 @@ const styles = StyleSheet.create({
   },
   sendButtonDisabled: {
     backgroundColor: '#f1f1f1',
+  },
+  deleteOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  deleteText: {
+    color: '#fff',
+    marginTop: 15,
+    fontSize: 16,
+  },
+  androidMenu: {
+    backgroundColor: '#fff',
+    elevation: 4,
+    borderRadius: 4,
   },
 });
 

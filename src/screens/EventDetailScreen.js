@@ -11,11 +11,18 @@ import {
   Platform,
   FlatList,
   ActivityIndicator,
-  Alert
+  Alert,
+  Dimensions,
+  Image,
+  ActionSheetIOS
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+import { Menu, Provider } from 'react-native-paper';
+
+const { height } = Dimensions.get('window');
+const androidPaddingTop = height * 0.05; // 3% of screen height for better scaling
 
 const EventDetailScreen = ({ route, navigation }) => {
   const { eventId } = route.params;
@@ -25,6 +32,8 @@ const EventDetailScreen = ({ route, navigation }) => {
   const [event, setEvent] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [organizerName, setOrganizerName] = useState('Organisator');
+  const [isOrganizer, setIsOrganizer] = useState(false);
   
   // State for comments and reactions
   const [comment, setComment] = useState('');
@@ -36,15 +45,26 @@ const EventDetailScreen = ({ route, navigation }) => {
   const [addingComment, setAddingComment] = useState(false);
   
   // State for attendance
-  const [attendees, setAttendees] = useState([]);
-  const [loadingAttendees, setLoadingAttendees] = useState(false);
-  const [attendanceStatus, setAttendanceStatus] = useState(null); // 'attending', 'maybe', 'declined', or null
-  const [changingAttendance, setChangingAttendance] = useState(false);
+  const [attendees, setAttendees] = useState({ attending: 0, maybe: 0, declined: 0 });
+  const [userStatus, setUserStatus] = useState(null); // 'attending', 'maybe', 'declined', or null
+  const [attendeesList, setAttendeesList] = useState([]); // For displaying names/avatars
+  const [loadingAttendeesList, setLoadingAttendeesList] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+  
+  // State for options menu
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  
+  // Show and hide menu for Android
+  const openMenu = () => setMenuVisible(true);
+  const closeMenu = () => setMenuVisible(false);
   
   // Load event, comments, reactions, and attendance on component mount
   useEffect(() => {
     fetchEventData();
-  }, [eventId]);
+    fetchUserAttendanceStatus();
+    fetchAttendeesList();
+  }, [eventId, user]);
 
   // Fetch the full event data from Supabase
   const fetchEventData = async () => {
@@ -54,8 +74,13 @@ const EventDetailScreen = ({ route, navigation }) => {
       
       // Fetch the event
       const { data: eventData, error: eventError } = await supabase
-        .from('event_listings')
-        .select('*')
+        .from('events')
+        .select(`
+          *,
+          app_users:organizer_id (
+            display_name
+          )
+        `)
         .eq('id', eventId)
         .single();
       
@@ -73,14 +98,24 @@ const EventDetailScreen = ({ route, navigation }) => {
       // Set the event
       setEvent(eventData);
       
+      // Set organizer name
+      if (eventData.app_users && eventData.app_users.display_name) {
+        setOrganizerName(eventData.app_users.display_name);
+      }
+      
+      // Check if current user is the organizer
+      if (user && eventData.organizer_id === user.id) {
+        setIsOrganizer(true);
+      }
+      
       // Fetch comments
       fetchComments();
       
       // Fetch reactions
       fetchReactions();
       
-      // Fetch attendees and check user's attendance status
-      fetchAttendees();
+      // Fetch attendee counts
+      fetchAttendeeCounts();
       
     } catch (err) {
       console.error('Unexpected error fetching event:', err);
@@ -131,144 +166,195 @@ const EventDetailScreen = ({ route, navigation }) => {
     }
   };
   
-  // Fetch attendees for the event and check user's attendance status
-  const fetchAttendees = async () => {
+  // Fetch attendee counts
+  const fetchAttendeeCounts = async () => {
     try {
-      setLoadingAttendees(true);
-      
-      // Get all attendees for this event
       const { data, error } = await supabase
-        .from('event_attendees_with_users')
-        .select('*')
-        .eq('event_id', eventId)
-        .order('created_at', { ascending: true });
-      
+        .rpc('get_event_attendees', { event_uuid: eventId });
+
       if (error) {
-        console.error('Error fetching attendees:', error);
+        console.error('Error fetching attendee counts:', error);
         return;
       }
-      
-      setAttendees(data || []);
-      
-      // Check if user is already attending
-      if (user) {
-        const userAttendance = data?.find(attendee => attendee.user_id === user.id);
-        if (userAttendance) {
-          setAttendanceStatus(userAttendance.status);
-        } else {
-          setAttendanceStatus(null);
-        }
-      }
+      setAttendees(data || { attending: 0, maybe: 0, declined: 0 });
     } catch (err) {
-      console.error('Unexpected error fetching attendees:', err);
-    } finally {
-      setLoadingAttendees(false);
+      console.error('Unexpected error fetching counts:', err);
     }
   };
   
-  // Add or update attendance status
-  const updateAttendance = async (status) => {
+  // Fetch the current user's attendance status
+  const fetchUserAttendanceStatus = async () => {
     if (!user) {
-      Alert.alert(
-        'Permanenten Account erstellen',
-        'Bitte erstelle einen permanenten Account, um an diesem Event teilzunehmen.',
-        [
-          { text: 'OK', style: 'cancel' },
-          { 
-            text: 'Zum Profil', 
-            onPress: () => navigation.navigate('Profile')
-          }
-        ]
-      );
+      setUserStatus(null);
       return;
     }
-    
     try {
-      setChangingAttendance(true);
-      
-      let operation;
-      
-      // Check if user already has an attendance record
-      if (attendanceStatus) {
-        // User is already in the attendance list, update their status
-        if (attendanceStatus === status) {
-          // If clicking the same status, remove the attendance record
-          const { error: deleteError } = await supabase
-            .from('event_attendees')
-            .delete()
-            .eq('event_id', eventId)
-            .eq('user_id', user.id);
-          
-          if (deleteError) {
-            console.error('Error removing attendance:', deleteError);
-            Alert.alert('Fehler', 'Status konnte nicht aktualisiert werden.');
-            return;
-          }
-          
-          setAttendanceStatus(null);
-          operation = 'removed';
-        } else {
-          // Update to new status
-          const { error: updateError } = await supabase
-            .from('event_attendees')
-            .update({ status })
-            .eq('event_id', eventId)
-            .eq('user_id', user.id);
-          
-          if (updateError) {
-            console.error('Error updating attendance:', updateError);
-            Alert.alert('Fehler', 'Status konnte nicht aktualisiert werden.');
-            return;
-          }
-          
-          setAttendanceStatus(status);
-          operation = 'updated';
-        }
+      const { data, error } = await supabase
+        .from('event_attendees')
+        .select('status')
+        .eq('event_id', eventId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (error) {
+        console.error('Error fetching user status:', error);
       } else {
-        // Add new attendance record
-        const { error: insertError } = await supabase
-          .from('event_attendees')
-          .insert({
-            event_id: eventId,
-            user_id: user.id,
-            status
-          });
-        
-        if (insertError) {
-          console.error('Error adding attendance:', insertError);
-          Alert.alert('Fehler', 'Teilnahme konnte nicht gespeichert werden.');
-          return;
-        }
-        
-        setAttendanceStatus(status);
-        operation = 'added';
+        setUserStatus(data?.status || null);
       }
-      
-      // Refresh attendees list
-      fetchAttendees();
-      
-      // Also refresh the event to update attendee count
-      fetchEventData();
-      
-      // Show success message
-      const messages = {
-        attending: 'Du nimmst an diesem Event teil!',
-        maybe: 'Du hast Interesse an diesem Event bekundet.',
-        declined: 'Du hast abgesagt.',
-        removed: 'Deine Teilnahme wurde zurückgezogen.'
-      };
-      
-      const message = operation === 'removed' 
-        ? messages.removed 
-        : messages[status];
-      
-      Alert.alert('Status aktualisiert', message);
-      
     } catch (err) {
-      console.error('Unexpected error updating attendance:', err);
-      Alert.alert('Fehler', 'Ein unerwarteter Fehler ist aufgetreten.');
+      console.error('Unexpected error fetching user status:', err);
+    }
+  };
+  
+  // Fetch the list of attendees (names and avatars)
+  const fetchAttendeesList = async () => {
+    try {
+      setLoadingAttendeesList(true);
+      const { data, error } = await supabase
+        .from('event_attendees_with_users') // Use the view with user info
+        .select('user_id, user_name, status') // Removed avatar_url from select
+        .eq('event_id', eventId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching attendees list:', error);
+      } else {
+        setAttendeesList(data || []);
+      }
+    } catch (err) {
+      console.error('Unexpected error fetching attendees list:', err);
     } finally {
-      setChangingAttendance(false);
+      setLoadingAttendeesList(false);
+    }
+  };
+  
+  // Handle user changing their attendance status
+  const handleSetAttendance = async (status) => {
+    if (!user) {
+      Alert.alert('Anmeldung erforderlich', 'Bitte melde dich an, um teilzunehmen.');
+      return;
+    }
+    if (updatingStatus) return;
+
+    try {
+      setUpdatingStatus(true);
+      const currentStatus = userStatus;
+      const newStatus = currentStatus === status ? null : status; // Toggle off if same status clicked
+
+      // Update UI immediately for responsiveness
+      setUserStatus(newStatus);
+
+      if (newStatus === null && currentStatus) {
+        // Delete the attendance record
+        const { error } = await supabase
+          .from('event_attendees')
+          .delete()
+          .eq('event_id', eventId)
+          .eq('user_id', user.id);
+        if (error) throw error;
+      } else if (newStatus) {
+        // Upsert the attendance record (insert or update)
+        const { error } = await supabase
+          .from('event_attendees')
+          .upsert({ event_id: eventId, user_id: user.id, status: newStatus }, { onConflict: 'event_id, user_id' });
+        if (error) throw error;
+      }
+
+      // Refresh counts and attendee list after successful update
+      fetchAttendeeCounts();
+      fetchAttendeesList();
+
+    } catch (error) {
+      console.error('Error updating attendance:', error);
+      Alert.alert('Fehler', 'Teilnahmestatus konnte nicht aktualisiert werden.');
+      // Revert UI on error
+      setUserStatus(userStatus);
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
+  
+  // Handle event deletion
+  const handleDeleteEvent = async () => {
+    if (!user || !isOrganizer) {
+      Alert.alert('Fehler', 'Du bist nicht berechtigt, dieses Event zu löschen.');
+      return;
+    }
+
+    Alert.alert(
+      'Event löschen',
+      'Möchtest du dieses Event wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.',
+      [
+        { text: 'Abbrechen', style: 'cancel' },
+        {
+          text: 'Löschen',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setIsDeleting(true);
+
+              // Use RPC to delete the event, passing the organizer ID
+              const { data, error } = await supabase
+                .rpc('delete_event', {
+                  p_event_id: eventId,
+                  p_organizer_id: user.id
+                });
+
+              if (error || data === false) {
+                console.error('Error deleting event with RPC:', error);
+                Alert.alert('Fehler', 'Event konnte nicht gelöscht werden.');
+                return;
+              }
+
+              Alert.alert(
+                'Erfolg',
+                'Dein Event wurde erfolgreich gelöscht.',
+                [{ text: 'OK', onPress: () => navigation.navigate('CalendarList') }]
+              );
+            } catch (err) {
+              console.error('Unexpected error deleting event:', err);
+              Alert.alert('Fehler', 'Ein unerwarteter Fehler ist aufgetreten.');
+            } finally {
+              setIsDeleting(false);
+              closeMenu();
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  // Handle event editing
+  const handleEditEvent = () => {
+    if (!user || !isOrganizer) {
+      Alert.alert('Fehler', 'Du bist nicht berechtigt, dieses Event zu bearbeiten.');
+      return;
+    }
+
+    navigation.navigate('EditEvent', { eventId });
+    closeMenu();
+  };
+
+  // Show options menu based on platform
+  const showOptions = () => {
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Abbrechen', 'Event bearbeiten', 'Event löschen'],
+          destructiveButtonIndex: 2,
+          cancelButtonIndex: 0,
+          userInterfaceStyle: 'light'
+        },
+        (buttonIndex) => {
+          if (buttonIndex === 1) {
+            handleEditEvent();
+          } else if (buttonIndex === 2) {
+            handleDeleteEvent();
+          }
+        }
+      );
+    } else {
+      openMenu(); // Show Android menu
     }
   };
   
@@ -439,120 +525,18 @@ const EventDetailScreen = ({ route, navigation }) => {
     );
   };
   
-  const renderAttendanceButtons = () => {
-    const isAttending = attendanceStatus === 'attending';
-    const isMaybe = attendanceStatus === 'maybe';
-    const isDeclined = attendanceStatus === 'declined';
-    
-    return (
-      <View style={styles.attendanceButtonsContainer}>
-        <TouchableOpacity 
-          style={[
-            styles.attendanceButton, 
-            isAttending && styles.activeAttendanceButton,
-            changingAttendance && styles.disabledButton
-          ]}
-          onPress={() => updateAttendance('attending')}
-          disabled={changingAttendance}
-        >
-          <Ionicons 
-            name={isAttending ? "checkmark-circle" : "checkmark-circle-outline"} 
-            size={20} 
-            color={isAttending ? "#fff" : "#4285F4"} 
-          />
-          <Text style={[
-            styles.attendanceButtonText,
-            isAttending && styles.activeAttendanceButtonText
-          ]}>Teilnehmen</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={[
-            styles.attendanceButton, 
-            isMaybe && styles.activeAttendanceButton,
-            changingAttendance && styles.disabledButton
-          ]}
-          onPress={() => updateAttendance('maybe')}
-          disabled={changingAttendance}
-        >
-          <Ionicons 
-            name={isMaybe ? "help-circle" : "help-circle-outline"} 
-            size={20} 
-            color={isMaybe ? "#fff" : "#4285F4"} 
-          />
-          <Text style={[
-            styles.attendanceButtonText,
-            isMaybe && styles.activeAttendanceButtonText
-          ]}>Vielleicht</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={[
-            styles.attendanceButton, 
-            isDeclined && styles.activeDeclinedButton,
-            changingAttendance && styles.disabledButton
-          ]}
-          onPress={() => updateAttendance('declined')}
-          disabled={changingAttendance}
-        >
-          <Ionicons 
-            name={isDeclined ? "close-circle" : "close-circle-outline"} 
-            size={20} 
-            color={isDeclined ? "#fff" : "#4285F4"} 
-          />
-          <Text style={[
-            styles.attendanceButtonText,
-            isDeclined && styles.activeAttendanceButtonText
-          ]}>Absagen</Text>
-        </TouchableOpacity>
+  const renderAttendeeItem = ({ item }) => (
+    <View style={styles.attendeeItem}>
+      <Image
+        source={require('../../assets/avatar_placeholder.png')} // Always use placeholder
+        style={styles.attendeeAvatar}
+      />
+      <Text style={styles.attendeeName}>{item.user_name}</Text>
+      <View style={[styles.statusBadge, styles[`statusBadge_${item.status}`]]}>
+         <Text style={styles.statusBadgeText}>{item.status === 'attending' ? 'Nimmt teil' : item.status === 'maybe' ? 'Vielleicht' : 'Abgelehnt'}</Text>
       </View>
-    );
-  };
-  
-  const renderAttendeeSummary = () => {
-    if (!event || !event.attendees) return null;
-    
-    const attending = event.attendees.attending || 0;
-    const maybe = event.attendees.maybe || 0;
-    const declined = event.attendees.declined || 0;
-    
-    return (
-      <View style={styles.attendeeSummaryContainer}>
-        <Text style={styles.attendeeSummaryTitle}>Teilnehmer</Text>
-        <View style={styles.attendeeSummaryRow}>
-          <View style={styles.attendeeSummaryItem}>
-            <Ionicons name="checkmark-circle" size={18} color="#34A853" />
-            <Text style={styles.attendeeSummaryCount}>{attending}</Text>
-            <Text style={styles.attendeeSummaryLabel}>Zusagen</Text>
-          </View>
-          
-          <View style={styles.attendeeSummaryItem}>
-            <Ionicons name="help-circle" size={18} color="#FBBC05" />
-            <Text style={styles.attendeeSummaryCount}>{maybe}</Text>
-            <Text style={styles.attendeeSummaryLabel}>Vielleicht</Text>
-          </View>
-          
-          <View style={styles.attendeeSummaryItem}>
-            <Ionicons name="close-circle" size={18} color="#EA4335" />
-            <Text style={styles.attendeeSummaryCount}>{declined}</Text>
-            <Text style={styles.attendeeSummaryLabel}>Absagen</Text>
-          </View>
-        </View>
-      </View>
-    );
-  };
-  
-  const renderComment = ({ item }) => {
-    return (
-      <View style={styles.commentItem}>
-        <View style={styles.commentHeader}>
-          <Text style={styles.commentUser}>{item.user_name}</Text>
-          <Text style={styles.commentTime}>{item.time}</Text>
-        </View>
-        <Text style={styles.commentText}>{item.text}</Text>
-      </View>
-    );
-  };
+    </View>
+  );
   
   if (loading) {
     return (
@@ -569,7 +553,7 @@ const EventDetailScreen = ({ route, navigation }) => {
         <Ionicons name="alert-circle-outline" size={40} color="#ff3b30" />
         <Text style={styles.errorText}>{error}</Text>
         <TouchableOpacity 
-          style={styles.backButton}
+          style={styles.backButtonTextOnly} // Use text-only style for back button here
           onPress={() => navigation.goBack()}
         >
           <Text style={styles.backButtonText}>Zurück</Text>
@@ -579,111 +563,196 @@ const EventDetailScreen = ({ route, navigation }) => {
   }
   
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color="#4285F4" />
-        </TouchableOpacity>
-        <View style={styles.headerTitle}>
-          <Text style={styles.headerType}>{event.category}</Text>
-        </View>
-      </View>
-      
-      <ScrollView
-        style={styles.content}
-        contentContainerStyle={styles.contentContainer}
-        showsVerticalScrollIndicator={false}
-      >
-        <Text style={styles.title}>{event.title}</Text>
-        <View style={styles.eventMeta}>
-          <View style={styles.eventMetaItem}>
-            <Ionicons name="calendar-outline" size={16} color="#666" />
-            <Text style={styles.eventMetaText}>{event.formatted_date}</Text>
-          </View>
-          <View style={styles.eventMetaItem}>
-            <Ionicons name="time-outline" size={16} color="#666" />
-            <Text style={styles.eventMetaText}>{event.time}</Text>
-          </View>
-          <View style={styles.eventMetaItem}>
-            <Ionicons name="location-outline" size={16} color="#666" />
-            <Text style={styles.eventMetaText}>{event.location}</Text>
-          </View>
-        </View>
-        
-        {renderAttendanceButtons()}
-        
-        {renderAttendeeSummary()}
-        
-        <Text style={styles.descriptionTitle}>Beschreibung</Text>
-        <Text style={styles.eventDescription}>{event.description}</Text>
-        
-        <View style={styles.divider} />
-        
-        {renderReactions()}
-        
-        <View style={styles.actionBar}>
-          <TouchableOpacity 
-            style={styles.actionButton}
-            onPress={() => setShowEmojiPicker(!showEmojiPicker)}
-          >
-            <Ionicons name="happy-outline" size={20} color="#4285F4" />
-            <Text style={styles.actionText}>Reaktion</Text>
+    <Provider>
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+            <Ionicons name="arrow-back" size={24} color="#4285F4" />
           </TouchableOpacity>
-          
-          {renderEmojiPicker()}
-        </View>
-        
-        <View style={styles.commentsSection}>
-          <Text style={styles.commentsHeader}>Kommentare ({comments.length})</Text>
-          
-          {loadingComments ? (
-            <ActivityIndicator size="small" color="#4285F4" style={styles.commentsLoading} />
-          ) : (
-            <FlatList
-              data={comments}
-              renderItem={renderComment}
-              keyExtractor={item => item.id.toString()}
-              scrollEnabled={false}
-              ListEmptyComponent={
-                <Text style={styles.emptyCommentsText}>
-                  Noch keine Kommentare. Sei der Erste, der einen Kommentar hinterlässt!
-                </Text>
+          <View style={styles.headerTitleContainer}>
+             <Text style={styles.headerTitle}>{event.title}</Text>
+          </View>
+          {isOrganizer && (
+            <Menu
+              visible={menuVisible}
+              onDismiss={closeMenu}
+              anchor={
+                <TouchableOpacity
+                  style={styles.optionsButton}
+                  onPress={showOptions}
+                >
+                  <Ionicons name="ellipsis-vertical" size={20} color="#666" />
+                </TouchableOpacity>
               }
-            />
+            >
+              <Menu.Item
+                onPress={handleEditEvent}
+                icon="pencil"
+                title="Event bearbeiten"
+              />
+              <Menu.Item
+                onPress={handleDeleteEvent}
+                icon="delete"
+                title="Event löschen"
+                titleStyle={{ color: '#ff3b30' }}
+              />
+            </Menu>
           )}
         </View>
-      </ScrollView>
-      
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 90}
-        style={styles.inputContainer}
-      >
-        <View style={styles.inputRow}>
-          <TextInput
-            style={styles.input}
-            placeholder="Schreibe einen Kommentar..."
-            value={comment}
-            onChangeText={setComment}
-            multiline
-          />
-          <TouchableOpacity 
-            style={[
-              styles.sendButton, 
-              (comment.trim() === '' || addingComment) && styles.sendButtonDisabled
-            ]} 
-            onPress={addComment}
-            disabled={comment.trim() === '' || addingComment}
-          >
-            {addingComment ? (
-              <ActivityIndicator size="small" color="#fff" />
+        
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={styles.contentContainer}
+          showsVerticalScrollIndicator={false}
+        >
+          <Text style={styles.title}>{event.title}</Text>
+          <View style={styles.eventMeta}>
+            <View style={styles.eventMetaItem}>
+              <Ionicons name="calendar-outline" size={16} color="#666" />
+              <Text style={styles.eventMetaText}>{event.formatted_date}</Text>
+            </View>
+            <View style={styles.eventMetaItem}>
+              <Ionicons name="time-outline" size={16} color="#666" />
+              <Text style={styles.eventMetaText}>{event.time}</Text>
+            </View>
+            <View style={styles.eventMetaItem}>
+              <Ionicons name="location-outline" size={16} color="#666" />
+              <Text style={styles.eventMetaText}>{event.location}</Text>
+            </View>
+          </View>
+          
+          <Text style={styles.descriptionTitle}>Beschreibung</Text>
+          <Text style={styles.eventDescription}>{event.description}</Text>
+          
+          <View style={styles.divider} />
+          
+          <Text style={styles.sectionTitle}>Nimmst du teil?</Text>
+          <View style={styles.attendanceButtonsContainer}>
+            <TouchableOpacity
+              style={[styles.attendanceButton, userStatus === 'attending' && styles.attendingSelected]}
+              onPress={() => handleSetAttendance('attending')}
+              disabled={updatingStatus}
+            >
+              <Ionicons name={userStatus === 'attending' ? "checkmark-circle" : "checkmark-circle-outline"} size={20} color={userStatus === 'attending' ? '#fff' : '#4CAF50'} />
+              <Text style={[styles.attendanceButtonText, userStatus === 'attending' && styles.selectedText]}>Ja ({attendees.attending || 0})</Text>
+              {updatingStatus && userStatus === 'attending' && <ActivityIndicator size="small" color="#fff" style={styles.buttonLoader}/>}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.attendanceButton, userStatus === 'maybe' && styles.maybeSelected]}
+              onPress={() => handleSetAttendance('maybe')}
+              disabled={updatingStatus}
+            >
+              <Ionicons name={userStatus === 'maybe' ? "help-circle" : "help-circle-outline"} size={20} color={userStatus === 'maybe' ? '#fff' : '#FFC107'} />
+              <Text style={[styles.attendanceButtonText, userStatus === 'maybe' && styles.selectedText]}>Vielleicht ({attendees.maybe || 0})</Text>
+               {updatingStatus && userStatus === 'maybe' && <ActivityIndicator size="small" color="#fff" style={styles.buttonLoader}/>}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.attendanceButton, userStatus === 'declined' && styles.declinedSelected]}
+              onPress={() => handleSetAttendance('declined')}
+               disabled={updatingStatus}
+            >
+              <Ionicons name={userStatus === 'declined' ? "close-circle" : "close-circle-outline"} size={20} color={userStatus === 'declined' ? '#fff' : '#F44336'} />
+              <Text style={[styles.attendanceButtonText, userStatus === 'declined' && styles.selectedText]}>Nein ({attendees.declined || 0})</Text>
+              {updatingStatus && userStatus === 'declined' && <ActivityIndicator size="small" color="#fff" style={styles.buttonLoader}/>}
+            </TouchableOpacity>
+          </View>
+          
+          <View style={styles.divider} />
+          
+          {renderReactions()}
+          
+          <View style={styles.actionBar}>
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={() => setShowEmojiPicker(!showEmojiPicker)}
+            >
+              <Ionicons name="happy-outline" size={20} color="#4285F4" />
+              <Text style={styles.actionText}>Reaktion</Text>
+            </TouchableOpacity>
+            
+            {renderEmojiPicker()}
+          </View>
+          
+          <View style={styles.commentsSection}>
+            <Text style={styles.commentsHeader}>Kommentare ({comments.length})</Text>
+            
+            {loadingComments ? (
+              <ActivityIndicator size="small" color="#4285F4" style={styles.commentsLoading} />
             ) : (
-              <Ionicons name="send" size={20} color={comment.trim() === '' ? "#ccc" : "#fff"} />
+              <FlatList
+                data={comments}
+                renderItem={({ item }) => (
+                  <View style={styles.commentItem}>
+                    <View style={styles.commentHeader}>
+                      <Text style={styles.commentUser}>{item.user_name}</Text>
+                      <Text style={styles.commentTime}>{item.time}</Text>
+                    </View>
+                    <Text style={styles.commentText}>{item.text}</Text>
+                  </View>
+                )}
+                keyExtractor={item => item.id.toString()}
+                scrollEnabled={false}
+                ListEmptyComponent={
+                  <Text style={styles.emptyCommentsText}>
+                    Noch keine Kommentare. Sei der Erste, der einen Kommentar hinterlässt!
+                  </Text>
+                }
+              />
             )}
-          </TouchableOpacity>
-        </View>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+          </View>
+          
+          <View style={styles.divider} />
+          
+          <View style={styles.attendeesSection}>
+            <Text style={styles.sectionTitle}>Teilnehmerliste ({attendeesList.length})</Text>
+            {loadingAttendeesList ? (
+              <ActivityIndicator size="small" color="#4285F4" />
+            ) : attendeesList.length > 0 ? (
+              attendeesList.map(item => renderAttendeeItem({ item }))
+            ) : (
+              <Text style={styles.noAttendeesText}>Noch keine Teilnehmer registriert.</Text>
+            )}
+          </View>
+        </ScrollView>
+        
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 90}
+          style={styles.inputContainer}
+        >
+          <View style={styles.inputRow}>
+            <TextInput
+              style={styles.input}
+              placeholder="Schreibe einen Kommentar..."
+              value={comment}
+              onChangeText={setComment}
+              multiline
+            />
+            <TouchableOpacity 
+              style={[
+                styles.sendButton, 
+                (comment.trim() === '' || addingComment) && styles.sendButtonDisabled
+              ]} 
+              onPress={addComment}
+              disabled={comment.trim() === '' || addingComment}
+            >
+              {addingComment ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Ionicons name="send" size={20} color={comment.trim() === '' ? "#ccc" : "#fff"} />
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+        
+        {isDeleting && (
+          <View style={styles.deleteOverlay}>
+            <ActivityIndicator size="large" color="#fff" />
+            <Text style={styles.deleteText}>Event wird gelöscht...</Text>
+          </View>
+        )}
+      </SafeAreaView>
+    </Provider>
   );
 };
 
@@ -715,6 +784,9 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 20,
   },
+  backButtonTextOnly: { // Style for the back button in error view
+    padding: 10,
+  },
   backButtonText: {
     color: '#4285F4',
     fontWeight: 'bold',
@@ -722,35 +794,45 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
-    padding: 15,
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    paddingTop: Platform.OS === 'android' ? androidPaddingTop : 15,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
     alignItems: 'center',
+    justifyContent: 'space-between', // Space items out
   },
   backButton: {
-    paddingRight: 10,
+    padding: 5, // Add padding for easier tap
+    marginRight: 10,
+  },
+  headerTitleContainer: {
+      flex: 1, // Allow title to take available space
+      alignItems: 'center', // Center title horizontally
   },
   headerTitle: {
-    flex: 1,
-  },
-  headerType: {
-    fontSize: 14,
-    color: '#4285F4',
+    fontSize: 18,
     fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+  },
+  optionsButton: {
+    padding: 8,
+    marginLeft: 10, // Add some space from title
   },
   content: {
     flex: 1,
   },
   contentContainer: {
     padding: 15,
-    paddingBottom: 80,
+    paddingBottom: 30,
   },
   title: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: 'bold',
     color: '#333',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   eventMeta: {
     flexDirection: 'row',
@@ -788,66 +870,107 @@ const styles = StyleSheet.create({
   attendanceButtonsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 20,
-    marginTop: 5,
+    marginBottom: 25,
   },
   attendanceButton: {
+    flex: 1, // Make buttons take equal width
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#f1f1f1',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ddd',
     marginHorizontal: 4,
-  },
-  activeAttendanceButton: {
-    backgroundColor: '#4285F4',
-  },
-  activeDeclinedButton: {
-    backgroundColor: '#EA4335',
-  },
-  disabledButton: {
-    opacity: 0.5,
+    backgroundColor: '#f9f9f9',
   },
   attendanceButtonText: {
     fontSize: 13,
-    color: '#4285F4',
-    marginLeft: 4,
+    fontWeight: '500',
+    marginLeft: 6,
+    color: '#555',
   },
-  activeAttendanceButtonText: {
+  attendingSelected: {
+    backgroundColor: '#4CAF50',
+    borderColor: '#4CAF50',
+  },
+  maybeSelected: {
+    backgroundColor: '#FFC107',
+    borderColor: '#FFC107',
+  },
+  declinedSelected: {
+    backgroundColor: '#F44336',
+    borderColor: '#F44336',
+  },
+  selectedText: {
     color: '#fff',
-  },
-  attendeeSummaryContainer: {
-    backgroundColor: '#f8f8f8',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 20,
-  },
-  attendeeSummaryTitle: {
-    fontSize: 14,
     fontWeight: 'bold',
-    marginBottom: 8,
-    color: '#444',
   },
-  attendeeSummaryRow: {
+  buttonLoader: {
+      marginLeft: 5,
+  },
+  attendeesSection: {
+      marginTop: 10,
+  },
+  attendeeItem: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
   },
-  attendeeSummaryItem: {
+  attendeeAvatar: {
+    width: 35,
+    height: 35,
+    borderRadius: 17.5,
+    marginRight: 10,
+    backgroundColor: '#eee', // Placeholder background
+  },
+  attendeeName: {
+    fontSize: 14,
+    color: '#333',
+    flex: 1, // Take remaining space
+  },
+  statusBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 10,
+  },
+  statusBadge_attending: {
+      backgroundColor: '#e8f5e9', // Light green
+  },
+   statusBadge_maybe: {
+      backgroundColor: '#fff8e1', // Light yellow
+  },
+   statusBadge_declined: {
+      backgroundColor: '#ffebee', // Light red
+  },
+  statusBadgeText: {
+      fontSize: 11,
+      fontWeight: 'bold',
+      color: '#555' // Consider adjusting text color based on badge background
+  },
+  noAttendeesText: {
+    fontStyle: 'italic',
+    color: '#888',
+    textAlign: 'center',
+    padding: 15,
+  },
+  deleteOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
     alignItems: 'center',
   },
-  attendeeSummaryCount: {
+  deleteText: {
+    color: '#fff',
+    marginTop: 15,
     fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    marginTop: 4,
-  },
-  attendeeSummaryLabel: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 2,
   },
   reactionsContainer: {
     flexDirection: 'row',

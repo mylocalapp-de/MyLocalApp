@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, SafeAreaView, Dimensions, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, SafeAreaView, Dimensions, Platform, ActivityIndicator, Alert } from 'react-native';
 import { Calendar, LocaleConfig } from 'react-native-calendars';
 import ScreenHeader from '../components/common/ScreenHeader';
 import { Ionicons } from '@expo/vector-icons';
-import { useOrganization } from '../context/OrganizationContext';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 
@@ -46,8 +45,7 @@ const CalendarScreen = ({ navigation }) => {
   const [error, setError] = useState(null);
   const [activeFilter, setActiveFilter] = useState('Alle');
   
-  // Use organization context to determine if add button should be shown
-  const { isOrganization } = useOrganization();
+  // Get user from AuthContext
   const { user } = useAuth();
   
   // Fetch events from Supabase
@@ -375,6 +373,17 @@ const CalendarScreen = ({ navigation }) => {
 
   const calendarHeight = getCalendarHeight();
 
+  // Handle navigation to create event screen
+  const handleCreateEvent = () => {
+    if (user) {
+      navigation.navigate('CreateEvent');
+    } else {
+      // Optionally prompt user to log in or show an alert
+      Alert.alert('Anmeldung erforderlich', 'Bitte melde dich an, um ein Event zu erstellen.');
+      // navigation.navigate('Profile'); // Or navigate to login/profile
+    }
+  };
+
   if (isLoading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
@@ -521,8 +530,11 @@ const CalendarScreen = ({ navigation }) => {
         />
       </View>
       
-      {isOrganization && user && (
-        <TouchableOpacity style={styles.addButton}>
+      {user && (
+        <TouchableOpacity 
+          style={styles.addButton}
+          onPress={handleCreateEvent}
+        >
           <Ionicons name="add" size={24} color="#fff" />
         </TouchableOpacity>
       )}

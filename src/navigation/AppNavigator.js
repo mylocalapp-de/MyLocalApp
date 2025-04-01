@@ -16,8 +16,12 @@ import ChatDetailScreen from '../screens/ChatDetailScreen';
 import DorfbotScreen from '../screens/DorfbotScreen';
 import ArticleDetailScreen from '../screens/ArticleDetailScreen';
 import CreateArticleScreen from '../screens/CreateArticleScreen';
+import EditArticleScreen from '../screens/EditArticleScreen';
 import EventDetailScreen from '../screens/EventDetailScreen';
 import WelcomeScreen from '../screens/WelcomeScreen';
+import CreateBroadcastGroupScreen from '../screens/CreateBroadcastGroupScreen';
+import CreateEventScreen from '../screens/CreateEventScreen';
+import EditEventScreen from '../screens/EditEventScreen';
 
 const Tab = createBottomTabNavigator();
 const ChatStack = createStackNavigator();
@@ -36,6 +40,7 @@ const ChatStackNavigator = () => {
       <ChatStack.Screen name="ChatList" component={ChatScreen} />
       <ChatStack.Screen name="ChatDetail" component={ChatDetailScreen} />
       <ChatStack.Screen name="Dorfbot" component={DorfbotScreen} />
+      <ChatStack.Screen name="CreateBroadcastGroup" component={CreateBroadcastGroupScreen} />
     </ChatStack.Navigator>
   );
 };
@@ -51,6 +56,7 @@ const HomeStackNavigator = () => {
       <HomeStack.Screen name="HomeList" component={HomeScreen} />
       <HomeStack.Screen name="ArticleDetail" component={ArticleDetailScreen} />
       <HomeStack.Screen name="CreateArticle" component={CreateArticleScreen} />
+      <HomeStack.Screen name="EditArticle" component={EditArticleScreen} />
     </HomeStack.Navigator>
   );
 };
@@ -65,6 +71,8 @@ const CalendarStackNavigator = () => {
     >
       <CalendarStack.Screen name="CalendarList" component={CalendarScreen} />
       <CalendarStack.Screen name="EventDetail" component={EventDetailScreen} />
+      <CalendarStack.Screen name="CreateEvent" component={CreateEventScreen} />
+      <CalendarStack.Screen name="EditEvent" component={EditEventScreen} />
     </CalendarStack.Navigator>
   );
 };

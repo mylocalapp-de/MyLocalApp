@@ -1,8 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 
-const FilterButtons = ({ filters = [], onFilterChange = () => {} }) => {
-  const [selectedFilter, setSelectedFilter] = useState('Alle');
+const FilterButtons = ({ filters = [], onFilterChange = () => {}, initialFilter = 'Alle' }) => {
+  const [selectedFilter, setSelectedFilter] = useState(initialFilter);
+
+  // Update selected filter if initialFilter prop changes
+  useEffect(() => {
+    if (initialFilter && initialFilter !== selectedFilter) {
+      setSelectedFilter(initialFilter);
+    }
+  }, [initialFilter]);
 
   const selectFilter = (filter) => {
     setSelectedFilter(filter);
@@ -42,14 +49,14 @@ const FilterButtons = ({ filters = [], onFilterChange = () => {} }) => {
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
-    marginBottom: 10,
+    marginBottom: 6,
   },
   contentContainer: {
     paddingHorizontal: 10,
   },
   filterButton: {
     paddingHorizontal: 15,
-    paddingVertical: 6,
+    paddingVertical: 5,
     borderRadius: 20,
     backgroundColor: '#f0f0f0',
     marginRight: 8,

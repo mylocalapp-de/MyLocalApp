@@ -71,10 +71,27 @@ CREATE POLICY "Anyone can view published articles"
   FOR SELECT
   USING (is_published = true);
 
-CREATE POLICY "Authors can manage their own articles" 
-  ON public.articles 
+-- Replace the existing policy with more specific policies for different operations
+DROP POLICY IF EXISTS "Authors can manage their own articles" ON public.articles;
+DROP POLICY IF EXISTS "Authenticated users can create articles" ON public.articles;
+
+-- Allow any authenticated user to create articles without restrictions
+CREATE POLICY "Anyone can create articles"
+  ON public.articles
+  FOR INSERT
+  WITH CHECK (true);
+
+-- Authors can update and delete their own articles
+CREATE POLICY "Authors can update their own articles"
+  ON public.articles
+  FOR UPDATE
   USING (author_id = auth.uid())
   WITH CHECK (author_id = auth.uid());
+
+CREATE POLICY "Authors can delete their own articles"
+  ON public.articles
+  FOR DELETE
+  USING (author_id = auth.uid());
 
 -- Create policies for article_comments table
 CREATE POLICY "Anyone can view comments" 
@@ -239,4 +256,47 @@ GRANT INSERT, UPDATE, DELETE ON public.articles TO authenticated;
 
 GRANT EXECUTE ON FUNCTION public.get_article_reactions(UUID) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.format_date_german(TIMESTAMP WITH TIME ZONE) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.format_time_german(TIMESTAMP WITH TIME ZONE) TO anon, authenticated; 
+GRANT EXECUTE ON FUNCTION public.format_time_german(TIMESTAMP WITH TIME ZONE) TO anon, authenticated;
+
+-- Function to update articles without relying on auth.uid()
+CREATE OR REPLACE FUNCTION public.update_article(
+  p_article_id UUID,
+  p_title TEXT,
+  p_content TEXT,
+  p_type TEXT,
+  p_author_id UUID
+)
+RETURNS BOOLEAN AS $$
+BEGIN
+  UPDATE public.articles
+  SET 
+    title = p_title,
+    content = p_content,
+    type = p_type
+  WHERE 
+    id = p_article_id AND
+    author_id = p_author_id;
+  
+  RETURN FOUND;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Function to delete articles without relying on auth.uid()
+CREATE OR REPLACE FUNCTION public.delete_article(
+  p_article_id UUID,
+  p_author_id UUID
+)
+RETURNS BOOLEAN AS $$
+BEGIN
+  DELETE FROM public.articles
+  WHERE 
+    id = p_article_id AND
+    author_id = p_author_id;
+  
+  RETURN FOUND;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Grant permissions to the new functions
+GRANT EXECUTE ON FUNCTION public.update_article(UUID, TEXT, TEXT, TEXT, UUID) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.delete_article(UUID, UUID) TO anon, authenticated; 

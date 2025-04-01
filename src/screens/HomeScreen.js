@@ -13,33 +13,85 @@ const HomeScreen = ({ navigation }) => {
   
   // State for articles and loading
   const [articles, setArticles] = useState([]);
+  const [filteredArticles, setFilteredArticles] = useState([]);
+  const [selectedFilter, setSelectedFilter] = useState('Aktuell');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   
-  // Placeholder filters for the home screen
-  const homeFilters = ['Aktuell', 'Vereine', 'Gemeinde', 'Veranstaltungen', 'Polizei'];
+  // Update filters to match all article types available in CreateArticleScreen
+  const homeFilters = ['Aktuell', 'Kultur', 'Sport', 'Verkehr', 'Politik', 'Vereine', 'Gemeinde', 'Polizei', 'Veranstaltungen'];
 
   // Fetch articles from Supabase
   useEffect(() => {
     fetchArticles();
   }, []);
 
+  // Refresh articles when screen comes into focus
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      // Add a small delay to ensure component is mounted before fetching
+      setTimeout(() => {
+        console.log('HomeScreen focused - refreshing articles');
+        fetchArticles();
+      }, 100);
+    });
+    
+    return unsubscribe;
+  }, [navigation]);
+
+  // Apply filter when articles or selectedFilter changes
+  useEffect(() => {
+    applyFilter(selectedFilter);
+  }, [articles, selectedFilter]);
+
   const fetchArticles = async () => {
     try {
       setIsLoading(true);
       setError(null);
       
-      // Fetch articles from the article_listings view
+      // Fetch articles from the articles table directly with author info
       const { data, error } = await supabase
-        .from('article_listings')
-        .select('*')
+        .from('articles')
+        .select(`
+          id,
+          title,
+          content,
+          type,
+          published_at,
+          author_id,
+          app_users(display_name)
+        `)
+        .eq('is_published', true)
         .order('published_at', { ascending: false });
       
       if (error) {
         console.error('Error fetching articles:', error);
         setError('Could not load articles. Please try again later.');
       } else {
-        setArticles(data || []);
+        // Format the data to match what we expect from article_listings
+        const formattedArticles = data.map(article => {
+          // Format date
+          const publishDate = new Date(article.published_at);
+          const formattedDate = `${publishDate.getDate().toString().padStart(2, '0')}.${(publishDate.getMonth() + 1).toString().padStart(2, '0')}.${publishDate.getFullYear()}`;
+          
+          // Truncate content to 100 chars with ellipsis
+          const truncatedContent = article.content.length > 100 
+            ? article.content.substring(0, 100) + '...' 
+            : article.content;
+            
+          return {
+            id: article.id,
+            title: article.title,
+            content: truncatedContent,
+            type: article.type,
+            published_at: article.published_at,
+            date: formattedDate,
+            author_id: article.author_id,
+            author_name: article.app_users?.display_name || 'Redaktion'
+          };
+        });
+        
+        setArticles(formattedArticles || []);
       }
     } catch (err) {
       console.error('Unexpected error fetching articles:', err);
@@ -47,6 +99,28 @@ const HomeScreen = ({ navigation }) => {
     } finally {
       setIsLoading(false);
     }
+  };
+  
+  // Filter articles based on the selected filter
+  const applyFilter = (filter) => {
+    if (!articles.length) return;
+    
+    if (filter === 'Aktuell') {
+      // Show all articles sorted by date (newest first)
+      setFilteredArticles([...articles].sort((a, b) => 
+        new Date(b.published_at) - new Date(a.published_at)
+      ));
+    } else {
+      // Filter by the selected type
+      setFilteredArticles(
+        articles.filter(article => article.type === filter)
+      );
+    }
+  };
+
+  // Handle filter change
+  const handleFilterChange = (filter) => {
+    setSelectedFilter(filter);
   };
   
   // Open article creation screen (for organization accounts)
@@ -58,7 +132,11 @@ const HomeScreen = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <ScreenHeader filters={homeFilters} />
+      <ScreenHeader 
+        filters={homeFilters} 
+        onFilterChange={handleFilterChange} 
+        initialFilter={selectedFilter} 
+      />
       
       {isLoading ? (
         <View style={styles.loadingContainer}>
@@ -79,12 +157,12 @@ const HomeScreen = ({ navigation }) => {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          {articles.length === 0 ? (
+          {filteredArticles.length === 0 ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>Keine Artikel verfügbar.</Text>
             </View>
           ) : (
-            articles.map(article => (
+            filteredArticles.map(article => (
               <TouchableOpacity 
                 key={article.id} 
                 style={styles.articleCard}
@@ -95,7 +173,11 @@ const HomeScreen = ({ navigation }) => {
                     <Text style={styles.articleType}>{article.type}</Text>
                     <Text style={styles.articleDate}>{article.date}</Text>
                   </View>
-                  <Ionicons name="ellipsis-vertical" size={20} color="#666" />
+                  <Text 
+                  style={article.author_name === 'Redaktion' ? styles.redaktionAuthor : styles.articleAuthor}
+                >
+                  {article.author_name}
+                </Text>
                 </View>
                 <Text style={styles.articleTitle}>{article.title}</Text>
                 <Text style={styles.articleContent} numberOfLines={3}>
@@ -215,6 +297,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     lineHeight: 20,
+    marginBottom: 8,
+  },
+  articleAuthor: {
+    fontSize: 12,
+    color: '#4285F4',
+    fontWeight: 'bold',
+    alignSelf: 'flex-end',
+  },
+  redaktionAuthor: {
+    fontSize: 12,
+    color: '#888',
+    fontStyle: 'italic',
+    alignSelf: 'flex-end',
   },
   addButton: {
     position: 'absolute',

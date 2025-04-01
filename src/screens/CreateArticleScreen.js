@@ -10,11 +10,15 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView
+  SafeAreaView,
+  Dimensions
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+
+const { height } = Dimensions.get('window');
+const androidPaddingTop = height * 0.03; // 3% of screen height for better scaling
 
 const CreateArticleScreen = ({ navigation }) => {
   const { user } = useAuth();
@@ -94,7 +98,10 @@ const CreateArticleScreen = ({ navigation }) => {
         [
           { 
             text: 'OK', 
-            onPress: () => navigation.navigate('ArticleDetail', { articleId: data.id }) 
+            onPress: () => {
+              // Use goBack to return to previous screen
+              navigation.goBack();
+            }
           }
         ]
       );
@@ -262,6 +269,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 15,
     paddingVertical: 10,
+    paddingTop: Platform.OS === 'android' ? androidPaddingTop : 10,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },

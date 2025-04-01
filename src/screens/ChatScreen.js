@@ -345,7 +345,10 @@ const ChatScreen = ({ navigation, route }) => {
       {renderChatList()}
       
       {isOrganization && user && (
-        <TouchableOpacity style={styles.addButton}>
+        <TouchableOpacity 
+          style={styles.addButton}
+          onPress={() => navigation.navigate('CreateBroadcastGroup')}
+        >
           <Ionicons name="add" size={24} color="#fff" />
         </TouchableOpacity>
       )}

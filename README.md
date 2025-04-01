@@ -159,3 +159,10 @@ App.js              - Main application entry point
 - Persistent storage for organization mode settings 
 - Social login options (Google, Apple, etc.)
 - Content moderation and reporting system 
+
+# How to build the app?
+
+Just use 
+npx expo prebuild
+ npx expo run:android --variant release   
+ npx expo run:ios

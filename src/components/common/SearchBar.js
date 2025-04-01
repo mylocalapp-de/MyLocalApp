@@ -23,7 +23,7 @@ const styles = StyleSheet.create({
   container: {
     width: '100%',
     padding: 10,
-    paddingTop: Platform.OS === 'ios' ? 10 : 15,
+    paddingTop: 10,
     paddingBottom: 6,
   },
   searchContainer: {
@@ -34,7 +34,7 @@ const styles = StyleSheet.create({
     borderColor: '#ddd',
     alignItems: 'center',
     paddingHorizontal: 10,
-    height: 40,
+    height: 36,
   },
   input: {
     flex: 1,

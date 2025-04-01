@@ -12,12 +12,16 @@ import {
   Image,
   ScrollView,
   ActivityIndicator,
-  Alert
+  Alert,
+  Dimensions
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const { height } = Dimensions.get('window');
+const androidPaddingTop = height * 0.05; // 5% of screen height for better scaling
 
 const ChatDetailScreen = ({ route, navigation }) => {
   const { chatGroup, onReturn } = route.params;
@@ -756,6 +760,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     padding: 15,
+    paddingTop: Platform.OS === 'android' ? androidPaddingTop : 10,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
