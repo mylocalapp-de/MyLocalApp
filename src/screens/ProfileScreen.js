@@ -6,6 +6,9 @@ import { useOrganization } from '../context/OrganizationContext';
 import { useAuth } from '../context/AuthContext';
 
 const ProfileScreen = () => {
+  // DEBUG: Log component render and loading state
+  console.log(`ProfileScreen rendering - isAccountSettingsLoading: ${isAccountSettingsLoading}`);
+
   // Use navigation hook
   const navigation = useNavigation();
   
@@ -324,16 +327,18 @@ const ProfileScreen = () => {
     } finally {
       // Always stop loading, regardless of success or failure
       setIsAccountSettingsLoading(false);
+      // DEBUG: Confirm state update executed
+      console.log('ProfileScreen: setIsAccountSettingsLoading(false) executed.');
     }
   };
   
   // Handle password update
   const handleUpdatePassword = async () => {
-    console.log('Updating password...');
-    
+    console.log('ProfileScreen: Attempting password update...');
+
     // No current password needed for Supabase Auth update
     // if (!currentPassword.trim()) { ... }
-    
+
     if (!newPassword) {
       setAccountSettingsError('Bitte gib ein neues Passwort ein.');
       return;
@@ -346,32 +351,42 @@ const ProfileScreen = () => {
       setAccountSettingsError('Die neuen Passwörter stimmen nicht überein.');
       return;
     }
-    
+
     setIsAccountSettingsLoading(true);
     setAccountSettingsError('');
-    
+
     try {
       // Use the updated context function which only needs the new password
+      console.log('ProfileScreen: Calling AuthContext.updatePassword...');
       const result = await updatePassword(newPassword);
-      
+      console.log('ProfileScreen: AuthContext.updatePassword result:', result);
+
       if (result.success) {
-        // Only close modal on success
+        console.log('ProfileScreen: Password update successful. Closing modal and alerting.');
+        // Only close modal on success and show alert immediately
+        // Do not wait for the background profile refresh
         setShowAccountSettingsModal(false);
         Alert.alert(
-          'Erfolgreich', 
+          'Erfolgreich',
           'Dein Passwort wurde aktualisiert.'
         );
+        // Setting loading false is handled by finally block
       } else {
-        console.error('Failed to update password:', result.error);
+        console.error('ProfileScreen: Failed to update password:', result.error);
         // Provide more specific feedback if possible (e.g., new password is same as old)
         setAccountSettingsError(result.error?.message || 'Passwort konnte nicht geändert werden.');
+        // Setting loading false is handled by finally block
       }
     } catch (error) {
-      console.error('Unexpected error during password update:', error);
+      console.error('ProfileScreen: Unexpected error during password update:', error);
       setAccountSettingsError('Ein unerwarteter Fehler ist aufgetreten.');
+       // Setting loading false is handled by finally block
     } finally {
       // Always stop loading, regardless of success or failure
+      console.log('ProfileScreen: Resetting loading state in finally block.');
       setIsAccountSettingsLoading(false);
+      // DEBUG: Confirm state update executed
+      console.log('ProfileScreen: setIsAccountSettingsLoading(false) executed.');
     }
   };
 
