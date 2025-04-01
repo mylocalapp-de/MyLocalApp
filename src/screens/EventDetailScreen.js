@@ -525,19 +525,6 @@ const EventDetailScreen = ({ route, navigation }) => {
     );
   };
   
-  const renderAttendeeItem = ({ item }) => (
-    <View style={styles.attendeeItem}>
-      <Image
-        source={require('../../assets/avatar_placeholder.png')} // Always use placeholder
-        style={styles.attendeeAvatar}
-      />
-      <Text style={styles.attendeeName}>{item.user_name}</Text>
-      <View style={[styles.statusBadge, styles[`statusBadge_${item.status}`]]}>
-         <Text style={styles.statusBadgeText}>{item.status === 'attending' ? 'Nimmt teil' : item.status === 'maybe' ? 'Vielleicht' : 'Abgelehnt'}</Text>
-      </View>
-    </View>
-  );
-  
   if (loading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
@@ -708,7 +695,18 @@ const EventDetailScreen = ({ route, navigation }) => {
             {loadingAttendeesList ? (
               <ActivityIndicator size="small" color="#4285F4" />
             ) : attendeesList.length > 0 ? (
-              attendeesList.map(item => renderAttendeeItem({ item }))
+              attendeesList.map(item => (
+                <View key={item.user_id} style={styles.attendeeItem}> 
+                  <Image
+                    source={require('../../assets/avatar_placeholder.png')} // Always use placeholder
+                    style={styles.attendeeAvatar}
+                  />
+                  <Text style={styles.attendeeName}>{item.user_name}</Text>
+                  <View style={[styles.statusBadge, styles[`statusBadge_${item.status}`]]}>
+                     <Text style={styles.statusBadgeText}>{item.status === 'attending' ? 'Nimmt teil' : item.status === 'maybe' ? 'Vielleicht' : 'Abgelehnt'}</Text>
+                  </View>
+                </View>
+              ))
             ) : (
               <Text style={styles.noAttendeesText}>Noch keine Teilnehmer registriert.</Text>
             )}

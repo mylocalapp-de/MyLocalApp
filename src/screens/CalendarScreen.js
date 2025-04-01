@@ -5,6 +5,7 @@ import ScreenHeader from '../components/common/ScreenHeader';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+import { useOrganization } from '../context/OrganizationContext';
 
 // Get screen dimensions for responsive sizing
 const { width, height } = Dimensions.get('window');
@@ -47,6 +48,7 @@ const CalendarScreen = ({ navigation }) => {
   
   // Get user from AuthContext
   const { user } = useAuth();
+  const { isOrganization } = useOrganization();
   
   // Fetch events from Supabase
   useEffect(() => {
@@ -530,7 +532,7 @@ const CalendarScreen = ({ navigation }) => {
         />
       </View>
       
-      {user && (
+      {isOrganization && user && (
         <TouchableOpacity 
           style={styles.addButton}
           onPress={handleCreateEvent}
