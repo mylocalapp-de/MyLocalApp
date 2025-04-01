@@ -607,7 +607,7 @@ CREATE OR REPLACE VIEW public.event_attendees_with_users AS
     a.event_id,
     a.user_id,
     a.status,
-    COALESCE(p.display_name, 'Anonymous') as user_name, -- Join with profiles
+    COALESCE(p.display_name, 'Unbekannt') as user_name, -- Join with profiles, default to 'Unbekannt'
     a.created_at
   FROM
     public.event_attendees a

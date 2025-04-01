@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import 'react-native-url-polyfill/auto';
 import { supabase } from '../lib/supabase';
@@ -15,7 +15,6 @@ export const AuthProvider = ({ children }) => {
   const [preferences, setPreferences] = useState([]); // Still managed locally first
   const [displayName, setDisplayName] = useState(''); // Still managed locally first
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
-  const previousUserIdRef = useRef(null); // Ref to store the previous user ID
 
   // --- Session Management ---
   useEffect(() => {
@@ -55,54 +54,62 @@ export const AuthProvider = ({ children }) => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, newSession) => {
         console.log(`AuthContext: Auth state changed event: ${_event}`, newSession ? 'New session' : 'No session');
-
+        
         const currentUser = newSession?.user ?? null;
-        const previousUserId = previousUserIdRef.current; // Get previous ID from ref
-        const currentUserId = currentUser?.id ?? null;
+        const currentUserId = currentUser?.id;
+        const previousUserId = session?.user?.id;
+
+        // Explicitly compare IDs, handling nulls
         const userIdChanged = previousUserId !== currentUserId;
 
-        setSession(newSession);
-        setUser(currentUser);
-        setLoading(false); // Set loading false after session/user update
+        console.log(`AuthContext: User ID check - Previous: ${previousUserId}, Current: ${currentUserId}, Changed: ${userIdChanged}`); // DEBUG log
+
+        const wasAlreadyLoggedIn = !!previousUserId; // Use previousUserId for this check
+
+        setSession(newSession); 
+        // Only update the main user state if the user ID actually changed 
+        // or if it's not a USER_UPDATED event (e.g., SIGNED_IN, INITIAL_SESSION).
+        // Avoids unnecessary re-renders/navigation triggers just for metadata updates.
+        if (userIdChanged || _event !== 'USER_UPDATED') {
+            console.log('AuthContext: Updating user state object.');
+            setUser(currentUser);
+        } else {
+            console.log('AuthContext: Skipping user state object update for USER_UPDATED event with same user ID.');
+        }
+        // setLoading(false); // This setLoading might be causing issues if set too early?
 
         if (currentUser) {
           // User logged in, session restored, or user updated
-
-          if (userIdChanged) {
-            // This is a new login or session restoration for a different user
-            console.log('AuthContext: New user detected (or initial load), setting onboarding complete.');
-            setHasCompletedOnboarding(true);
-            await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
-            await loadUserProfile(currentUser.id); // Load profile for the new user
-          } else if (_event === 'USER_UPDATED') {
-             // User details (like email/password) were updated, but it's the same user.
-             // DO NOT change onboarding status here.
-             console.log('AuthContext: User updated (e.g., email/password change). Reloading profile.');
-             await loadUserProfile(currentUser.id); // Reload profile to get potentially updated data linked to the user
-          } else if (!previousUserId && currentUser.id && _event === 'INITIAL_SESSION') {
-             // Handles the case where the app loads and finds an existing session (INITIAL_SESSION)
-             console.log('AuthContext: Initial session detected, setting onboarding complete.');
+          
+          // Only set onboarding complete on initial sign-in/session recovery, 
+          // not on simple user updates if already logged in.
+          if (!wasAlreadyLoggedIn || _event !== 'USER_UPDATED') {
+             console.log('AuthContext: Setting onboarding complete status (Initial session or non-update event).');
              setHasCompletedOnboarding(true);
              await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
-             await loadUserProfile(currentUser.id);
+          } else {
+             console.log('AuthContext: Skipping onboarding state set for USER_UPDATED event while already logged in.');
           }
-          // If event is PASSWORD_RECOVERY, SIGNED_IN etc. and userId hasn't changed,
-          // ensure profile is loaded, but onboarding status likely set already.
-          else if (profile?.id !== currentUser.id) { // Also reload if profile doesn't match current user
-             console.log('AuthContext: Handling other event or mismatched profile, loading profile.');
-             await loadUserProfile(currentUser.id);
+          
+          // Reload profile *unless* it's just a user update (like password change) for the *same* user.
+          if (_event !== 'USER_UPDATED' || userIdChanged) {
+            console.log('AuthContext: Loading profile due to event type or user change.');
+            await loadUserProfile(currentUser.id);
+          } else {
+            console.log('AuthContext: Skipping profile reload for USER_UPDATED event with same user ID.');
           }
 
         } else {
-          // User logged out or session expired
-          console.log('AuthContext: User logged out or session expired.');
+          // User logged out
           setProfile(null);
-          // Explicitly handle onboarding state in signOut or resetOnboarding
-          // setHasCompletedOnboarding(false); // Moved to signOut/resetOnboarding
+          // Keep local displayName/preferences if user signs out? Or clear them?
+          // Let's keep them for now, they might log back in.
+          // Consider clearing if resetOnboarding is called explicitly.
+          // Also ensure onboarding is marked false if logged out.
+          // setHasCompletedOnboarding(false); // We handle this explicitly in signOut now
         }
-
-        // Update the ref *after* processing the current state change
-        previousUserIdRef.current = currentUserId;
+        // Set loading false AFTER potentially async operations inside the if(currentUser) block
+        setLoading(false);
       }
     );
 
@@ -110,7 +117,7 @@ export const AuthProvider = ({ children }) => {
     return () => {
       subscription?.unsubscribe();
     };
-  }, []); // Revert dependency array to empty
+  }, []);
 
   // --- Profile Management ---
   const loadUserProfile = useCallback(async (userId) => {
@@ -446,7 +453,7 @@ export const AuthProvider = ({ children }) => {
      //    return { success: false, error: { message: 'Aktuelles Passwort benötigt.' } };
      // }
 
-     // setLoading(true); // REMOVE global loading state change
+     setLoading(true);
      try {
        // Removed the problematic password verification step
 
@@ -464,19 +471,18 @@ export const AuthProvider = ({ children }) => {
 
        console.log("AuthContext: Email update successful via API.", data);
        // Since email confirmation is disabled in project settings, treat as immediate success.
-       // The onAuthStateChange listener will now handle updating the user object and reloading profile.
-       // REMOVED: setTimeout(() => loadUserProfile(user.id), 500);
+       // The onAuthStateChange listener should eventually update the user object in the context.
+       // Reload the profile manually IF the user object doesn't update quickly enough via listener.
+       // This provides faster feedback in the UI.
+       setTimeout(() => loadUserProfile(user.id), 500); // Trigger profile reload
 
-       // Check if confirmation is needed (Supabase might still send this field even if disabled)
-       const needsConfirmation = data.user?.new_email ? true : false;
-
-       return { success: true, needsConfirmation: needsConfirmation }; // Indicate success to the ProfileScreen
+       return { success: true }; // Indicate success to the ProfileScreen
 
      } catch (error) {
        console.error("AuthContext: Unexpected error updating email:", error);
        return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
      } finally {
-       // setLoading(false); // REMOVE global loading state change
+       setLoading(false);
      }
    };
 
@@ -490,7 +496,7 @@ export const AuthProvider = ({ children }) => {
           return { success: false, error: { message: 'Neues Passwort muss mind. 6 Zeichen lang sein.' } };
       }
 
-      // setLoading(true); // REMOVE global loading state change
+      let result = null; // Variable to hold the result
       try {
           console.log('AuthContext: Attempting password update via Supabase Auth...');
           const { data, error } = await supabase.auth.updateUser({
@@ -500,19 +506,19 @@ export const AuthProvider = ({ children }) => {
           if (error) {
               console.error("AuthContext: Supabase updateUser (password) error:", error);
               // Supabase error might include "New password should be different from the old password."
-              return { success: false, error: { message: error.message || 'Passwort konnte nicht geändert werden.' } };
+              result = { success: false, error: { message: error.message || 'Passwort konnte nicht geändert werden.' } };
+          } else {
+             console.log("AuthContext: Password updated successfully in try block.", data);
+             result = { success: true };
           }
-
-          console.log("AuthContext: Password updated successfully.", data);
-          // User state remains the same, just password changed.
-          return { success: true };
 
       } catch (error) {
           console.error("AuthContext: Unexpected error updating password:", error);
-          return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+          result = { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
       } finally {
-          // setLoading(false); // REMOVE global loading state change
+          console.log("AuthContext: updatePassword finally block reached. Returning:", result); // Log before returning
       }
+      return result; // Return the captured result
    };
 
 

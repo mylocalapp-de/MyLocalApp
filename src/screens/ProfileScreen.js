@@ -59,9 +59,11 @@ const ProfileScreen = () => {
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   // No current password needed for password update via Supabase Auth
   // const [currentPassword, setCurrentPassword] = useState(''); 
-  const [isAccountSettingsLoading, setIsAccountSettingsLoading] = useState(false);
   const [accountSettingsError, setAccountSettingsError] = useState('');
   
+  // Ensure loading state is properly initialized
+  const [isAccountSettingsLoading, setIsAccountSettingsLoading] = useState(false);
+
   // Derived state: Check if user has a full Supabase account
   const hasFullAccount = !!user?.id;
 
@@ -567,17 +569,6 @@ const ProfileScreen = () => {
         <Ionicons name="log-out-outline" size={24} style={[styles.settingIcon, styles.signOutIcon]} />
         <Text style={[styles.settingText, styles.signOutText]}>Abmelden</Text>
       </TouchableOpacity>
-      
-       {/* Reset Onboarding Button (for dev/testing) */} 
-       {__DEV__ && (
-          <TouchableOpacity 
-             style={[styles.settingItem, styles.resetButton]} 
-             onPress={handleResetOnboarding}
-          >
-             <Ionicons name="refresh-outline" size={24} style={[styles.settingIcon, styles.resetIcon]} />
-             <Text style={[styles.settingText, styles.resetText]}>Onboarding zurücksetzen (Dev)</Text>
-          </TouchableOpacity>
-       )}
     </View>
   );
 

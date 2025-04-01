@@ -600,7 +600,9 @@ const EventDetailScreen = ({ route, navigation }) => {
           <View style={styles.eventMeta}>
             <View style={styles.eventMetaItem}>
               <Ionicons name="calendar-outline" size={16} color="#666" />
-              <Text style={styles.eventMetaText}>{event.formatted_date}</Text>
+              <Text style={styles.eventMetaText}>
+                {event.date ? new Date(event.date).toLocaleDateString('de-DE', { year: 'numeric', month: 'short', day: 'numeric' }) : 'Datum unbekannt'}
+              </Text>
             </View>
             <View style={styles.eventMetaItem}>
               <Ionicons name="time-outline" size={16} color="#666" />
@@ -710,8 +712,8 @@ const EventDetailScreen = ({ route, navigation }) => {
               <ActivityIndicator size="small" color="#4285F4" />
             ) : attendeesList.length > 0 ? (
               attendeesList.map(item => {
-                // Get user name from profiles relation
-                const attendeeName = item.profiles?.display_name || 'Unbekannt';
+                // Get user name from the view directly
+                const attendeeName = item.user_name; // Corrected: Use user_name from the view
                 
                 return (
                   <View key={item.user_id} style={styles.attendeeItem}>
