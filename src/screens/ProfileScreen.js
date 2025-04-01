@@ -653,6 +653,262 @@ const ProfileScreen = () => {
           </View>
       );
   }
+  
+  // Define modal render functions inside the component to access state/handlers
+  const renderCreateAccountModal = () => (
+    <Modal
+      visible={showCreateAccountModal}
+      animationType="slide"
+      transparent={true}
+      onRequestClose={() => setShowCreateAccountModal(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <Text style={styles.modalTitle}>Account erstellen</Text>
+          <Text style={styles.modalSubtitle}>Sichere deine Daten und nutze die App auf mehreren Geräten.</Text>
+          
+          <TextInput
+            style={styles.input}
+            placeholder="E-Mail"
+            value={createEmail}
+            onChangeText={setCreateEmail}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoComplete="email"
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Passwort (min. 6 Zeichen)"
+            value={createPassword}
+            onChangeText={setCreatePassword}
+            secureTextEntry
+            autoCapitalize="none"
+            autoComplete="new-password"
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Passwort bestätigen"
+            value={confirmCreatePassword}
+            onChangeText={setConfirmCreatePassword}
+            secureTextEntry
+            autoCapitalize="none"
+            autoComplete="new-password"
+          />
+          
+          {createFormError ? <Text style={styles.errorTextModal}>{createFormError}</Text> : null}
+          
+          <View style={styles.modalActions}>
+            <TouchableOpacity 
+              style={[styles.modalButton, styles.cancelButton]} 
+              onPress={() => setShowCreateAccountModal(false)}
+              disabled={isCreateLoading}
+            >
+              <Text style={styles.modalButtonText}>Abbrechen</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={[styles.modalButton, styles.saveButton, isCreateLoading && styles.buttonDisabled]} 
+              onPress={handleCreateAccount}
+              disabled={isCreateLoading}
+            >
+              {isCreateLoading ? 
+                 <ActivityIndicator color="#fff" size="small" /> : 
+                 <Text style={styles.modalButtonText}>Erstellen</Text>
+              }
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  const renderProfileEditModal = () => (
+    <Modal
+      visible={showProfileEditModal}
+      animationType="slide"
+      transparent={true}
+      onRequestClose={() => setShowProfileEditModal(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <Text style={styles.modalTitle}>Profil bearbeiten</Text>
+          
+          <Text style={styles.inputLabel}>Anzeigename</Text>
+          <TextInput
+            style={styles.input}
+            value={editDisplayName}
+            onChangeText={setEditDisplayName}
+            placeholder="Dein Name oder Spitzname"
+            autoCapitalize="words"
+          />
+          
+          <Text style={styles.inputLabel}>Interessen</Text>
+          <View style={styles.categoriesContainerModal}>
+            {categories.map((category) => (
+              <TouchableOpacity
+                key={category.id}
+                style={[
+                  styles.categoryItemModal,
+                  editPreferences.includes(category.id) && styles.categoryItemModalSelected
+                ]}
+                onPress={() => togglePreference(category.id)}
+              >
+                <Ionicons 
+                  name={category.icon} 
+                  size={20} 
+                  color={editPreferences.includes(category.id) ? '#fff' : '#4285F4'} 
+                  style={styles.categoryIconModal}
+                />
+                <Text 
+                  style={[
+                    styles.categoryTextModal,
+                    editPreferences.includes(category.id) && styles.categoryTextModalSelected
+                  ]}
+                >
+                  {category.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          
+          {editFormError ? <Text style={styles.errorTextModal}>{editFormError}</Text> : null}
+          
+          <View style={styles.modalActions}>
+            <TouchableOpacity 
+              style={[styles.modalButton, styles.cancelButton]} 
+              onPress={() => setShowProfileEditModal(false)}
+              disabled={isEditLoading}
+            >
+              <Text style={styles.modalButtonText}>Abbrechen</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={[styles.modalButton, styles.saveButton, isEditLoading && styles.buttonDisabled]} 
+              onPress={handleSaveProfile}
+              disabled={isEditLoading}
+            >
+              {isEditLoading ? 
+                 <ActivityIndicator color="#fff" size="small" /> : 
+                 <Text style={styles.modalButtonText}>Speichern</Text>
+              }
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  const renderAccountSettingsModal = () => (
+    <Modal
+      visible={showAccountSettingsModal}
+      animationType="slide"
+      transparent={true}
+      onRequestClose={() => setShowAccountSettingsModal(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <Text style={styles.modalTitle}>Account Einstellungen</Text>
+          
+          {/* Tabs */} 
+          <View style={styles.tabContainer}>
+             <TouchableOpacity 
+                style={[styles.tabButton, activeTab === 'email' && styles.tabButtonActive]}
+                onPress={() => {setActiveTab('email'); setAccountSettingsError('');}}
+             >
+                 <Text style={[styles.tabText, activeTab === 'email' && styles.tabTextActive]}>E-Mail ändern</Text>
+             </TouchableOpacity>
+             <TouchableOpacity 
+                style={[styles.tabButton, activeTab === 'password' && styles.tabButtonActive]}
+                onPress={() => {setActiveTab('password'); setAccountSettingsError('');}}
+             >
+                 <Text style={[styles.tabText, activeTab === 'password' && styles.tabTextActive]}>Passwort ändern</Text>
+             </TouchableOpacity>
+          </View>
+          
+          {/* Content based on active tab */} 
+          {activeTab === 'email' && (
+             <View>
+                <Text style={styles.inputLabel}>Neue E-Mail-Adresse</Text>
+                <TextInput
+                   style={styles.input}
+                   placeholder="Neue E-Mail"
+                   value={newEmail}
+                   onChangeText={setNewEmail}
+                   keyboardType="email-address"
+                   autoCapitalize="none"
+                   autoComplete="email"
+                />
+                <Text style={styles.inputLabel}>Aktuelles Passwort zur Bestätigung</Text>
+                <TextInput
+                   style={styles.input}
+                   placeholder="Aktuelles Passwort"
+                   value={emailCurrentPassword} 
+                   onChangeText={setEmailCurrentPassword}
+                   secureTextEntry
+                   autoCapitalize="none"
+                   autoComplete="current-password"
+                />
+                {accountSettingsError ? <Text style={styles.errorTextModal}>{accountSettingsError}</Text> : null}
+                <TouchableOpacity 
+                  style={[styles.modalButton, styles.saveButton, styles.singleButton, isAccountSettingsLoading && styles.buttonDisabled]} 
+                  onPress={handleUpdateEmail}
+                  disabled={isAccountSettingsLoading}
+                >
+                  {isAccountSettingsLoading ? 
+                     <ActivityIndicator color="#fff" size="small" /> : 
+                     <Text style={styles.modalButtonText}>E-Mail Aktualisieren</Text> 
+                  }
+                </TouchableOpacity>
+             </View>
+          )}
+          
+          {activeTab === 'password' && (
+             <View>
+                {/* Current password field removed as not needed for Supabase update */} 
+                <Text style={styles.inputLabel}>Neues Passwort</Text>
+                <TextInput
+                   style={styles.input}
+                   placeholder="Neues Passwort (min. 6 Zeichen)"
+                   value={newPassword}
+                   onChangeText={setNewPassword}
+                   secureTextEntry
+                   autoCapitalize="none"
+                   autoComplete="new-password"
+                />
+                <Text style={styles.inputLabel}>Neues Passwort bestätigen</Text>
+                <TextInput
+                   style={styles.input}
+                   placeholder="Neues Passwort bestätigen"
+                   value={confirmNewPassword}
+                   onChangeText={setConfirmNewPassword}
+                   secureTextEntry
+                   autoCapitalize="none"
+                   autoComplete="new-password"
+                 />
+                 {accountSettingsError ? <Text style={styles.errorTextModal}>{accountSettingsError}</Text> : null}
+                 <TouchableOpacity 
+                  style={[styles.modalButton, styles.saveButton, styles.singleButton, isAccountSettingsLoading && styles.buttonDisabled]} 
+                  onPress={handleUpdatePassword}
+                  disabled={isAccountSettingsLoading}
+                 >
+                  {isAccountSettingsLoading ? 
+                     <ActivityIndicator color="#fff" size="small" /> : 
+                     <Text style={styles.modalButtonText}>Passwort Aktualisieren</Text>
+                  }
+                 </TouchableOpacity>
+             </View>
+          )}
+          
+          <TouchableOpacity 
+            style={[styles.modalButton, styles.cancelButton, styles.marginTop]} 
+            onPress={() => setShowAccountSettingsModal(false)}
+            disabled={isAccountSettingsLoading}
+          >
+            <Text style={styles.modalButtonText}>Abbrechen</Text>
+          </TouchableOpacity>
+
+        </View>
+      </View>
+    </Modal>
+  );
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 30 }}>
@@ -688,265 +944,6 @@ const ProfileScreen = () => {
     </ScrollView>
   );
 };
-
-// --- Render Modal Functions (Keep as they are, just ensure they are called correctly) --- 
-
-// Add renderCreateAccountModal, renderProfileEditModal, renderAccountSettingsModal 
-// (Copied from the original provided code - assumed unchanged for brevity)
-const renderCreateAccountModal = () => (
-  <Modal
-    visible={showCreateAccountModal}
-    animationType="slide"
-    transparent={true}
-    onRequestClose={() => setShowCreateAccountModal(false)}
-  >
-    <View style={styles.modalOverlay}>
-      <View style={styles.modalContent}>
-        <Text style={styles.modalTitle}>Account erstellen</Text>
-        <Text style={styles.modalSubtitle}>Sichere deine Daten und nutze die App auf mehreren Geräten.</Text>
-        
-        <TextInput
-          style={styles.input}
-          placeholder="E-Mail"
-          value={createEmail}
-          onChangeText={setCreateEmail}
-          keyboardType="email-address"
-          autoCapitalize="none"
-          autoComplete="email"
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Passwort (min. 6 Zeichen)"
-          value={createPassword}
-          onChangeText={setCreatePassword}
-          secureTextEntry
-          autoCapitalize="none"
-          autoComplete="new-password"
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Passwort bestätigen"
-          value={confirmCreatePassword}
-          onChangeText={setConfirmCreatePassword}
-          secureTextEntry
-          autoCapitalize="none"
-          autoComplete="new-password"
-        />
-        
-        {createFormError ? <Text style={styles.errorTextModal}>{createFormError}</Text> : null}
-        
-        <View style={styles.modalActions}>
-          <TouchableOpacity 
-            style={[styles.modalButton, styles.cancelButton]} 
-            onPress={() => setShowCreateAccountModal(false)}
-            disabled={isCreateLoading}
-          >
-            <Text style={styles.modalButtonText}>Abbrechen</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.modalButton, styles.saveButton, isCreateLoading && styles.buttonDisabled]} 
-            onPress={handleCreateAccount}
-            disabled={isCreateLoading}
-          >
-            {isCreateLoading ? 
-               <ActivityIndicator color="#fff" size="small" /> : 
-               <Text style={styles.modalButtonText}>Erstellen</Text>
-            }
-          </TouchableOpacity>
-        </View>
-      </View>
-    </View>
-  </Modal>
-);
-
-const renderProfileEditModal = () => (
-  <Modal
-    visible={showProfileEditModal}
-    animationType="slide"
-    transparent={true}
-    onRequestClose={() => setShowProfileEditModal(false)}
-  >
-    <View style={styles.modalOverlay}>
-      <View style={styles.modalContent}>
-        <Text style={styles.modalTitle}>Profil bearbeiten</Text>
-        
-        <Text style={styles.inputLabel}>Anzeigename</Text>
-        <TextInput
-          style={styles.input}
-          value={editDisplayName}
-          onChangeText={setEditDisplayName}
-          placeholder="Dein Name oder Spitzname"
-          autoCapitalize="words"
-        />
-        
-        <Text style={styles.inputLabel}>Interessen</Text>
-        <View style={styles.categoriesContainerModal}>
-          {categories.map((category) => (
-            <TouchableOpacity
-              key={category.id}
-              style={[
-                styles.categoryItemModal,
-                editPreferences.includes(category.id) && styles.categoryItemModalSelected
-              ]}
-              onPress={() => togglePreference(category.id)}
-            >
-              <Ionicons 
-                name={category.icon} 
-                size={20} 
-                color={editPreferences.includes(category.id) ? '#fff' : '#4285F4'} 
-                style={styles.categoryIconModal}
-              />
-              <Text 
-                style={[
-                  styles.categoryTextModal,
-                  editPreferences.includes(category.id) && styles.categoryTextModalSelected
-                ]}
-              >
-                {category.name}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        
-        {editFormError ? <Text style={styles.errorTextModal}>{editFormError}</Text> : null}
-        
-        <View style={styles.modalActions}>
-          <TouchableOpacity 
-            style={[styles.modalButton, styles.cancelButton]} 
-            onPress={() => setShowProfileEditModal(false)}
-            disabled={isEditLoading}
-          >
-            <Text style={styles.modalButtonText}>Abbrechen</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.modalButton, styles.saveButton, isEditLoading && styles.buttonDisabled]} 
-            onPress={handleSaveProfile}
-            disabled={isEditLoading}
-          >
-            {isEditLoading ? 
-               <ActivityIndicator color="#fff" size="small" /> : 
-               <Text style={styles.modalButtonText}>Speichern</Text>
-            }
-          </TouchableOpacity>
-        </View>
-      </View>
-    </View>
-  </Modal>
-);
-
-const renderAccountSettingsModal = () => (
-  <Modal
-    visible={showAccountSettingsModal}
-    animationType="slide"
-    transparent={true}
-    onRequestClose={() => setShowAccountSettingsModal(false)}
-  >
-    <View style={styles.modalOverlay}>
-      <View style={styles.modalContent}>
-        <Text style={styles.modalTitle}>Account Einstellungen</Text>
-        
-        {/* Tabs */} 
-        <View style={styles.tabContainer}>
-           <TouchableOpacity 
-              style={[styles.tabButton, activeTab === 'email' && styles.tabButtonActive]}
-              onPress={() => {setActiveTab('email'); setAccountSettingsError('');}}
-           >
-               <Text style={[styles.tabText, activeTab === 'email' && styles.tabTextActive]}>E-Mail ändern</Text>
-           </TouchableOpacity>
-           <TouchableOpacity 
-              style={[styles.tabButton, activeTab === 'password' && styles.tabButtonActive]}
-              onPress={() => {setActiveTab('password'); setAccountSettingsError('');}}
-           >
-               <Text style={[styles.tabText, activeTab === 'password' && styles.tabTextActive]}>Passwort ändern</Text>
-           </TouchableOpacity>
-        </View>
-        
-        {/* Content based on active tab */} 
-        {activeTab === 'email' && (
-           <View>
-              <Text style={styles.inputLabel}>Neue E-Mail-Adresse</Text>
-              <TextInput
-                 style={styles.input}
-                 placeholder="Neue E-Mail"
-                 value={newEmail}
-                 onChangeText={setNewEmail}
-                 keyboardType="email-address"
-                 autoCapitalize="none"
-                 autoComplete="email"
-              />
-              <Text style={styles.inputLabel}>Aktuelles Passwort zur Bestätigung</Text>
-              <TextInput
-                 style={styles.input}
-                 placeholder="Aktuelles Passwort"
-                 value={emailCurrentPassword} 
-                 onChangeText={setEmailCurrentPassword}
-                 secureTextEntry
-                 autoCapitalize="none"
-                 autoComplete="current-password"
-              />
-              {accountSettingsError ? <Text style={styles.errorTextModal}>{accountSettingsError}</Text> : null}
-              <TouchableOpacity 
-                style={[styles.modalButton, styles.saveButton, styles.singleButton, isAccountSettingsLoading && styles.buttonDisabled]} 
-                onPress={handleUpdateEmail}
-                disabled={isAccountSettingsLoading}
-              >
-                {isAccountSettingsLoading ? 
-                   <ActivityIndicator color="#fff" size="small" /> : 
-                   <Text style={styles.modalButtonText}>E-Mail Aktualisieren</Text> 
-                }
-              </TouchableOpacity>
-           </View>
-        )}
-        
-        {activeTab === 'password' && (
-           <View>
-              {/* Current password field removed as not needed for Supabase update */} 
-              <Text style={styles.inputLabel}>Neues Passwort</Text>
-              <TextInput
-                 style={styles.input}
-                 placeholder="Neues Passwort (min. 6 Zeichen)"
-                 value={newPassword}
-                 onChangeText={setNewPassword}
-                 secureTextEntry
-                 autoCapitalize="none"
-                 autoComplete="new-password"
-              />
-              <Text style={styles.inputLabel}>Neues Passwort bestätigen</Text>
-              <TextInput
-                 style={styles.input}
-                 placeholder="Neues Passwort bestätigen"
-                 value={confirmNewPassword}
-                 onChangeText={setConfirmNewPassword}
-                 secureTextEntry
-                 autoCapitalize="none"
-                 autoComplete="new-password"
-               />
-               {accountSettingsError ? <Text style={styles.errorTextModal}>{accountSettingsError}</Text> : null}
-               <TouchableOpacity 
-                style={[styles.modalButton, styles.saveButton, styles.singleButton, isAccountSettingsLoading && styles.buttonDisabled]} 
-                onPress={handleUpdatePassword}
-                disabled={isAccountSettingsLoading}
-               >
-                {isAccountSettingsLoading ? 
-                   <ActivityIndicator color="#fff" size="small" /> : 
-                   <Text style={styles.modalButtonText}>Passwort Aktualisieren</Text>
-                }
-               </TouchableOpacity>
-           </View>
-        )}
-        
-        <TouchableOpacity 
-          style={[styles.modalButton, styles.cancelButton, styles.marginTop]} 
-          onPress={() => setShowAccountSettingsModal(false)}
-          disabled={isAccountSettingsLoading}
-        >
-          <Text style={styles.modalButtonText}>Abbrechen</Text>
-        </TouchableOpacity>
-
-      </View>
-    </View>
-  </Modal>
-);
 
 // --- Styles --- 
 const styles = StyleSheet.create({

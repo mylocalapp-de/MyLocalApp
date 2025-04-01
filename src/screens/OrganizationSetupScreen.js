@@ -45,7 +45,7 @@ const OrganizationSetupScreen = ({ navigation }) => {
       // await switchOrganizationContext(result.data.id); 
       navigation.goBack(); // Go back to profile screen after creation
     } else {
-      setError(result.error?.message || 'Organisation konnte nicht erstellt werden.');
+      setError(String(result.error?.message || 'Organisation konnte nicht erstellt werden.'));
     }
   };
 
@@ -69,7 +69,7 @@ const OrganizationSetupScreen = ({ navigation }) => {
       // await switchOrganizationContext(result.data.id);
       navigation.goBack(); // Go back to profile screen after joining
     } else {
-      setError(result.error?.message || 'Beitritt fehlgeschlagen.');
+      setError(String(result.error?.message || 'Beitritt fehlgeschlagen.'));
     }
   };
 
@@ -85,7 +85,11 @@ const OrganizationSetupScreen = ({ navigation }) => {
             onChangeText={setOrgName}
             autoCapitalize="words"
           />
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          {!!error && (
+            <Text style={styles.errorText}>
+              {String(error)}
+            </Text>
+          )}
           <TouchableOpacity 
             style={[styles.button, styles.actionButton, isLoading && styles.buttonDisabled]} 
             onPress={handleCreate}
@@ -112,7 +116,11 @@ const OrganizationSetupScreen = ({ navigation }) => {
             autoCapitalize="none"
             maxLength={8} // Assuming invite codes are 8 chars
           />
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          {!!error && (
+            <Text style={styles.errorText}>
+              {String(error)}
+            </Text>
+          )}
           <TouchableOpacity 
             style={[styles.button, styles.actionButton, isLoading && styles.buttonDisabled]} 
             onPress={handleJoin}
@@ -151,14 +159,12 @@ const OrganizationSetupScreen = ({ navigation }) => {
                 <Ionicons name="arrow-back" size={24} color="#333" />
             </TouchableOpacity>
           <Text style={styles.title}>Organisation verwalten</Text>
-          <View style={{ width: 24 }} /> {/* Spacer */}
+          <View style={{ width: 24 }} />{/* Spacer */}
         </View>
         <Text style={styles.subtitle}>
           Erstelle eine neue Organisation (Verein, Gemeinde, Unternehmen) oder trete einer bestehenden mittels Einladungscode bei.
         </Text>
-        
-        {renderContent()}
-        
+        {renderContent()}{/* Ensure no extra space here */}
       </ScrollView>
     </TouchableWithoutFeedback>
   );
