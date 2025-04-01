@@ -52,12 +52,31 @@ CREATE POLICY "Users can update their own profile"
 -- 5. Create a trigger function to automatically create a profile on new user sign-up
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
+DECLARE
+  meta_display_name TEXT;
+  meta_preferences TEXT[];
 BEGIN
+  -- Safely extract display_name, checking if it exists and is text
+  meta_display_name := NEW.raw_user_meta_data ->> 'display_name';
+
+  -- Safely extract preferences, checking if it exists and is an array
+  BEGIN
+    IF jsonb_typeof(NEW.raw_user_meta_data -> 'preferences') = 'array' THEN
+       SELECT array_agg(elem::TEXT) INTO meta_preferences
+       FROM jsonb_array_elements_text(NEW.raw_user_meta_data -> 'preferences') AS elem;
+    ELSE
+       meta_preferences := '{}'; -- Default to empty array if not a valid JSON array
+    END IF;
+  EXCEPTION
+     WHEN others THEN
+       meta_preferences := '{}'; -- Default on any error during extraction/casting
+  END;
+
   INSERT INTO public.profiles (id, display_name, preferences)
   VALUES (
     NEW.id,
-    NEW.raw_user_meta_data ->> 'display_name', -- Get display_name from metadata if provided during signup
-    (NEW.raw_user_meta_data ->> 'preferences')::TEXT[] -- Get preferences from metadata if provided
+    meta_display_name, -- Use extracted display_name (can be NULL)
+    COALESCE(meta_preferences, '{}') -- Use extracted preferences, default to empty array if NULL
   );
   RETURN NEW;
 END;
@@ -104,6 +123,15 @@ CREATE TABLE public.article_reactions (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   UNIQUE (article_id, user_id, emoji)
 );
+
+-- View for reactions count (group by emoji and article)
+CREATE OR REPLACE VIEW public.article_reaction_counts AS
+  SELECT
+    article_id,
+    emoji,
+    count(*) as count
+  FROM public.article_reactions
+  GROUP BY article_id, emoji;
 
 -- Re-enable RLS (if disabled previously) and define policies
 ALTER TABLE public.articles ENABLE ROW LEVEL SECURITY;
@@ -153,16 +181,11 @@ DROP POLICY IF EXISTS "Authenticated users can create reactions" ON public.artic
 CREATE POLICY "Authenticated users can create reactions" ON public.article_reactions
   FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
 
--- Note: Supabase handles ON CONFLICT for unique constraints, so separate UPDATE policy might not be needed if handled in code.
--- If upsert is used, INSERT policy applies. If explicit UPDATE needed, add:
--- CREATE POLICY "Users can update their own reactions" ON public.article_reactions
---   FOR UPDATE TO authenticated USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
-
 DROP POLICY IF EXISTS "Users can delete their own reactions" ON public.article_reactions;
 CREATE POLICY "Users can delete their own reactions" ON public.article_reactions
   FOR DELETE TO authenticated USING (user_id = auth.uid());
 
--- Update VIEWS to join with profiles instead of app_users
+-- Update VIEWS to join with profiles
 DROP VIEW IF EXISTS public.article_comments_with_users;
 CREATE OR REPLACE VIEW public.article_comments_with_users AS
   SELECT
@@ -252,6 +275,15 @@ CREATE TABLE public.message_reactions (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   UNIQUE (message_id, user_id, emoji)
 );
+
+-- View for message reactions count (group by emoji and message)
+CREATE OR REPLACE VIEW public.message_reaction_counts AS
+  SELECT
+    message_id,
+    emoji,
+    count(*) as count
+  FROM public.message_reactions
+  GROUP BY message_id, emoji;
 
 -- Re-enable RLS and define policies
 ALTER TABLE public.chat_groups ENABLE ROW LEVEL SECURITY;
@@ -447,6 +479,15 @@ CREATE TABLE public.event_reactions (
   UNIQUE (event_id, user_id, emoji)
 );
 
+-- View for event reactions count (group by emoji and event)
+CREATE OR REPLACE VIEW public.event_reaction_counts AS
+  SELECT
+    event_id,
+    emoji,
+    count(*) as count
+  FROM public.event_reactions
+  GROUP BY event_id, emoji;
+
 -- Recreate event_attendees table linking user_id to profiles(id)
 DROP TABLE IF EXISTS public.event_attendees CASCADE;
 CREATE TABLE public.event_attendees (
@@ -457,6 +498,15 @@ CREATE TABLE public.event_attendees (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   UNIQUE (event_id, user_id)
 );
+
+-- View for event attendees count (group by event and status)
+CREATE OR REPLACE VIEW public.event_attendee_counts AS
+  SELECT
+    event_id,
+    status,
+    count(*) as count
+  FROM public.event_attendees
+  GROUP BY event_id, status;
 
 -- Re-enable RLS and define policies
 ALTER TABLE public.events ENABLE ROW LEVEL SECURITY;
@@ -657,8 +707,38 @@ GRANT EXECUTE ON FUNCTION public.format_date_german(DATE) TO anon, authenticated
 GRANT EXECUTE ON FUNCTION public.get_event_reactions(UUID) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.get_event_attendees(UUID) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.handle_new_user() TO postgres; -- Trigger function needs elevated privilege usually handled by Supabase
+GRANT INSERT ON public.profiles TO postgres; -- Grant insert permission to the trigger definer role
 
+-- Function to get reaction counts for multiple messages
+CREATE OR REPLACE FUNCTION get_reactions_for_messages(message_ids uuid[])
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT jsonb_object_agg(message_id, reactions)
+  FROM (
+    SELECT
+      message_id,
+      jsonb_object_agg(emoji, count) as reactions
+    FROM (
+      SELECT
+        message_id,
+        emoji,
+        COUNT(*) as count
+      FROM message_reactions
+      WHERE message_id = ANY(message_ids)
+      GROUP BY message_id, emoji
+    ) as reaction_counts
+    GROUP BY message_id
+  ) as grouped_reactions;
+$$;
 
--- Note: Seed data sections are removed for brevity. Re-add them if needed, ensuring they reference profiles(id) correctly.
+-- Grant execute permission
+GRANT EXECUTE ON FUNCTION get_reactions_for_messages(uuid[]) TO authenticated;
+GRANT EXECUTE ON FUNCTION get_reactions_for_messages(uuid[]) TO service_role;
+
+-- ====================================================================
+-- 11. Grant Final Permissions
+-- ====================================================================
 
 COMMIT; 

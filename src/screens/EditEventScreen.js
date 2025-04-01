@@ -139,29 +139,23 @@ const EditEventScreen = ({ navigation, route }) => {
       const formattedDate = date.toISOString().split('T')[0];
       const formattedTime = time.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', hour12: false });
 
-      // Use RPC to update the event, passing the organizer ID
-      const { data, error } = await supabase
-        .rpc('update_event', {
-          p_event_id: eventId,
-          p_title: title,
-          p_description: description,
-          p_date: formattedDate,
-          p_time: `Um ${formattedTime}`,
-          p_end_time: null, // Assuming end_time is not handled here
-          p_location: location,
-          p_category: category,
-          p_image_url: null, // Assuming image_url is not handled here
-          p_organizer_id: user.id // Pass current user's ID for the check in the function
-        });
+      // Directly update the event. RLS policy enforces organizer check.
+      const { error } = await supabase
+        .from('events')
+        .update({
+          title: title,
+          description: description,
+          date: formattedDate,
+          time: `Um ${formattedTime}`,
+          location: location,
+          category: category,
+          // Add any other fields that should be updatable
+        })
+        .eq('id', eventId); // RLS checks organizer_id implicitly
 
-        // RPC returns a boolean `found` which is true if update happened
-        // The `data` variable will hold this boolean value from the RPC call
-
-      if (error || data === false) { // Check if RPC failed or did not update (returns false)
-        console.error('Error updating event with RPC:', error);
-        // Consider a fallback direct update if needed and appropriate RLS is set
-        // but the RPC is preferred for the explicit ownership check.
-        Alert.alert('Fehler', 'Event konnte nicht aktualisiert werden. Stelle sicher, dass du der Organisator bist.');
+      if (error) {
+        console.error('Error updating event:', error);
+        Alert.alert('Fehler', 'Event konnte nicht aktualisiert werden. Prüfe die RLS Policies oder Datenbankverbindung.');
         return;
       }
 

@@ -10,7 +10,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const ChatScreen = ({ navigation, route }) => {
   // Use organization context to determine if add button should be shown
   const { isOrganization } = useOrganization();
-  const { user } = useAuth();
+  const { user, displayName } = useAuth();
   
   // State for chat groups and loading
   const [chatGroups, setChatGroups] = useState([]);
@@ -177,17 +177,21 @@ const ChatScreen = ({ navigation, route }) => {
           let lastMessage = group.last_message || '';
           let messageTime = group.last_message_time || '';
           let lastTimestamp = group.last_message_timestamp || 0;
+          let senderName = group.last_message_sender_name || null; // Get sender name from view
           
           if (localMsg && (!lastTimestamp || localMsg.timestamp > lastTimestamp)) {
             lastMessage = localMsg.text;
             messageTime = localMsg.time;
             lastTimestamp = localMsg.timestamp;
+            // We don't have sender info for locally stored messages, so clear it
+            senderName = null; 
           }
           
           return {
             id: group.id,
             name: group.name,
             lastMessage: lastMessage,
+            lastMessageSender: senderName, // Store sender name
             time: messageTime,
             lastTimestamp: lastTimestamp,
             unread: unreadCount,
@@ -251,41 +255,57 @@ const ChatScreen = ({ navigation, route }) => {
     </TouchableOpacity>
   );
 
-  const renderChatItem = ({ item }) => (
-    <TouchableOpacity 
-      style={styles.chatItem}
-      onPress={() => {
-        // If it's a bot type for some reason, navigate to Dorfbot screen
-        if (item.dbType === 'bot' || item.isBot) {
-          navigation.navigate('Dorfbot');
-        } else {
-          // Pass timestamp parameter to trigger unread count update when returning
-          navigation.navigate('ChatDetail', { 
-            chatGroup: item,
-            onReturn: () => updateLocalUnreadCount(item.id)
-          });
-        }
-      }}
-    >
-      {renderAvatar(item)}
-      <View style={styles.chatInfo}>
-        <View style={styles.chatTopLine}>
-          <Text style={styles.chatName}>{item.name}</Text>
-          <Text style={styles.chatTime}>{item.time}</Text>
+  const renderChatItem = ({ item }) => {
+    // Determine how to display the last message text
+    let displayMessage = item.lastMessage;
+    if (item.lastMessage && item.lastMessageSender) {
+      // Check if the sender is the current user (requires displayName from useAuth)
+      if (user && item.lastMessageSender === displayName) { 
+        displayMessage = `Du: ${item.lastMessage}`;
+      } else {
+        displayMessage = `${item.lastMessageSender}: ${item.lastMessage}`;
+      }
+    } else if (item.lastMessage && item.dbType === 'broadcast') {
+      // For broadcasts, don't show sender name if missing (likely system message)
+      displayMessage = item.lastMessage;
+    }
+    
+    return (
+      <TouchableOpacity 
+        style={styles.chatItem}
+        onPress={() => {
+          // If it's a bot type for some reason, navigate to Dorfbot screen
+          if (item.dbType === 'bot' || item.isBot) {
+            navigation.navigate('Dorfbot');
+          } else {
+            // Pass timestamp parameter to trigger unread count update when returning
+            navigation.navigate('ChatDetail', { 
+              chatGroup: item,
+              onReturn: () => updateLocalUnreadCount(item.id)
+            });
+          }
+        }}
+      >
+        {renderAvatar(item)}
+        <View style={styles.chatInfo}>
+          <View style={styles.chatTopLine}>
+            <Text style={styles.chatName}>{item.name}</Text>
+            <Text style={styles.chatTime}>{item.time}</Text>
+          </View>
+          <View style={styles.chatBottomLine}>
+            <Text style={styles.chatMessage} numberOfLines={1}>
+              {displayMessage}
+            </Text>
+            {item.unread > 0 && (
+              <View style={styles.unreadBadge}>
+                <Text style={styles.unreadText}>{item.unread}</Text>
+              </View>
+            )}
+          </View>
         </View>
-        <View style={styles.chatBottomLine}>
-          <Text style={styles.chatMessage} numberOfLines={1}>
-            {item.lastMessage}
-          </Text>
-          {item.unread > 0 && (
-            <View style={styles.unreadBadge}>
-              <Text style={styles.unreadText}>{item.unread}</Text>
-            </View>
-          )}
-        </View>
-      </View>
-    </TouchableOpacity>
-  );
+      </TouchableOpacity>
+    );
+  };
 
   const renderChatList = () => {
     if (isLoading) {

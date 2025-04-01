@@ -116,39 +116,108 @@ const ChatDetailScreen = ({ route, navigation }) => {
       setLoading(true);
       setError(null);
       
-      // Fetch messages for this chat group
-      const { data, error } = await supabase
-        .from('chat_messages_with_users')
-        .select('*')
+      // 1. Fetch messages for this chat group, joining with profiles
+      const { data: messagesData, error: messagesError } = await supabase
+        .from('chat_messages') // Query the base table
+        .select(`
+          id,
+          chat_group_id,
+          user_id,
+          text,
+          created_at,
+          profiles ( display_name ) // Join profiles table
+        `)
         .eq('chat_group_id', chatGroup.id)
         .order('created_at', { ascending: true });
       
-      if (error) {
-        console.error('Error fetching messages:', error);
-        setError('Could not load messages. Please try again later.');
+      if (messagesError) {
+        console.error('Error fetching messages:', messagesError);
+        setError('Nachrichten konnten nicht geladen werden. Bitte versuche es später erneut.');
+        setLoading(false);
         return;
       }
       
-      // Process messages to include reactions and comments
-      const processedMessages = await Promise.all(data.map(async (msg) => {
-        const reactions = await fetchReactions(msg.id);
-        const comments = await fetchComments(msg.id);
+      if (!messagesData || messagesData.length === 0) {
+        setMessages([]);
+        setLoading(false);
+        return;
+      }
+
+      const messageIds = messagesData.map(msg => msg.id);
+      
+      // 2. Fetch all comments for these messages in one go
+      const { data: commentsData, error: commentsError } = await supabase
+        .from('message_comments') // Query the base table
+        .select(`
+          id,
+          message_id,
+          user_id,
+          text,
+          created_at,
+          profiles ( display_name ) // Join profiles table
+        `)
+        .in('message_id', messageIds)
+        .order('created_at', { ascending: true });
+
+      if (commentsError) {
+        console.error('Error fetching comments:', commentsError);
+        // Continue without comments if they fail to load
+      }
+      
+      // 3. Fetch all reactions for these messages (using RPC for aggregation)
+      // Assuming get_message_reactions_for_list exists and returns { message_id: { emoji: count, ... }, ... }
+      // If not, this part needs adjustment or fallback to individual fetching.
+      const { data: reactionsData, error: reactionsError } = await supabase
+          .rpc('get_reactions_for_messages', { message_ids: messageIds });
+
+      if (reactionsError) {
+          console.error('Error fetching reactions:', reactionsError);
+          // Continue without reactions if they fail
+      }
+      
+      // 4. Process and combine the data
+      const commentsByMessageId = (commentsData || []).reduce((acc, comment) => {
+        const messageId = comment.message_id;
+        if (!acc[messageId]) {
+          acc[messageId] = [];
+        }
+        // Format comment time
+        const commentDate = new Date(comment.created_at);
+        const formattedTime = `${commentDate.getHours().toString().padStart(2, '0')}:${commentDate.getMinutes().toString().padStart(2, '0')}`;
+
+        acc[messageId].push({
+            id: comment.id,
+            text: comment.text,
+            sender: comment.profiles?.display_name || 'Unbekannt',
+            time: formattedTime,
+            user_id: comment.user_id
+        });
+        return acc;
+      }, {});
+
+      const reactionsByMessageId = reactionsData || {}; // Use the RPC result directly
+
+      const processedMessages = messagesData.map(msg => {
+        // Format message time
+        const messageDate = new Date(msg.created_at);
+        const formattedTime = `${messageDate.getHours().toString().padStart(2, '0')}:${messageDate.getMinutes().toString().padStart(2, '0')}`;
         
         return {
           id: msg.id,
           text: msg.text,
-          sender: msg.sender,
-          time: msg.time,
-          reactions: reactions,
-          comments: comments,
+          sender: msg.profiles?.display_name || (msg.user_id ? 'Unbekannt' : 'System'), // Handle null user_id
+          time: formattedTime,
+          reactions: reactionsByMessageId[msg.id] || {},
+          comments: commentsByMessageId[msg.id] || [],
           user_id: msg.user_id
         };
-      }));
+      });
       
       setMessages(processedMessages);
+
     } catch (err) {
       console.error('Unexpected error fetching messages:', err);
-      setError('An unexpected error occurred.');
+      setError('Ein unerwarteter Fehler ist aufgetreten.');
     } finally {
       setLoading(false);
     }
@@ -159,48 +228,6 @@ const ChatDetailScreen = ({ route, navigation }) => {
     setActiveEmojiPickerMessageId(prevId => 
       prevId === messageId ? null : messageId
     );
-  };
-
-  // Fetch reactions for a specific message
-  const fetchReactions = async (messageId) => {
-    try {
-      // Use the helper function to get reactions as JSON
-      const { data, error } = await supabase.rpc(
-        'get_message_reactions',
-        { message_uuid: messageId }
-      );
-      
-      if (error) {
-        console.error('Error fetching reactions:', error);
-        return {};
-      }
-      
-      return data || {};
-    } catch (err) {
-      console.error('Error in fetchReactions:', err);
-      return {};
-    }
-  };
-  
-  // Fetch comments for a specific message
-  const fetchComments = async (messageId) => {
-    try {
-      const { data, error } = await supabase
-        .from('message_comments_with_users')
-        .select('*')
-        .eq('message_id', messageId)
-        .order('created_at', { ascending: true });
-      
-      if (error) {
-        console.error('Error fetching comments:', error);
-        return [];
-      }
-      
-      return data || [];
-    } catch (err) {
-      console.error('Error in fetchComments:', err);
-      return [];
-    }
   };
 
   const sendMessage = async () => {
@@ -517,9 +544,10 @@ const ChatDetailScreen = ({ route, navigation }) => {
   const renderComments = (item) => {
     if (!item.comments || item.comments.length === 0) return null;
     
+    // Comments are now pre-formatted with sender name and time in fetchMessages
     return (
       <View style={styles.commentsContainer}>
-        <Text style={styles.commentsHeader}>Kommentare:</Text>
+        <Text style={styles.commentsHeader}>Kommentare ({item.comments.length}):</Text>
         {item.comments.map(comment => (
           <View key={comment.id} style={styles.commentBubble}>
             <Text style={styles.commentSender}>{comment.sender}</Text>
@@ -583,22 +611,25 @@ const ChatDetailScreen = ({ route, navigation }) => {
 
   const renderItem = ({ item }) => {
     const isMe = user && item.user_id === user.id;
-    const isSystemOrBroadcast = (isBroadcast() && !isMe) || item.sender === 'bot';
+    // Use item.sender which is pre-formatted in fetchMessages
+    const isSystemOrBroadcastAdmin = (isBroadcast() && !isMe) || item.sender === 'System'; 
     
     return (
       <View style={styles.messageContainer}>
         <View 
           style={[
             styles.messageBubble, 
-            isMe ? styles.myMessage : 
-            isSystemOrBroadcast ? styles.systemMessage : styles.otherMessage
+            isMe ? styles.myMessage :
+            isSystemOrBroadcastAdmin ? styles.systemMessage : styles.otherMessage
           ]}
         >
-          {!isMe && <Text style={styles.messageSender}>{item.sender}</Text>}
+          {/* Display sender name only if it's not me and not a system message */}
+          {!isMe && item.sender !== 'System' && <Text style={styles.messageSender}>{item.sender}</Text>}
           <Text style={styles.messageText}>{item.text}</Text>
           <Text style={styles.messageTime}>{item.time}</Text>
         </View>
         
+        {/* Render reactions and comments which are now part of the item object */}
         {renderReactions(item)}
         {isBroadcast() && renderBroadcastActions(item)}
         {renderComments(item)}

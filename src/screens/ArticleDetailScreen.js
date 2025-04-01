@@ -67,7 +67,7 @@ const ArticleDetailScreen = ({ route, navigation }) => {
         .from('articles')
         .select(`
           *,
-          app_users:author_id (
+          profiles:author_id (
             display_name
           )
         `)
@@ -96,8 +96,10 @@ const ArticleDetailScreen = ({ route, navigation }) => {
       });
       
       // Set author name
-      if (articleData.app_users && articleData.app_users.display_name) {
-        setAuthorName(articleData.app_users.display_name);
+      if (articleData.profiles && articleData.profiles.display_name) {
+        setAuthorName(articleData.profiles.display_name);
+      } else {
+        setAuthorName('Redaktion');
       }
       
       // Check if current user is the author
@@ -400,11 +402,19 @@ const ArticleDetailScreen = ({ route, navigation }) => {
   };
   
   const renderComment = ({ item }) => {
+    // Format the timestamp
+    const commentDate = new Date(item.created_at);
+    const formattedTime = `${commentDate.getHours().toString().padStart(2, '0')}:${commentDate.getMinutes().toString().padStart(2, '0')}`;
+    const formattedDate = `${commentDate.getDate().toString().padStart(2, '0')}.${(commentDate.getMonth() + 1).toString().padStart(2, '0')}.${commentDate.getFullYear()}`;
+
+    // Get user display name from the nested profiles object
+    const userName = item.profiles?.display_name || 'Unbekannt';
+
     return (
       <View style={styles.commentItem}>
         <View style={styles.commentHeader}>
-          <Text style={styles.commentUser}>{item.user}</Text>
-          <Text style={styles.commentTime}>{item.time}</Text>
+          <Text style={styles.commentUser}>{userName}</Text>
+          <Text style={styles.commentTime}>{`${formattedDate} ${formattedTime}`}</Text>
         </View>
         <Text style={styles.commentText}>{item.text}</Text>
       </View>
@@ -761,7 +771,7 @@ const styles = StyleSheet.create({
     color: '#444',
   },
   commentsLoading: {
-    marginVertical: 20,
+    marginTop: 20,
   },
   emptyCommentsText: {
     fontStyle: 'italic',
@@ -770,29 +780,31 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   commentItem: {
-    backgroundColor: '#f8f8f8',
-    padding: 10,
+    backgroundColor: '#f9f9f9',
+    padding: 12,
     borderRadius: 8,
     marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#eee',
   },
   commentHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 5,
   },
   commentUser: {
-    fontSize: 14,
     fontWeight: 'bold',
-    color: '#444',
+    color: '#333',
+    fontSize: 13,
   },
   commentTime: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#888',
   },
   commentText: {
     fontSize: 14,
-    color: '#333',
+    color: '#555',
+    lineHeight: 20,
   },
   inputContainer: {
     padding: 10,

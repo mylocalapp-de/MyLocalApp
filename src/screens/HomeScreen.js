@@ -59,14 +59,14 @@ const HomeScreen = ({ navigation }) => {
           type,
           published_at,
           author_id,
-          app_users(display_name)
+          profiles(display_name)
         `)
         .eq('is_published', true)
         .order('published_at', { ascending: false });
       
       if (error) {
         console.error('Error fetching articles:', error);
-        setError('Could not load articles. Please try again later.');
+        setError('Artikel konnten nicht geladen werden. Bitte versuche es später erneut.');
       } else {
         // Format the data to match what we expect from article_listings
         const formattedArticles = data.map(article => {
@@ -87,7 +87,7 @@ const HomeScreen = ({ navigation }) => {
             published_at: article.published_at,
             date: formattedDate,
             author_id: article.author_id,
-            author_name: article.app_users?.display_name || 'Redaktion'
+            author_name: article.profiles?.display_name || 'Redaktion'
           };
         });
         

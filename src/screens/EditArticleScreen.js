@@ -119,35 +119,20 @@ const EditArticleScreen = ({ navigation, route }) => {
     try {
       setIsSaving(true);
       
-      // Use RPC to bypass RLS policies since we're not using Supabase Auth
-      const { data, error } = await supabase
-        .rpc('update_article', {
-          p_article_id: articleId,
-          p_title: title,
-          p_content: content,
-          p_type: type,
-          p_author_id: user.id
-        });
+      // Directly update the article. RLS policies will enforce that only the author can update.
+      const { error } = await supabase
+        .from('articles')
+        .update({
+          title: title,
+          content: content,
+          type: type
+        })
+        .eq('id', articleId); // RLS handles the author_id check
       
       if (error) {
         console.error('Error updating article:', error);
-        
-        // Fallback to direct update if RPC fails
-        const { error: directError } = await supabase
-          .from('articles')
-          .update({
-            title: title,
-            content: content,
-            type: type
-          })
-          .eq('id', articleId)
-          .eq('author_id', user.id);
-        
-        if (directError) {
-          console.error('Error with direct update:', directError);
-          Alert.alert('Fehler', 'Artikel konnte nicht aktualisiert werden.');
-          return;
-        }
+        Alert.alert('Fehler', 'Artikel konnte nicht aktualisiert werden. Bitte prüfe die RLS Policies oder Datenbankverbindung.');
+        return;
       }
       
       Alert.alert(

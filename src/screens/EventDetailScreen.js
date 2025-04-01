@@ -72,12 +72,12 @@ const EventDetailScreen = ({ route, navigation }) => {
       setLoading(true);
       setError(null);
       
-      // Fetch the event
+      // Fetch the event with organizer info
       const { data: eventData, error: eventError } = await supabase
         .from('events')
         .select(`
           *,
-          app_users:organizer_id (
+          profiles:organizer_id (
             display_name
           )
         `)
@@ -99,8 +99,12 @@ const EventDetailScreen = ({ route, navigation }) => {
       setEvent(eventData);
       
       // Set organizer name
-      if (eventData.app_users && eventData.app_users.display_name) {
-        setOrganizerName(eventData.app_users.display_name);
+      // Use the joined profiles table for the display name
+      if (eventData.profiles && eventData.profiles.display_name) {
+        setOrganizerName(eventData.profiles.display_name);
+      } else {
+        // Fallback if profile is somehow missing or name is null
+        setOrganizerName('Organisator'); 
       }
       
       // Check if current user is the organizer
@@ -668,15 +672,25 @@ const EventDetailScreen = ({ route, navigation }) => {
             ) : (
               <FlatList
                 data={comments}
-                renderItem={({ item }) => (
-                  <View style={styles.commentItem}>
-                    <View style={styles.commentHeader}>
-                      <Text style={styles.commentUser}>{item.user_name}</Text>
-                      <Text style={styles.commentTime}>{item.time}</Text>
+                renderItem={({ item }) => {
+                  // Format comment time
+                  const commentDate = new Date(item.created_at);
+                  const formattedTime = `${commentDate.getHours().toString().padStart(2, '0')}:${commentDate.getMinutes().toString().padStart(2, '0')}`;
+                  const formattedDate = `${commentDate.getDate().toString().padStart(2, '0')}.${(commentDate.getMonth() + 1).toString().padStart(2, '0')}.${commentDate.getFullYear()}`;
+                  
+                  // Get user name from profiles relation
+                  const userName = item.profiles?.display_name || 'Unbekannt';
+
+                  return (
+                    <View style={styles.commentItem}>
+                      <View style={styles.commentHeader}>
+                        <Text style={styles.commentUser}>{userName}</Text> 
+                        <Text style={styles.commentTime}>{`${formattedDate} ${formattedTime}`}</Text>
+                      </View>
+                      <Text style={styles.commentText}>{item.text}</Text>
                     </View>
-                    <Text style={styles.commentText}>{item.text}</Text>
-                  </View>
-                )}
+                  );
+                }}
                 keyExtractor={item => item.id.toString()}
                 scrollEnabled={false}
                 ListEmptyComponent={
@@ -695,18 +709,23 @@ const EventDetailScreen = ({ route, navigation }) => {
             {loadingAttendeesList ? (
               <ActivityIndicator size="small" color="#4285F4" />
             ) : attendeesList.length > 0 ? (
-              attendeesList.map(item => (
-                <View key={item.user_id} style={styles.attendeeItem}> 
-                  <Image
-                    source={require('../../assets/avatar_placeholder.png')} // Always use placeholder
-                    style={styles.attendeeAvatar}
-                  />
-                  <Text style={styles.attendeeName}>{item.user_name}</Text>
-                  <View style={[styles.statusBadge, styles[`statusBadge_${item.status}`]]}>
-                     <Text style={styles.statusBadgeText}>{item.status === 'attending' ? 'Nimmt teil' : item.status === 'maybe' ? 'Vielleicht' : 'Abgelehnt'}</Text>
+              attendeesList.map(item => {
+                // Get user name from profiles relation
+                const attendeeName = item.profiles?.display_name || 'Unbekannt';
+                
+                return (
+                  <View key={item.user_id} style={styles.attendeeItem}>
+                    <Image
+                      source={require('../../assets/avatar_placeholder.png')} // Always use placeholder
+                      style={styles.attendeeAvatar}
+                    />
+                    <Text style={styles.attendeeName}>{attendeeName}</Text>
+                    <View style={[styles.statusBadge, styles[`statusBadge_${item.status}`]]}>
+                      <Text style={styles.statusBadgeText}>{item.status === 'attending' ? 'Nimmt teil' : item.status === 'maybe' ? 'Vielleicht' : 'Abgelehnt'}</Text>
+                    </View>
                   </View>
-                </View>
-              ))
+                );
+              })
             ) : (
               <Text style={styles.noAttendeesText}>Noch keine Teilnehmer registriert.</Text>
             )}

@@ -151,8 +151,21 @@ export const AuthProvider = ({ children }) => {
       }
 
       // Get locally stored preferences and display name
-      const localPrefs = await AsyncStorage.getItem('userPreferences');
+      const localPrefsString = await AsyncStorage.getItem('userPreferences');
       const localDisplayName = await AsyncStorage.getItem('userDisplayName');
+      let localPrefs = [];
+      try {
+        if (localPrefsString) {
+            localPrefs = JSON.parse(localPrefsString);
+            // Ensure it's an array
+            if (!Array.isArray(localPrefs)) {
+                localPrefs = [];
+            }
+        }
+      } catch (e) {
+          console.error("AuthContext: Failed to parse local preferences from storage", e);
+          localPrefs = []; // Default to empty array on parse error
+      }
 
       // Sign up using Supabase Auth
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
@@ -162,7 +175,7 @@ export const AuthProvider = ({ children }) => {
           // Pass local data to be picked up by the handle_new_user trigger
           data: {
             display_name: localDisplayName || email.split('@')[0], // Use local name or generate default
-            preferences: localPrefs ? JSON.parse(localPrefs) : []
+            preferences: localPrefs // Pass the actual array
           }
         }
       });
