@@ -296,6 +296,8 @@ const ProfileScreen = () => {
       const result = await updateEmail(newEmail.trim(), emailCurrentPassword);
       
       if (result.success) {
+        // Only close modal on success
+        setShowAccountSettingsModal(false);
         if (result.needsConfirmation) {
            Alert.alert(
               'Bestätigung erforderlich', 
@@ -304,13 +306,14 @@ const ProfileScreen = () => {
         } else {
             Alert.alert('Erfolgreich', 'Deine E-Mail-Adresse wurde aktualisiert.');
         }
-        setShowAccountSettingsModal(false);
       } else {
         console.error('Failed to update email:', result.error);
         // Check for specific rate-limiting error
         const errorMessage = result.error?.message || 'E-Mail konnte nicht geändert werden.';
         if (errorMessage.includes('For security purposes')) {
             setAccountSettingsError('Aus Sicherheitsgründen können Sie diese Anfrage erst nach kurzer Wartezeit erneut stellen. Bitte versuchen Sie es später noch einmal.');
+        } else if (errorMessage.includes('Invalid user credentials')) { // Catch incorrect password
+            setAccountSettingsError('Falsches aktuelles Passwort. Bitte versuche es erneut.');
         } else {
             setAccountSettingsError(errorMessage);
         }
@@ -319,6 +322,7 @@ const ProfileScreen = () => {
       console.error('Unexpected error during email update:', error);
       setAccountSettingsError('Ein unerwarteter Fehler ist aufgetreten.');
     } finally {
+      // Always stop loading, regardless of success or failure
       setIsAccountSettingsLoading(false);
     }
   };
@@ -351,11 +355,12 @@ const ProfileScreen = () => {
       const result = await updatePassword(newPassword);
       
       if (result.success) {
+        // Only close modal on success
+        setShowAccountSettingsModal(false);
         Alert.alert(
           'Erfolgreich', 
           'Dein Passwort wurde aktualisiert.'
         );
-        setShowAccountSettingsModal(false);
       } else {
         console.error('Failed to update password:', result.error);
         // Provide more specific feedback if possible (e.g., new password is same as old)
@@ -365,6 +370,7 @@ const ProfileScreen = () => {
       console.error('Unexpected error during password update:', error);
       setAccountSettingsError('Ein unerwarteter Fehler ist aufgetreten.');
     } finally {
+      // Always stop loading, regardless of success or failure
       setIsAccountSettingsLoading(false);
     }
   };

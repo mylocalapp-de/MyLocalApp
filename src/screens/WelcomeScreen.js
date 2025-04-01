@@ -98,13 +98,17 @@ const WelcomeScreen = ({ navigation }) => {
         // which triggers AppNavigator to switch to MainApp.
       } else {
         console.error('Login failed:', result.error);
-        // Check for specific invalid credentials error
-        const errorMessage = result.error?.message || 'Anmeldung fehlgeschlagen. Bitte überprüfe deine Eingaben.';
-        if (errorMessage.toLowerCase().includes('invalid login credentials')) {
-            setError('Ungültige Anmeldedaten. Bitte überprüfe deine E-Mail und dein Passwort.');
+        const errorMessage = result.error?.message;
+        
+        if (errorMessage === 'Invalid login credentials') {
+            setError('E-Mail oder Passwort ist ungültig. Bitte überprüfe deine Eingaben.');
+        } else if (errorMessage?.includes('Email not confirmed')) {
+            setError('Bitte bestätige deine E-Mail-Adresse, bevor du dich anmeldest. Überprüfe dein Postfach.');
+        } else if (errorMessage?.includes('rate limit')) { // Catch potential rate limit errors
+             setError('Zu viele Anmeldeversuche. Bitte warte einen Moment und versuche es erneut.');
         } else {
-            // Use Supabase error message directly for other cases
-            setError(errorMessage);
+             // Use Supabase error message or a generic fallback
+             setError(`Anmeldung fehlgeschlagen: ${errorMessage || 'Unbekannter Fehler'}`);
         }
       }
     } catch (err) {
