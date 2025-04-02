@@ -16,12 +16,14 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+import { useOrganization } from '../context/OrganizationContext';
 
 const { height } = Dimensions.get('window');
 const androidPaddingTop = height * 0.05; // 3% of screen height for better scaling
 
 const CreateBroadcastGroupScreen = ({ navigation }) => {
   const { user } = useAuth();
+  const { activeOrganizationId } = useOrganization();
   
   // Form state
   const [name, setName] = useState('');
@@ -122,6 +124,7 @@ const CreateBroadcastGroupScreen = ({ navigation }) => {
           type: 'broadcast',
           tags: selectedTags,
           admin_id: user.id,
+          organization_id: activeOrganizationId,
           is_active: true
         })
         .select()

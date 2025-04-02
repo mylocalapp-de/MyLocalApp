@@ -309,12 +309,11 @@ CREATE OR REPLACE VIEW public.chat_group_listings AS
     lm.text as last_message, format_time_german(lm.created_at) as last_message_time,
     lm.created_at as last_message_timestamp,
     COALESCE(org.name, g.name) as display_source, -- Org name or group name
-    -- Attempt to get sender name (might need refinement for org context)
-    COALESCE(
-        (SELECT sender_org.name FROM public.organizations sender_org WHERE sender_org.id = g.organization_id AND lm.user_id IS NULL), -- Placeholder logic for system/org sent message
-        sender_profile.display_name,
-        'System'
-     ) as last_message_sender_name,
+    -- Determine last sender name
+    CASE
+      WHEN g.type = 'broadcast' AND g.organization_id IS NOT NULL THEN COALESCE(org.name, 'Organisation') -- Show Org Name for Org Broadcasts
+      ELSE COALESCE(sender_profile.display_name, 'System') -- Show User Name or System otherwise
+    END as last_message_sender_name,
     0 as unread_count -- Placeholder, requires complex logic with RLS/read status
   FROM public.chat_groups g
   LEFT JOIN LastMessages lm ON g.id = lm.chat_group_id AND lm.rn = 1
@@ -325,11 +324,25 @@ CREATE OR REPLACE VIEW public.chat_group_listings AS
 
 -- Chat Messages
 CREATE OR REPLACE VIEW public.chat_messages_with_users AS
-  SELECT m.id, m.chat_group_id, m.text, m.user_id,
-    COALESCE(p.display_name, 'Anonymous') as sender,
-    format_time_german(m.created_at) as time, m.created_at
+  SELECT 
+    m.id, 
+    m.chat_group_id, 
+    m.text, 
+    m.user_id,
+    -- Determine sender: Org name for broadcast messages in org context, else profile name or 'System'/'Anonymous'
+    CASE
+      WHEN g.type = 'broadcast' AND g.organization_id IS NOT NULL THEN COALESCE(org.name, 'Organisation') -- Show Org Name for Org Broadcasts
+      ELSE COALESCE(p.display_name, 'Unbekannt') -- Show User Name otherwise
+    END as sender,
+    format_time_german(m.created_at) as time, 
+    m.created_at,
+    g.type as group_type, -- Include group type for client-side logic if needed
+    g.organization_id -- Include org ID for client-side logic if needed
   FROM public.chat_messages m
-  LEFT JOIN public.profiles p ON m.user_id = p.id ORDER BY m.created_at;
+  LEFT JOIN public.profiles p ON m.user_id = p.id 
+  LEFT JOIN public.chat_groups g ON m.chat_group_id = g.id -- Join chat_groups to get type and org_id
+  LEFT JOIN public.organizations org ON g.organization_id = org.id -- Join organizations to get name
+  ORDER BY m.created_at;
 
 -- Message Comments
 CREATE OR REPLACE VIEW public.message_comments_with_users AS
@@ -448,6 +461,8 @@ DROP POLICY IF EXISTS "Allow users to join an organization (insert)" ON public.o
 DROP POLICY IF EXISTS "Allow users to leave an organization (delete)" ON public.organization_members;
 -- Drop the potentially new named policy if it exists from previous runs
 DROP POLICY IF EXISTS "prevent_last_admin_leave" ON public.organization_members;
+-- Drop the policy we are about to recreate with a potentially different name
+DROP POLICY IF EXISTS "Allow authenticated users to add themselves to an organization" ON public.organization_members;
 
 -- Revised SELECT Policy (Using SECURITY DEFINER function)
 CREATE POLICY "Allow members to view membership of their orgs" ON public.organization_members
@@ -460,10 +475,12 @@ CREATE POLICY "Allow admin to manage members in their org" ON public.organizatio
   USING (public.is_org_member_admin(auth.uid(), organization_id) AND user_id != auth.uid()) -- Use admin function
   WITH CHECK (public.is_org_member_admin(auth.uid(), organization_id)); -- Use admin function
 
--- REVISED INSERT policy: Allow any authenticated user to insert.
--- The application logic is responsible for ensuring the correct user_id is inserted.
-CREATE POLICY "Allow users to join an organization (insert)" ON public.organization_members
-  FOR INSERT TO authenticated WITH CHECK (true);
+-- REVISED INSERT policy: Allow authenticated users to add themselves.
+-- The AuthContext.js logic already ensures the correct user_id (auth.uid()) is sent.
+CREATE POLICY "Allow authenticated users to add themselves to an organization" ON public.organization_members
+  FOR INSERT TO authenticated
+  WITH CHECK (user_id = auth.uid());
+COMMENT ON POLICY "Allow authenticated users to add themselves to an organization" ON public.organization_members IS 'Ensures a user can only insert a membership row for themselves.';
 
 -- REVISED DELETE Policy: Prevent last admin from leaving
 CREATE POLICY "prevent_last_admin_leave" ON public.organization_members
@@ -748,6 +765,28 @@ GRANT EXECUTE ON FUNCTION public.generate_unique_invite_code() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_event_attendees(UUID) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.handle_new_user() TO postgres; -- Trigger needs elevated rights
 GRANT EXECUTE ON FUNCTION public.handle_new_organization() TO postgres; -- Trigger needs elevated rights
+
+-- NEW FUNCTION: Get Article Reactions (Counts per emoji)
+CREATE OR REPLACE FUNCTION public.get_article_reactions(article_uuid UUID)
+RETURNS JSON AS $$
+DECLARE reaction_counts JSON;
+BEGIN
+  SELECT json_object_agg(emoji, count) INTO reaction_counts
+  FROM (
+    SELECT emoji, count(*) as count
+    FROM public.article_reactions
+    WHERE article_id = article_uuid
+    GROUP BY emoji
+  ) as grouped_reactions;
+
+  RETURN COALESCE(reaction_counts, '{}'::JSON); -- Return empty JSON object if no reactions
+END;
+$$ LANGUAGE plpgsql STABLE; -- SECURITY DEFINER might be needed if SELECT RLS on article_reactions is restrictive, but STABLE is generally preferred.
+
+COMMENT ON FUNCTION public.get_article_reactions(UUID) IS 'Retrieves the counts of each reaction emoji for a given article UUID.';
+
+-- Grant execute permission for the new function
+GRANT EXECUTE ON FUNCTION public.get_article_reactions(UUID) TO authenticated;
 
 -- NEW FUNCTION: Securely create an organization
 CREATE OR REPLACE FUNCTION public.create_new_organization(org_name TEXT)

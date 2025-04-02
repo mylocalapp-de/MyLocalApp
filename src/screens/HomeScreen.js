@@ -59,7 +59,8 @@ const HomeScreen = ({ navigation }) => {
           type,
           published_at,
           author_id,
-          profiles(display_name)
+          profiles(display_name),
+          is_organization_post
         `)
         .eq('is_published', true)
         .order('published_at', { ascending: false });
@@ -87,7 +88,8 @@ const HomeScreen = ({ navigation }) => {
             published_at: article.published_at,
             date: formattedDate,
             author_id: article.author_id,
-            author_name: article.profiles?.display_name || 'Redaktion'
+            author_name: article.profiles?.display_name || 'Redaktion',
+            is_organization_post: article.is_organization_post
           };
         });
         
@@ -176,10 +178,10 @@ const HomeScreen = ({ navigation }) => {
                     <Text style={styles.articleDate}>{article.date}</Text>
                   </View>
                   <Text 
-                  style={article.author_name === 'Redaktion' ? styles.redaktionAuthor : styles.articleAuthor}
-                >
-                  {article.author_name}
-                </Text>
+                    style={article.is_organization_post ? styles.organizationAuthor : (article.author_name === 'Redaktion' ? styles.redaktionAuthor : styles.articleAuthor)}
+                  >
+                    {article.author_name}
+                  </Text>
                 </View>
                 <Text style={styles.articleTitle}>{article.title}</Text>
                 <Text style={styles.articleContent} numberOfLines={3}>
@@ -312,6 +314,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#888',
     fontStyle: 'italic',
+    alignSelf: 'flex-end',
+  },
+  organizationAuthor: {
+    fontSize: 12,
+    color: '#208e5d',
+    fontWeight: 'bold',
     alignSelf: 'flex-end',
   },
   addButton: {

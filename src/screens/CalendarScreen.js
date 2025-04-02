@@ -93,7 +93,9 @@ const CalendarScreen = ({ navigation }) => {
           category: event.category,
           description: event.description,
           attendees: event.attendees || {}, // Attendee data from the view
-          formatted_date: event.formatted_date
+          formatted_date: event.formatted_date,
+          organizer_name: event.organizer_name, // Name from the view
+          is_organization_event: event.is_organization_event // Flag from the view
         }));
         
         setEvents(formattedEvents);
@@ -349,6 +351,11 @@ const CalendarScreen = ({ navigation }) => {
             <Text style={styles.eventDateTime}>Am {formattedDate} {item.time}</Text>
             <View style={styles.eventFooter}>
               <Text style={styles.eventLocation}>Uhr am {item.location}</Text>
+              <Text 
+                style={item.is_organization_event ? styles.organizationOrganizer : styles.eventOrganizer}
+              >
+                {item.organizer_name} 
+              </Text>
               {attendeeCount > 0 && (
                 <View style={styles.attendeesInfo}>
                   <Ionicons name="people" size={14} color="#666" />
@@ -648,6 +655,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     marginLeft: 4,
+  },
+  eventOrganizer: { // Style for individual organizer
+    fontSize: 12,
+    color: '#4285F4',
+    fontWeight: 'bold',
+    flexShrink: 1, // Prevent long names from pushing out other elements
+    textAlign: 'right',
+  },
+  organizationOrganizer: { // Style for organization organizer
+    fontSize: 12,
+    color: '#208e5d', // Use the same green as in HomeScreen
+    fontWeight: 'bold',
+    flexShrink: 1,
+    textAlign: 'right',
   },
   addButton: {
     position: 'absolute',

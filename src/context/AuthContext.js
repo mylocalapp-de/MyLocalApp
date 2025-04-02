@@ -705,11 +705,12 @@ export const AuthProvider = ({ children }) => {
              // 3. Add the user as a member
              const { data: insertData, error: joinError } = await supabase
                  .from('organization_members')
-                 .insert(memberData)
-                 .select(); // Select to see if an error occurs but returns data?
+                 .insert(memberData);
+                 // NOTE: .select() was removed here as it caused RLS issues immediately after insert.
+                 // The function relies on loadUserProfileAndOrgs refetching the org list.
 
              console.log('[AuthContext] Insert operation result - Error:', joinError); // Log the error
-             console.log('[AuthContext] Insert operation result - Data:', insertData); // Log returned data
+             // Data is null without .select(), which is expected now.
 
              if (joinError) {
                   // Handle potential duplicate entry if user is already a member

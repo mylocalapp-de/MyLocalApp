@@ -69,6 +69,9 @@ const ArticleDetailScreen = ({ route, navigation }) => {
           *,
           profiles:author_id (
             display_name
+          ),
+          organizations:organization_id (
+            name
           )
         `)
         .eq('id', articleId)
@@ -95,11 +98,13 @@ const ArticleDetailScreen = ({ route, navigation }) => {
         date: formattedDate
       });
       
-      // Set author name
-      if (articleData.profiles && articleData.profiles.display_name) {
+      // Set author name (prioritize organization name)
+      if (articleData.organizations && articleData.organizations.name) {
+        setAuthorName(articleData.organizations.name);
+      } else if (articleData.profiles && articleData.profiles.display_name) {
         setAuthorName(articleData.profiles.display_name);
       } else {
-        setAuthorName('Redaktion');
+        setAuthorName('Redaktion'); // Default fallback
       }
       
       // Check if current user is the author
@@ -522,7 +527,13 @@ const ArticleDetailScreen = ({ route, navigation }) => {
           <Text style={styles.title}>{article.title}</Text>
           <View style={styles.articleMeta}>
             <Text style={styles.date}>{article.date}</Text>
-            <Text style={authorName === 'Redaktion' ? styles.redaktionAuthor : styles.author}>
+            <Text 
+              style={
+                article.organization_id 
+                  ? styles.organizationAuthor 
+                  : (authorName === 'Redaktion' ? styles.redaktionAuthor : styles.author)
+              }
+            >
               {authorName}
             </Text>
           </View>
@@ -695,6 +706,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#888',
     fontStyle: 'italic',
+  },
+  organizationAuthor: {
+    fontSize: 12,
+    color: '#208e5d',
+    fontWeight: 'bold',
   },
   articleContent: {
     fontSize: 16,

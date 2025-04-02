@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker'; // For date/time selection
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+import { useOrganization } from '../context/OrganizationContext';
 
 const { height } = Dimensions.get('window');
 const androidPaddingTop = height * 0.03;
@@ -26,6 +27,7 @@ const eventCategories = ['Sport', 'Vereine', 'Gemeindeamt', 'Kultur'];
 
 const CreateEventScreen = ({ navigation }) => {
   const { user } = useAuth();
+  const { activeOrganizationId } = useOrganization(); // Get active org ID
 
   // Event form state
   const [title, setTitle] = useState('');
@@ -86,6 +88,7 @@ const CreateEventScreen = ({ navigation }) => {
           location: location,
           category: category,
           organizer_id: user.id, // Assign the current user as the organizer
+          organization_id: activeOrganizationId, // Add organization ID
           is_published: true // Publish immediately
         })
         .select()

@@ -16,12 +16,14 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+import { useOrganization } from '../context/OrganizationContext';
 
 const { height } = Dimensions.get('window');
 const androidPaddingTop = height * 0.03; // 3% of screen height for better scaling
 
 const CreateArticleScreen = ({ navigation }) => {
   const { user } = useAuth();
+  const { activeOrganizationId } = useOrganization();
   
   // Article form state
   const [title, setTitle] = useState('');
@@ -81,6 +83,7 @@ const CreateArticleScreen = ({ navigation }) => {
           content: content,
           type: type,
           author_id: user.id,
+          organization_id: activeOrganizationId,
           is_published: true
         })
         .select()
@@ -136,6 +139,7 @@ const CreateArticleScreen = ({ navigation }) => {
           content: content || '',
           type: type || 'Vereine',  // Default type
           author_id: user.id,
+          organization_id: activeOrganizationId,
           is_published: false  // Mark as draft
         });
       

@@ -118,15 +118,8 @@ const ChatDetailScreen = ({ route, navigation }) => {
       
       // 1. Fetch messages for this chat group, joining with profiles
       const { data: messagesData, error: messagesError } = await supabase
-        .from('chat_messages') // Query the base table
-        .select(`
-          id,
-          chat_group_id,
-          user_id,
-          text,
-          created_at,
-          profiles ( display_name ) // Join profiles table
-        `)
+        .from('chat_messages_with_users') // Query the VIEW
+        .select(`*`) // View already contains sender name
         .eq('chat_group_id', chatGroup.id)
         .order('created_at', { ascending: true });
       
@@ -205,7 +198,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
         return {
           id: msg.id,
           text: msg.text,
-          sender: msg.profiles?.display_name || (msg.user_id ? 'Unbekannt' : 'System'), // Handle null user_id
+          sender: msg.sender, // Use the sender field directly from the view
           time: formattedTime,
           reactions: reactionsByMessageId[msg.id] || {},
           comments: commentsByMessageId[msg.id] || [],

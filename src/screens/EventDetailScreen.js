@@ -79,6 +79,9 @@ const EventDetailScreen = ({ route, navigation }) => {
           *,
           profiles:organizer_id (
             display_name
+          ),
+          organizations:organization_id (
+            name
           )
         `)
         .eq('id', eventId)
@@ -98,9 +101,11 @@ const EventDetailScreen = ({ route, navigation }) => {
       // Set the event
       setEvent(eventData);
       
-      // Set organizer name
+      // Set organizer name (prioritize organization name)
       // Use the joined profiles table for the display name
-      if (eventData.profiles && eventData.profiles.display_name) {
+      if (eventData.organizations && eventData.organizations.name) {
+        setOrganizerName(eventData.organizations.name);
+      } else if (eventData.profiles && eventData.profiles.display_name) {
         setOrganizerName(eventData.profiles.display_name);
       } else {
         // Fallback if profile is somehow missing or name is null
@@ -612,6 +617,16 @@ const EventDetailScreen = ({ route, navigation }) => {
               <Ionicons name="location-outline" size={16} color="#666" />
               <Text style={styles.eventMetaText}>{event.location}</Text>
             </View>
+            <View style={styles.eventMetaItem}>
+                <Ionicons name="person-outline" size={16} color="#666" />
+                <Text 
+                  style={[styles.eventMetaText, event.organization_id ? styles.organizationOrganizer : styles.eventOrganizer]} 
+                  numberOfLines={1} 
+                  ellipsizeMode="tail"
+                 >
+                  {organizerName}
+                </Text>
+            </View>
           </View>
           
           <Text style={styles.descriptionTitle}>Beschreibung</Text>
@@ -868,6 +883,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     marginLeft: 4,
+  },
+  eventOrganizer: { // Style for individual organizer
+    fontWeight: 'bold',
+    color: '#4285F4', // Blue for individual
+  },
+  organizationOrganizer: { // Style for organization organizer
+    fontWeight: 'bold',
+    color: '#208e5d', // Green for organization
   },
   descriptionTitle: {
     fontSize: 16,
