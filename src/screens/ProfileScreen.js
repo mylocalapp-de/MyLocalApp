@@ -437,10 +437,13 @@ const ProfileScreen = () => {
 
   // Handle switch back to personal context
   const handleSwitchToPersonal = async () => {
-     setIsOrgContextLoading(true);
-     await switchOrganizationContext(null);
-     setIsOrgContextLoading(false);
-     // UI will update based on context change
+     // REMOVED: setIsOrgContextLoading(true);
+     const result = await switchOrganizationContext(null);
+     // REMOVED: setIsOrgContextLoading(false);
+     if (!result.success) {
+        Alert.alert("Fehler", result.error || "Konnte nicht zum persönlichen Account wechseln.");
+     }
+     // UI will update based on context change (isLoading from useOrganization)
   };
 
   // Handle leaving an organization
@@ -455,14 +458,18 @@ const ProfileScreen = () => {
                   text: "Verlassen",
                   style: "destructive",
                   onPress: async () => {
-                      setIsOrgContextLoading(true);
+                      // REMOVED: setIsOrgContextLoading(true);
                       const result = await leaveOrganization(orgId);
-                      setIsOrgContextLoading(false);
+                      // REMOVED: setIsOrgContextLoading(false);
                       if (result.success) {
                           Alert.alert("Erfolg", `Du hast "${orgName}" verlassen.`);
                           // Context should update automatically via AuthProvider listener
                       } else {
-                          Alert.alert("Fehler", result.error || "Verlassen fehlgeschlagen.");
+                          // Display a more user-friendly error
+                          const errorMessage = result.error?.message === 'Database Error: Cannot leave as the last admin.' 
+                              ? 'Du kannst die Organisation nicht verlassen, da du der letzte Administrator bist.'
+                              : result.error?.message || "Verlassen fehlgeschlagen.";
+                          Alert.alert("Fehler", errorMessage);
                       }
                   },
               },
@@ -578,9 +585,9 @@ const ProfileScreen = () => {
         <TouchableOpacity 
             style={[styles.button, styles.leaveButton]} 
             onPress={() => handleLeaveOrg(activeOrganizationId, activeOrganization.name)}
-            disabled={isOrgContextLoading}
+            disabled={isOrgContextLoading || authLoading}
         >
-            {isOrgContextLoading ? <ActivityIndicator size="small" color="#dc3545" /> : <Text style={styles.leaveButtonText}>Organisation verlassen</Text>}
+            {(isOrgContextLoading || authLoading) ? <ActivityIndicator size="small" color="#dc3545" /> : <Text style={styles.leaveButtonText}>Organisation verlassen</Text>}
         </TouchableOpacity>
 
       </View>

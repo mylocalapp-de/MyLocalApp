@@ -665,13 +665,22 @@ export const AuthProvider = ({ children }) => {
   };
 
   const joinOrganizationByInviteCode = async (inviteCode) => {
-      if (!user) return { success: false, error: { message: 'Nicht angemeldet.' } };
+      console.log(`[AuthContext] Attempting joinOrganizationByInviteCode with code: "${inviteCode}"`); // Log entry
+      if (!user) {
+          console.error('[AuthContext] joinOrganizationByInviteCode failed: User not logged in.');
+          return { success: false, error: { message: 'Nicht angemeldet.' } };
+      }
       if (!inviteCode || inviteCode.trim() === '') {
+           console.error('[AuthContext] joinOrganizationByInviteCode failed: Invite code is empty.');
            return { success: false, error: { message: 'Einladungscode benötigt.' } };
       }
+      
       setLoading(true);
+      let finalResult = {}; // Define final result variable
+
       try {
           // 1. Find the organization by invite code
+          console.log(`[AuthContext] Finding organization with invite code: ${inviteCode.trim()}`);
           const { data: org, error: findError } = await supabase
               .from('organizations')
               .select('id, name')
@@ -679,60 +688,102 @@ export const AuthProvider = ({ children }) => {
               .maybeSingle();
 
           if (findError) {
-              console.error("AuthContext: Error finding organization by invite code:", findError);
-              return { success: false, error: { message: findError.message || 'Fehler bei Codesuche.' } };
+              console.error("[AuthContext] Error finding organization by invite code:", findError);
+              throw new Error(findError.message || 'Fehler bei Codesuche.'); // Throw to be caught below
           }
           if (!org) {
-              return { success: false, error: { message: 'Ungültiger oder abgelaufener Einladungscode.' } };
+              console.warn("[AuthContext] No organization found for invite code:", inviteCode.trim());
+              finalResult = { success: false, error: { message: 'Ungültiger oder abgelaufener Einladungscode.' } };
+              // No need to return early, finally block handles loading state
+          } else {
+             console.log(`[AuthContext] Found organization: ${org.name} (ID: ${org.id})`);
+
+             // 2. Prepare member data
+             const memberData = { organization_id: org.id, user_id: user.id, role: 'member' };
+             console.log('[AuthContext] Attempting to insert into organization_members:', memberData);
+
+             // 3. Add the user as a member
+             const { data: insertData, error: joinError } = await supabase
+                 .from('organization_members')
+                 .insert(memberData)
+                 .select(); // Select to see if an error occurs but returns data?
+
+             console.log('[AuthContext] Insert operation result - Error:', joinError); // Log the error
+             console.log('[AuthContext] Insert operation result - Data:', insertData); // Log returned data
+
+             if (joinError) {
+                  // Handle potential duplicate entry if user is already a member
+                  if (joinError.code === '23505') { // Unique violation code
+                      console.warn('[AuthContext] User is already a member of this organization (Code 23505). Treating as success.');
+                      // Refetch anyway to ensure state is up-to-date
+                      console.log('[AuthContext] Refetching user profile and orgs (already member case)...');
+                      await loadUserProfileAndOrgs(user.id);
+                      console.log('[AuthContext] Refetch completed (already member case).');
+                      finalResult = { success: true, data: org }; // Treat as success, already joined
+                  } else {
+                      console.error("[AuthContext] Error joining organization (Insert failed): ", joinError);
+                      // Throw specific error to be caught
+                      throw new Error(joinError.message || 'Fehler beim Beitreten.');
+                  }
+             } else {
+                 // Insert seems successful (no error)
+                 console.log(`[AuthContext] User ${user.id} successfully inserted into organization ${org.name} (${org.id}) membership.`);
+                 
+                 // 4. Refetch user organizations to update the context state
+                 console.log('[AuthContext] Refetching user profile and orgs after successful join...');
+                 await loadUserProfileAndOrgs(user.id);
+                 console.log('[AuthContext] Refetch completed after successful join.');
+
+                 finalResult = { success: true, data: org };
+             }
           }
-
-          // 2. Add the user as a member
-          const { error: joinError } = await supabase
-              .from('organization_members')
-              .insert({ organization_id: org.id, user_id: user.id, role: 'member' }); 
-              // Use default role 'member'. ON CONFLICT DO NOTHING can be added in DB if preferred
-
-          if (joinError) {
-               // Handle potential duplicate entry if user is already a member
-               if (joinError.code === '23505') { // Unique violation code
-                   console.warn('AuthContext: User is already a member of this organization.');
-                   // Refetch anyway to ensure state is up-to-date
-                   await loadUserProfileAndOrgs(user.id);
-                   return { success: true, data: org }; // Treat as success, already joined
-               } else {
-                   console.error("AuthContext: Error joining organization:", joinError);
-                   return { success: false, error: { message: joinError.message || 'Fehler beim Beitreten.' } };
-               }
-          }
-          
-          console.log(`AuthContext: User ${user.id} joined organization ${org.name} (${org.id})`);
-          
-          // Refetch user organizations to update the context state
-          await loadUserProfileAndOrgs(user.id);
-
-          return { success: true, data: org };
 
       } catch (error) {
-          console.error("AuthContext: Unexpected error joining organization:", error);
-          return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+          console.error("[AuthContext] Unexpected error caught in joinOrganizationByInviteCode:", error);
+          // Ensure the error message passed back is a string
+          finalResult = { success: false, error: { message: String(error.message || 'Ein unerwarteter Fehler ist aufgetreten.') } };
       } finally {
           setLoading(false);
+          console.log("[AuthContext] joinOrganizationByInviteCode finished. Returning:", finalResult); // Log final result
       }
+      
+      return finalResult;
   };
 
   const leaveOrganization = async (organizationId) => {
       if (!user) return { success: false, error: { message: 'Nicht angemeldet.' } };
       if (!organizationId) return { success: false, error: { message: 'Organisations-ID benötigt.' } };
       
-      // TODO: Add check - prevent last admin from leaving? Requires extra logic.
-      // Example check (pseudo-code):
-      // const { data: members, error: memberCheckErr } = await supabase.from...
-      // if (members.length === 1 && members[0].role === 'admin') {
-      //    return { success: false, error: { message: 'Letzter Admin kann Organisation nicht verlassen.' } };
-      // }
-      
-      setLoading(true);
+      setLoading(true); // Set loading true at the start
+      let result = {}; // Define result variable
       try {
+          // ** CHECK: Prevent last admin from leaving **
+          console.log(`AuthContext: Checking membership status before leaving org ${organizationId}`);
+          const { data: members, error: memberCheckError } = await supabase
+              .from('organization_members')
+              .select('user_id, role')
+              .eq('organization_id', organizationId);
+
+          if (memberCheckError) {
+              console.error("AuthContext: Error checking members before leaving:", memberCheckError);
+              throw new Error("Fehler beim Prüfen der Mitgliederzahl."); // Throw to be caught by catch block
+          }
+
+          const isAdmin = members.some(m => m.user_id === user.id && m.role === 'admin');
+          const adminCount = members.filter(m => m.role === 'admin').length;
+
+          if (isAdmin && adminCount === 1 && members.length > 1) {
+             // Is the sole admin, but other members exist
+             console.warn(`AuthContext: User ${user.id} is the last admin of org ${organizationId} with other members.`);
+             result = { success: false, error: { message: 'Du bist der letzte Admin. Bitte übertrage die Admin-Rolle oder entferne zuerst alle anderen Mitglieder.' } };
+             setLoading(false); // <-- Need to set loading false here before returning
+             return result;
+          } 
+          // Note: If isAdmin && adminCount === 1 && members.length === 1, 
+          // the RLS policy should ideally prevent deletion anyway, but the backend check adds clarity.
+          // If !isAdmin, they can always leave.
+
+          console.log(`AuthContext: Proceeding with DELETE from organization_members for user ${user.id} and org ${organizationId}`);
           const { error } = await supabase
               .from('organization_members')
               .delete()
@@ -740,26 +791,33 @@ export const AuthProvider = ({ children }) => {
               .eq('user_id', user.id);
 
           if (error) {
-              console.error("AuthContext: Error leaving organization:", error);
-              return { success: false, error: { message: error.message || 'Fehler beim Verlassen.' } };
+              console.error("AuthContext: Error leaving organization (delete op):", error);
+              // Check if the error is from our RLS policy
+              if (error.message.includes('policy "prevent_last_admin_leave"' ) || error.message.includes('check constraint violation')) { // Adjust based on actual error
+                   result = { success: false, error: { message: 'Du bist der letzte Admin und kannst die Organisation nicht verlassen.', code: 'LAST_ADMIN_VIOLATION' } };
+              } else {
+                  result = { success: false, error: { message: error.message || 'Fehler beim Verlassen.' } };
+              }
+          } else {
+              console.log(`AuthContext: User ${user.id} successfully deleted membership for org ${organizationId}`);
+              
+              // Refetch user organizations immediately AFTER successful delete
+              console.log('AuthContext: Refetching user profile and orgs after leaving...');
+              await loadUserProfileAndOrgs(user.id); // This updates userOrganizations state
+              console.log('AuthContext: User profile and orgs refetched after leaving.');
+              
+              // Let OrganizationContext react to the change in userOrganizations if the left org was active.
+              
+              result = { success: true };
           }
-          
-          console.log(`AuthContext: User ${user.id} left organization ${organizationId}`);
-          
-          // Refetch user organizations
-          await loadUserProfileAndOrgs(user.id);
-          
-          // Check if the left org was the active one - handled by OrganizationContext via user change?
-          // Let OrganizationContext handle clearing active state if needed based on userOrganizations change.
-          
-          return { success: true };
 
       } catch (error) {
           console.error("AuthContext: Unexpected error leaving organization:", error);
-          return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+          result = { success: false, error: { message: error.message || 'Ein unerwarteter Fehler ist aufgetreten.' } };
       } finally {
-          setLoading(false);
+          setLoading(false); // Ensure loading is set to false in finally block
       }
+      return result; // Return the result
   };
 
   const fetchOrganizationMembers = async (organizationId) => {

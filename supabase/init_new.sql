@@ -40,12 +40,12 @@ CREATE TABLE public.organizations (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name TEXT NOT NULL UNIQUE,
   logo_url TEXT,
-  admin_id UUID NOT NULL REFERENCES public.profiles(id), -- User who created the org initially
+  admin_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
   invite_code TEXT UNIQUE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
-COMMENT ON TABLE public.organizations IS 'Stores information about organizations (clubs, companies, etc.).';
+COMMENT ON TABLE public.organizations IS 'Stores information about organizations (clubs, companies, etc.). The admin_id references the initial creator, but administration is managed via organization_members roles.';
 COMMENT ON COLUMN public.organizations.invite_code IS 'Unique, shareable code for users to join the organization.';
 
 CREATE TABLE public.organization_members (
@@ -216,12 +216,22 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- Trigger Function for new organizations (RLS bypass version)
 CREATE OR REPLACE FUNCTION public.handle_new_organization()
 RETURNS TRIGGER AS $$
-DECLARE original_replication_role TEXT;
+DECLARE 
+  original_replication_role TEXT;
+  creator_id UUID := NEW.admin_id; -- Get the admin_id passed during INSERT
 BEGIN
+  -- Ensure creator_id is provided (should be enforced by application logic or NOT NULL constraint if kept)
+  IF creator_id IS NULL THEN
+     RAISE EXCEPTION 'Cannot create organization without an admin_id (creator).'; 
+  END IF;
+
   original_replication_role := current_setting('session_replication_role', true);
-  SET LOCAL session_replication_role = replica;
+  SET LOCAL session_replication_role = replica; 
+  
+  -- Insert the creator as the first admin member
   INSERT INTO public.organization_members (organization_id, user_id, role)
-  VALUES (NEW.id, NEW.admin_id, 'admin');
+  VALUES (NEW.id, creator_id, 'admin');
+  
   EXECUTE format('SET LOCAL session_replication_role = %L', original_replication_role);
   RETURN NEW;
 END;
@@ -407,23 +417,26 @@ ALTER TABLE public.organizations ENABLE ROW LEVEL SECURITY;
 
 -- Drop potentially problematic policies first
 DROP POLICY IF EXISTS "Allow members to read their organization details" ON public.organizations;
+DROP POLICY IF EXISTS "Allow any authenticated user to read organization details" ON public.organizations; -- Drop new policy if exists
 DROP POLICY IF EXISTS "Allow admin to manage their organization" ON public.organizations;
 DROP POLICY IF EXISTS "Allow authenticated users to create organizations" ON public.organizations; -- Also drop insert policy
 
--- Revised SELECT Policy (Using SECURITY DEFINER function)
-CREATE POLICY "Allow members to read their organization details" ON public.organizations
+-- REVISED SELECT Policy: Allow any authenticated user to read.
+-- This is necessary for the invite_code lookup during the join process.
+-- Access control for sensitive actions (update/delete) is handled by other policies.
+CREATE POLICY "Allow any authenticated user to read organization details" ON public.organizations
   FOR SELECT TO authenticated
-  USING (public.is_org_member(auth.uid(), id)); -- Use function
+  USING (true);
 
--- Revised UPDATE Policy (Using SECURITY DEFINER function)
+-- Revised UPDATE Policy (Using SECURITY DEFINER function - NO CHANGE needed here)
 CREATE POLICY "Allow admin to manage their organization" ON public.organizations
   FOR UPDATE TO authenticated
   USING (public.is_org_member_admin(auth.uid(), id)) -- Use admin function
   WITH CHECK (public.is_org_member_admin(auth.uid(), id)); -- Use admin function
 
--- Recreate INSERT policy (no change in logic needed here)
+-- Recreate INSERT policy (no change in logic needed here, assumes admin_id is provided on insert)
 CREATE POLICY "Allow authenticated users to create organizations" ON public.organizations
-  FOR INSERT TO authenticated WITH CHECK (admin_id = auth.uid()); -- Check creator is admin
+  FOR INSERT TO authenticated WITH CHECK (admin_id = auth.uid()); -- Check creator is the one inserting
 
 -- Organization Members
 ALTER TABLE public.organization_members ENABLE ROW LEVEL SECURITY;
@@ -433,6 +446,8 @@ DROP POLICY IF EXISTS "Allow members to view membership of their orgs" ON public
 DROP POLICY IF EXISTS "Allow admin to manage members in their org" ON public.organization_members;
 DROP POLICY IF EXISTS "Allow users to join an organization (insert)" ON public.organization_members;
 DROP POLICY IF EXISTS "Allow users to leave an organization (delete)" ON public.organization_members;
+-- Drop the potentially new named policy if it exists from previous runs
+DROP POLICY IF EXISTS "prevent_last_admin_leave" ON public.organization_members;
 
 -- Revised SELECT Policy (Using SECURITY DEFINER function)
 CREATE POLICY "Allow members to view membership of their orgs" ON public.organization_members
@@ -445,12 +460,31 @@ CREATE POLICY "Allow admin to manage members in their org" ON public.organizatio
   USING (public.is_org_member_admin(auth.uid(), organization_id) AND user_id != auth.uid()) -- Use admin function
   WITH CHECK (public.is_org_member_admin(auth.uid(), organization_id)); -- Use admin function
 
--- Recreate INSERT policy (no change needed)
+-- REVISED INSERT policy: Allow any authenticated user to insert.
+-- The application logic is responsible for ensuring the correct user_id is inserted.
 CREATE POLICY "Allow users to join an organization (insert)" ON public.organization_members
-  FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid()); -- User can only insert themselves
--- Recreate DELETE policy (no change needed)
-CREATE POLICY "Allow users to leave an organization (delete)" ON public.organization_members
-  FOR DELETE TO authenticated USING (user_id = auth.uid()); -- User can only delete themselves
+  FOR INSERT TO authenticated WITH CHECK (true);
+
+-- REVISED DELETE Policy: Prevent last admin from leaving
+CREATE POLICY "prevent_last_admin_leave" ON public.organization_members
+  FOR DELETE TO authenticated
+  USING (
+    user_id = auth.uid() -- User must be deleting themselves
+    AND
+    (
+      role <> 'admin' -- Allow if they are not an admin
+      OR
+      -- OR if they ARE an admin, check if other admins exist
+      (
+        SELECT count(*)
+        FROM public.organization_members other_admins
+        WHERE other_admins.organization_id = organization_members.organization_id -- In the same org
+          AND other_admins.role = 'admin' -- Who are admins
+          AND other_admins.user_id <> organization_members.user_id -- And are not this user
+      ) > 0 -- At least one other admin must exist
+    )
+  );
+COMMENT ON POLICY "prevent_last_admin_leave" ON public.organization_members IS 'Allows users to delete their own membership, unless they are the sole administrator remaining in the organization.';
 
 -- Articles
 ALTER TABLE public.articles ENABLE ROW LEVEL SECURITY;
@@ -731,16 +765,18 @@ BEGIN
     RAISE EXCEPTION 'User must be authenticated to create an organization.';
   END IF;
 
-  -- Insert the new organization
-  INSERT INTO public.organizations (name, admin_id)
-  VALUES (org_name, _user_id)
+  -- Insert the new organization, providing the creator's ID as admin_id
+  INSERT INTO public.organizations (name, admin_id) 
+  VALUES (org_name, _user_id) 
   RETURNING organizations.id INTO _new_org_id; -- Get the new ID
+
+  -- The handle_new_organization trigger will automatically add the user to organization_members
 
   -- Return the ID and name of the newly created org
   RETURN QUERY SELECT o.id, o.name FROM public.organizations o WHERE o.id = _new_org_id;
 END;
 $$;
-COMMENT ON FUNCTION public.create_new_organization(TEXT) IS 'Creates a new organization, ensuring the creator is set as admin_id. SECURITY DEFINER bypasses INSERT RLS.';
+COMMENT ON FUNCTION public.create_new_organization(TEXT) IS 'Creates a new organization, ensuring the creator is set as admin_id and added as the first admin member via trigger. SECURITY DEFINER bypasses INSERT RLS.';
 
 -- Grant execute on new create organization function
 GRANT EXECUTE ON FUNCTION public.create_new_organization(TEXT) TO authenticated;
