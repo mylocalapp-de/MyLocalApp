@@ -43,40 +43,53 @@ const CreateBroadcastGroupScreen = ({ navigation }) => {
   useEffect(() => {
     const checkExistingGroups = async () => {
       if (!user) return;
-      
+      // Also need an active organization context to create a broadcast group for it
+      if (!activeOrganizationId) {
+          console.warn("CreateBroadcastGroupScreen: No active organization, cannot check/create broadcast group.");
+          // Optionally navigate back or show an error message
+          // For now, just stop the check. The form might still render but creation will fail.
+          setIsChecking(false);
+          return;
+      }
+
       try {
         setIsChecking(true);
-        
+
         const { data, error } = await supabase
           .from('chat_groups')
-          .select('id')
+          .select('id', { count: 'exact' }) // Use count for efficiency
           .eq('type', 'broadcast')
-          .eq('admin_id', user.id);
-        
+          .eq('organization_id', activeOrganizationId); // Use organization_id
+
+        // Check for error *after* the query
         if (error) {
-          console.error('Error checking admin groups:', error);
-          Alert.alert('Fehler', 'Fehler beim Prüfen vorhandener Gruppen.');
+          console.error('Error checking organization\'s broadcast groups:', error);
+          Alert.alert('Fehler', 'Fehler beim Prüfen vorhandener Gruppen für die Organisation.');
+          setAdminGroupCount(0); // Assume 0 on error to potentially allow creation attempt
         } else {
-          setAdminGroupCount(data.length);
-          
-          // Alert user if already at max groups
-          if (data.length >= 2) {
+          const count = data ? data.length : 0; // Supabase might return null if no rows match
+          setAdminGroupCount(count);
+
+          // Alert user if already at max groups *for this organization*
+          if (count >= 2) {
             Alert.alert(
               'Limit erreicht',
-              'Du kannst maximal 2 Broadcast-Gruppen erstellen. Du hast bereits ' + data.length + '.',
+              `Diese Organisation hat bereits ${count} Broadcast-Gruppen (Maximum: 2).`,
               [{ text: 'OK', onPress: () => navigation.goBack() }]
             );
           }
         }
       } catch (err) {
-        console.error('Unexpected error checking admin groups:', err);
+        console.error('Unexpected error checking organization\'s broadcast groups:', err);
+        Alert.alert('Fehler', 'Ein unerwarteter Fehler ist aufgetreten.');
+        setAdminGroupCount(0); // Assume 0 on error
       } finally {
         setIsChecking(false);
       }
     };
-    
+
     checkExistingGroups();
-  }, [user]);
+  }, [user, activeOrganizationId, navigation]); // Add activeOrganizationId and navigation to dependencies
   
   // Validate form before submission
   const validateForm = () => {
@@ -123,7 +136,6 @@ const CreateBroadcastGroupScreen = ({ navigation }) => {
           description: description,
           type: 'broadcast',
           tags: selectedTags,
-          admin_id: user.id,
           organization_id: activeOrganizationId,
           is_active: true
         })

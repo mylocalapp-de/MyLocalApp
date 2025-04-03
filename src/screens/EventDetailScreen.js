@@ -19,6 +19,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+import { useOrganization } from '../context/OrganizationContext';
 import { Menu, Provider } from 'react-native-paper';
 
 const { height } = Dimensions.get('window');
@@ -27,6 +28,7 @@ const androidPaddingTop = height * 0.05; // 3% of screen height for better scali
 const EventDetailScreen = ({ route, navigation }) => {
   const { eventId } = route.params;
   const { user, displayName } = useAuth();
+  const { activeOrganizationId } = useOrganization();
   
   // State for event data
   const [event, setEvent] = useState(null);
@@ -34,6 +36,7 @@ const EventDetailScreen = ({ route, navigation }) => {
   const [error, setError] = useState(null);
   const [organizerName, setOrganizerName] = useState('Organisator');
   const [isOrganizer, setIsOrganizer] = useState(false);
+  const [canEditDelete, setCanEditDelete] = useState(false);
   
   // State for comments and reactions
   const [comment, setComment] = useState('');
@@ -112,10 +115,8 @@ const EventDetailScreen = ({ route, navigation }) => {
         setOrganizerName('Organisator'); 
       }
       
-      // Check if current user is the organizer
-      if (user && eventData.organizer_id === user.id) {
-        setIsOrganizer(true);
-      }
+      // Determine if the current user can edit/delete this event
+      await checkEditDeletePermission(eventData);
       
       // Fetch comments
       fetchComments();
@@ -131,6 +132,49 @@ const EventDetailScreen = ({ route, navigation }) => {
       setError('An unexpected error occurred.');
     } finally {
       setLoading(false);
+    }
+  };
+  
+  // Function to check if the current user can edit/delete event
+  const checkEditDeletePermission = async (eventData) => {
+    if (!user) {
+        setCanEditDelete(false);
+        return;
+    }
+
+    // Case 1: Personal event
+    if (!eventData.organization_id) {
+        // Can only edit personal event if NOT in an org context
+        setCanEditDelete(eventData.organizer_id === user.id && !activeOrganizationId);
+        return;
+    }
+
+    // Case 2: Organizational event
+    if (eventData.organization_id) {
+        // Can only edit org event if user is member AND currently in that org's context
+        if (activeOrganizationId !== eventData.organization_id) {
+            setCanEditDelete(false); // Not in the correct org context
+            return;
+        }
+        // User is in the correct org context, now check membership
+        try {
+            const { data: membership, error } = await supabase
+                .from('organization_members')
+                .select('user_id') // Just need to check if a row exists
+                .eq('organization_id', eventData.organization_id)
+                .eq('user_id', user.id)
+                .maybeSingle();
+
+            if (error) {
+                console.error("Error checking org membership:", error);
+                setCanEditDelete(false);
+            } else {
+                setCanEditDelete(!!membership); // User is a member if a row is found
+            }
+        } catch (e) {
+            console.error("Unexpected error checking membership:", e);
+            setCanEditDelete(false);
+        }
     }
   };
   
@@ -237,10 +281,29 @@ const EventDetailScreen = ({ route, navigation }) => {
     }
   };
   
+  // Show authentication prompt
+  const showAuthPrompt = () => {
+    Alert.alert(
+      "Konto benötigt",
+      "Für diese Aktion benötigst du einen permanenten Account.",
+      [
+        { 
+          text: "Registrieren", 
+          onPress: () => navigation.navigate("Profile") 
+        },
+        { 
+          text: "Abbrechen", 
+          style: "cancel" 
+        }
+      ]
+    );
+  };
+  
   // Handle user changing their attendance status
   const handleSetAttendance = async (status) => {
+    // Check if user is authenticated
     if (!user) {
-      Alert.alert('Anmeldung erforderlich', 'Bitte melde dich an, um teilzunehmen.');
+      showAuthPrompt();
       return;
     }
     if (updatingStatus) return;
@@ -285,7 +348,8 @@ const EventDetailScreen = ({ route, navigation }) => {
   
   // Handle event deletion
   const handleDeleteEvent = async () => {
-    if (!user || !isOrganizer) {
+    // Re-check permission
+    if (!canEditDelete) {
       Alert.alert('Fehler', 'Du bist nicht berechtigt, dieses Event zu löschen.');
       return;
     }
@@ -335,7 +399,8 @@ const EventDetailScreen = ({ route, navigation }) => {
 
   // Handle event editing
   const handleEditEvent = () => {
-    if (!user || !isOrganizer) {
+    // Re-check permission
+    if (!canEditDelete) {
       Alert.alert('Fehler', 'Du bist nicht berechtigt, dieses Event zu bearbeiten.');
       return;
     }
@@ -369,22 +434,13 @@ const EventDetailScreen = ({ route, navigation }) => {
   
   // Add a comment
   const addComment = async () => {
-    if (!comment.trim()) return;
-    
+    // Check if user is authenticated
     if (!user) {
-      Alert.alert(
-        'Permanenten Account erstellen',
-        'Bitte erstelle einen permanenten Account, um einen Kommentar zu hinterlassen.',
-        [
-          { text: 'OK', style: 'cancel' },
-          { 
-            text: 'Zum Profil', 
-            onPress: () => navigation.navigate('Profile')
-          }
-        ]
-      );
+      showAuthPrompt();
       return;
     }
+    
+    if (!comment.trim()) return;
     
     try {
       setAddingComment(true);
@@ -418,19 +474,9 @@ const EventDetailScreen = ({ route, navigation }) => {
   
   // Add a reaction
   const addReaction = async (emoji) => {
+    // Check if user is authenticated
     if (!user) {
-      Alert.alert(
-        'Permanenten Account erstellen',
-        'Bitte erstelle einen permanenten Account, um zu reagieren.',
-        [
-          { text: 'OK', style: 'cancel' },
-          { 
-            text: 'Zum Profil', 
-            onPress: () => navigation.navigate('Profile')
-          }
-        ]
-      );
-      setShowEmojiPicker(false);
+      showAuthPrompt();
       return;
     }
     
@@ -568,7 +614,7 @@ const EventDetailScreen = ({ route, navigation }) => {
           <View style={styles.headerTitleContainer}>
              <Text style={styles.headerTitle}>{event.title}</Text>
           </View>
-          {isOrganizer && (
+          {canEditDelete && (
             <Menu
               visible={menuVisible}
               onDismiss={closeMenu}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, ActivityIndicator, Image } from 'react-native';
 import ScreenHeader from '../components/common/ScreenHeader';
 import { Ionicons } from '@expo/vector-icons';
 import { useOrganization } from '../context/OrganizationContext';
@@ -51,19 +51,9 @@ const HomeScreen = ({ navigation }) => {
       
       // Fetch articles from the articles table directly with author info
       const { data, error } = await supabase
-        .from('articles')
-        .select(`
-          id,
-          title,
-          content,
-          type,
-          published_at,
-          author_id,
-          profiles(display_name),
-          is_organization_post
-        `)
-        .eq('is_published', true)
-        .order('published_at', { ascending: false });
+        .from('article_listings') // Query the VIEW instead of the table
+        .select('*') // Select all columns from the view
+        .order('published_at', { ascending: false }); // Order by the original timestamp
       
       if (error) {
         console.error('Error fetching articles:', error);
@@ -88,8 +78,10 @@ const HomeScreen = ({ navigation }) => {
             published_at: article.published_at,
             date: formattedDate,
             author_id: article.author_id,
-            author_name: article.profiles?.display_name || 'Redaktion',
-            is_organization_post: article.is_organization_post
+            author_name: article.author_name, // Use the name from the view
+            is_organization_post: article.is_organization_post,
+            image_url: article.image_url, // Include the image URL
+            preview_image_url: article.preview_image_url // Include the preview image URL
           };
         });
         
@@ -184,6 +176,14 @@ const HomeScreen = ({ navigation }) => {
                   </Text>
                 </View>
                 <Text style={styles.articleTitle}>{article.title}</Text>
+                {/* Show image if available */}
+                {article.preview_image_url && (
+                  <Image 
+                    source={{ uri: article.preview_image_url }} 
+                    style={styles.articleImage}
+                    resizeMode="cover"
+                  />
+                )}
                 <Text style={styles.articleContent} numberOfLines={3}>
                   {article.content}
                 </Text>
@@ -337,6 +337,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 4,
     elevation: 5,
+  },
+  articleImage: {
+    width: '100%',
+    height: 160, // Slightly reduced height for preview list
+    borderRadius: 6,
+    marginVertical: 8,
   },
 });
 

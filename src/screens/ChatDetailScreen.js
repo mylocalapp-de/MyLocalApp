@@ -18,6 +18,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+import { useOrganization } from '../context/OrganizationContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { height } = Dimensions.get('window');
@@ -25,7 +26,11 @@ const androidPaddingTop = height * 0.05; // 5% of screen height for better scali
 
 const ChatDetailScreen = ({ route, navigation }) => {
   const { chatGroup, onReturn } = route.params;
-  const { user, displayName } = useAuth();
+  // Log the received chatGroup object immediately
+  console.log('ChatDetailScreen: Received chatGroup param:', JSON.stringify(chatGroup, null, 2));
+
+  const { user, displayName, userOrganizations } = useAuth();
+  const { activeOrganizationId } = useOrganization();
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -36,6 +41,24 @@ const ChatDetailScreen = ({ route, navigation }) => {
   const [addingReaction, setAddingReaction] = useState(false);
   const [addingComment, setAddingComment] = useState(false);
   const flatListRef = useRef(null);
+  const [isOrgMember, setIsOrgMember] = useState(false);
+
+  // Check if user is member of the org associated with this chat group
+  useEffect(() => {
+    // Log the dependencies whenever this effect runs
+    console.log(`ChatDetailScreen: Membership Effect Triggered. User: ${!!user}, OrgID: ${chatGroup?.organization_id}, UserOrgs available: ${!!userOrganizations}`);
+
+    if (user && chatGroup?.organization_id && userOrganizations) {
+      console.log(`ChatDetailScreen: Checking membership. UserOrgs: ${JSON.stringify(userOrganizations)}`); // Log the actual orgs list
+      const memberCheck = userOrganizations.some(org => org.id === chatGroup.organization_id);
+      setIsOrgMember(memberCheck);
+      console.log(`ChatDetailScreen: User ${user.id} membership check for org ${chatGroup.organization_id}: ${memberCheck}`);
+    } else {
+      // Log why the check might be failing
+      console.log(`ChatDetailScreen: Membership check skipped/failed in ELSE block. User: ${!!user}, OrgID: ${chatGroup?.organization_id}, UserOrgs: ${JSON.stringify(userOrganizations)}`);
+      setIsOrgMember(false);
+    }
+  }, [user, chatGroup, userOrganizations]);
 
   // Mark chat as viewed when screen is opened and when user navigates back
   useEffect(() => {
@@ -92,18 +115,6 @@ const ChatDetailScreen = ({ route, navigation }) => {
       return;
     }
   }, []);
-
-  // Log debug info about admin status
-  useEffect(() => {
-    if (isBroadcast() && user) {
-      console.log('Broadcast group admin check:', {
-        isAdmin: chatGroup.adminId === user.id,
-        groupAdminId: chatGroup.adminId,
-        userId: user.id,
-        groupName: chatGroup.name
-      });
-    }
-  }, [chatGroup, user]);
 
   // Load messages when component mounts or chat group changes
   useEffect(() => {
@@ -223,7 +234,30 @@ const ChatDetailScreen = ({ route, navigation }) => {
     );
   };
 
+  const showAuthPrompt = () => {
+    Alert.alert(
+      "Konto benötigt",
+      "Für diese Aktion benötigst du einen permanenten Account.",
+      [
+        { 
+          text: "Registrieren", 
+          onPress: () => navigation.navigate("Profile") 
+        },
+        { 
+          text: "Abbrechen", 
+          style: "cancel" 
+        }
+      ]
+    );
+  };
+
   const sendMessage = async () => {
+    // Check if user is authenticated
+    if (!user) {
+      showAuthPrompt();
+      return;
+    }
+
     if (message.trim() === '') return;
     
     // For broadcast channels, require a user account
@@ -249,7 +283,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
         chatGroupId: chatGroup.id,
         chatGroupType: chatGroup.dbType,
         userId: user?.id,
-        isAdmin: user && chatGroup.adminId === user.id,
+        isAdmin: isOrgMember,
         text: message.substring(0, 20) + (message.length > 20 ? '...' : ''),
         commentingOn: commentingOnMessageId
       });
@@ -258,7 +292,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
       if (commentingOnMessageId !== null && !isOpenChat()) {
         await addComment(commentingOnMessageId, message);
         setCommentingOnMessageId(null);
-      } else if (isOpenChat() || isBot() || (isBroadcast() && user && chatGroup.adminId === user.id)) {
+      } else if (isOpenChat() || isBot() || (isBroadcast() && isOrgMember)) {
         // Regular message for open chats, bot, or admin posting to broadcast
         const { data, error } = await supabase
           .from('chat_messages')
@@ -316,121 +350,81 @@ const ChatDetailScreen = ({ route, navigation }) => {
   };
 
   const addReaction = async (messageId, emoji) => {
+    // Check if user is authenticated
     if (!user) {
-      Alert.alert(
-        'Account erforderlich',
-        'Bitte erstelle einen Account, um auf Nachrichten reagieren zu können.',
-        [
-          { text: 'OK', style: 'cancel' },
-          { 
-            text: 'Zum Profil', 
-            onPress: () => navigation.navigate('Profile')
-          }
-        ]
-      );
-      setActiveEmojiPickerMessageId(null);
+      showAuthPrompt();
       return;
     }
-    
-    setAddingReaction(true);
-    
+
     try {
-      // First check if user already reacted with this emoji
-      const { data: existingReaction, error: checkError } = await supabase
+      const { data, error } = await supabase
         .from('message_reactions')
-        .select('id')
-        .eq('message_id', messageId)
-        .eq('user_id', user.id)
-        .eq('emoji', emoji)
-        .maybeSingle();
-      
-      if (checkError) {
-        console.error('Error checking reaction:', checkError);
+        .insert({
+          message_id: messageId,
+          user_id: user.id,
+          emoji
+        });
+
+      if (error) {
+        console.error('Error adding reaction:', error);
         return;
       }
-      
-      if (existingReaction) {
-        // User already reacted with this emoji, so remove the reaction
-        const { error: deleteError } = await supabase
-          .from('message_reactions')
-          .delete()
-          .eq('id', existingReaction.id);
-          
-        if (deleteError) {
-          console.error('Error removing reaction:', deleteError);
-          return;
-        }
-      } else {
-        // Add new reaction
-        const { error: insertError } = await supabase
-          .from('message_reactions')
-          .insert({
-            message_id: messageId,
-            user_id: user.id,
-            emoji: emoji
-          });
-          
-        if (insertError) {
-          console.error('Error adding reaction:', insertError);
-          return;
-        }
-      }
-      
-      // Refresh messages to update reactions
-      await fetchMessages();
-      
-      // Hide emoji picker
+
+      // Update local state to show the reaction immediately
+      setMessages(prevMessages => 
+        prevMessages.map(msg => 
+          msg.id === messageId 
+            ? {
+                ...msg,
+                reactions: msg.reactions 
+                  ? {
+                      ...msg.reactions,
+                      [emoji]: (msg.reactions[emoji] || 0) + 1
+                    }
+                  : { [emoji]: 1 }
+              }
+            : msg
+        )
+      );
+
+      // Close emoji picker
       setActiveEmojiPickerMessageId(null);
+
     } catch (err) {
-      console.error('Unexpected error with reaction:', err);
-      Alert.alert('Fehler', 'Ein unerwarteter Fehler ist aufgetreten.');
-    } finally {
-      setAddingReaction(false);
+      console.error('Error in reaction process:', err);
     }
   };
   
   const addComment = async (messageId, commentText) => {
+    // Check if user is authenticated
     if (!user) {
-      Alert.alert(
-        'Account erforderlich',
-        'Bitte erstelle einen Account, um Kommentare hinzuzufügen.',
-        [
-          { text: 'OK', style: 'cancel' },
-          { 
-            text: 'Zum Profil', 
-            onPress: () => navigation.navigate('Profile')
-          }
-        ]
-      );
-      return false;
+      showAuthPrompt();
+      return;
     }
-    
-    setAddingComment(true);
-    
+
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('message_comments')
         .insert({
           message_id: messageId,
           user_id: user.id,
           text: commentText
         });
-      
+
       if (error) {
         console.error('Error adding comment:', error);
-        Alert.alert('Fehler', 'Kommentar konnte nicht gespeichert werden.');
-        return false;
+        return;
       }
-      
-      // Refresh messages to update comments
-      await fetchMessages();
-      return true;
+
+      // Update UI to show comment
+      fetchMessages();
+
+      // Reset comment state
+      setCommentingOnMessageId(null);
+      setMessage('');
+
     } catch (err) {
-      console.error('Unexpected error adding comment:', err);
-      Alert.alert('Fehler', 'Ein unerwarteter Fehler ist aufgetreten.');
-      return false;
-    } finally {
-      setAddingComment(false);
+      console.error('Unexpected error when adding comment:', err);
     }
   };
 
@@ -446,75 +440,6 @@ const ChatDetailScreen = ({ route, navigation }) => {
   const isOpenChat = () => chatGroup.dbType === 'open_group';
   const isBroadcast = () => chatGroup.dbType === 'broadcast';
   const isBot = () => chatGroup.dbType === 'bot';
-
-  // Utility function to set the current user as admin (for debugging)
-  const setUserAsAdmin = async () => {
-    if (!user || !isBroadcast()) return;
-    
-    try {
-      console.log('Setting user as admin:', {
-        userId: user.id,
-        groupId: chatGroup.id,
-        groupName: chatGroup.name
-      });
-      
-      // First try to disable RLS for chat_groups table
-      try {
-        const { error: rlsError } = await supabase.rpc('disable_rls_for_chat_groups');
-        if (rlsError) {
-          console.log('Could not disable RLS via RPC, continuing anyway:', rlsError);
-        }
-      } catch (rlsError) {
-        console.log('RPC not available, continuing anyway');
-      }
-      
-      // Update the chat group admin_id
-      const { error } = await supabase
-        .from('chat_groups')
-        .update({ admin_id: user.id })
-        .eq('id', chatGroup.id);
-      
-      if (error) {
-        console.error('Error setting user as admin:', error);
-        
-        // Try a direct SQL approach
-        try {
-          const { error: sqlError } = await supabase.rpc(
-            'set_chat_group_admin',
-            { 
-              group_id: chatGroup.id,
-              admin_id: user.id
-            }
-          );
-          
-          if (sqlError) {
-            console.error('Error with SQL RPC approach:', sqlError);
-            Alert.alert('Fehler', 'Fehler beim Setzen als Admin: ' + error.message);
-            return;
-          } else {
-            console.log('Admin set via SQL RPC');
-          }
-        } catch (sqlErr) {
-          console.error('Error with SQL approach:', sqlErr);
-          Alert.alert('Fehler', 'Fehler beim Setzen als Admin über SQL: ' + sqlErr.message);
-          return;
-        }
-      } else {
-        console.log('Admin updated via standard approach');
-      }
-      
-      // Update local chat group object
-      chatGroup.adminId = user.id;
-      
-      console.log('User set as admin successfully!');
-      Alert.alert('Admin', 'Du bist jetzt Admin dieser Gruppe');
-      
-      // Force a refresh to apply changes
-      fetchMessages();
-    } catch (err) {
-      console.error('Unexpected error setting admin:', err);
-    }
-  };
 
   const renderReactions = (item) => {
     if (!item.reactions || Object.keys(item.reactions).length === 0) return null;
@@ -638,8 +563,6 @@ const ChatDetailScreen = ({ route, navigation }) => {
       
       <TouchableOpacity 
         style={styles.headerTitle}
-        onLongPress={isBroadcast() ? setUserAsAdmin : undefined}
-        delayLongPress={1000}
       >
         <Text style={styles.headerName}>{chatGroup.name}</Text>
         <Text style={styles.headerType}>
@@ -733,17 +656,21 @@ const ChatDetailScreen = ({ route, navigation }) => {
           </View>
         )}
         
-        {((isOpenChat() && !isBroadcast()) || commentingOnMessageId !== null || isBot() || 
-          // Allow organization admins to post new messages in their broadcast channels
-          (isBroadcast() && user && chatGroup.adminId === user.id && !commentingOnMessageId)
-        ) && (
+        {(() => {
+            // Logging before render check
+            const showInputCondition = (isOpenChat() && !isBroadcast()) || commentingOnMessageId !== null || isBot() || 
+                                    (isBroadcast() && isOrgMember && !commentingOnMessageId && activeOrganizationId === chatGroup.organization_id);
+            console.log(`ChatDetailScreen Render Input Check: isBroadcast=${isBroadcast()}, isOrgMember=${isOrgMember}, activeOrgId=${activeOrganizationId}, chatGroupOrgId=${chatGroup?.organization_id}, commentingOnMessageId=${commentingOnMessageId}, showInput=${showInputCondition}`);
+            
+            return showInputCondition;
+         })() && (
           <View style={styles.inputRow}>
             <TextInput
               style={styles.input}
               placeholder={
                 isBot() ? "Stelle eine Frage über dein Dorf..." : 
                 commentingOnMessageId !== null ? "Schreibe einen Kommentar..." :
-                (isBroadcast() && user && chatGroup.adminId === user.id) ?
+                (isBroadcast() && isOrgMember) ?
                 "Neue Ankündigung schreiben..." : 
                 "Nachricht schreiben..."
               }

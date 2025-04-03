@@ -68,7 +68,9 @@ CREATE TABLE public.articles (
   published_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   author_id UUID REFERENCES public.profiles(id),
   organization_id UUID REFERENCES public.organizations(id) ON DELETE SET NULL, -- Added Org Link
-  is_published BOOLEAN DEFAULT true
+  is_published BOOLEAN DEFAULT true,
+  image_url TEXT, -- Added field for article images
+  preview_image_url TEXT -- Added field for preview/thumbnail images
 );
 
 CREATE TABLE public.article_comments (
@@ -105,8 +107,10 @@ CREATE TABLE public.chat_messages (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   chat_group_id UUID NOT NULL REFERENCES public.chat_groups(id) ON DELETE CASCADE,
   user_id UUID REFERENCES public.profiles(id),
-  text TEXT NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+  text TEXT, -- Made nullable
+  image_url TEXT, -- Added image URL column
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  CHECK (text IS NOT NULL OR image_url IS NOT NULL) -- Ensure message has content
 );
 
 CREATE TABLE public.message_comments (
@@ -280,7 +284,8 @@ CREATE OR REPLACE VIEW public.article_listings AS
   SELECT
     a.id, a.title, format_date_german(a.published_at) as date,
     LEFT(a.content, 100) || (CASE WHEN length(a.content) > 100 THEN '...' ELSE '' END) as content,
-    a.type, a.published_at, a.author_id, a.organization_id,
+    a.type, a.published_at, a.author_id, a.organization_id, a.image_url,
+    a.preview_image_url, -- Added preview image URL
     COALESCE(org.name, p.display_name, 'Redaktion') as author_name, -- Org name or profile name
     (a.organization_id IS NOT NULL) as is_organization_post
   FROM public.articles a
@@ -434,11 +439,10 @@ DROP POLICY IF EXISTS "Allow any authenticated user to read organization details
 DROP POLICY IF EXISTS "Allow admin to manage their organization" ON public.organizations;
 DROP POLICY IF EXISTS "Allow authenticated users to create organizations" ON public.organizations; -- Also drop insert policy
 
--- REVISED SELECT Policy: Allow any authenticated user to read.
--- This is necessary for the invite_code lookup during the join process.
--- Access control for sensitive actions (update/delete) is handled by other policies.
-CREATE POLICY "Allow any authenticated user to read organization details" ON public.organizations
-  FOR SELECT TO authenticated
+-- REVISED SELECT Policy: Allow any user (including anonymous) to read organization details.
+-- This is necessary for the chat_group_listings and event_listings views which join with organizations.
+CREATE POLICY "Allow anyone to read organization details" ON public.organizations
+  FOR SELECT
   USING (true);
 
 -- Revised UPDATE Policy (Using SECURITY DEFINER function - NO CHANGE needed here)
@@ -514,23 +518,21 @@ DROP POLICY IF EXISTS "Allow delete if user is author or org member" ON public.a
 CREATE POLICY "Anyone can view published articles" ON public.articles FOR SELECT USING (is_published = true);
 CREATE POLICY "Allow insert if user is author or org member" ON public.articles FOR INSERT TO authenticated WITH CHECK (
     ( author_id = auth.uid() AND organization_id IS NULL ) OR -- Personal post
-    -- Use helper function for organization check
+    -- Use helper function for organization check (creator must be member)
     ( organization_id IS NOT NULL AND author_id = auth.uid() AND public.is_org_member(auth.uid(), organization_id) )
 );
-CREATE POLICY "Allow update if user is author or org member" ON public.articles FOR UPDATE TO authenticated USING (
-    ( author_id = auth.uid() AND organization_id IS NULL ) OR
-    -- Use helper function for organization check
-    ( organization_id IS NOT NULL AND public.is_org_member(auth.uid(), organization_id) )
+-- UPDATED Update Policy
+CREATE POLICY "Allow update if user is author OR org member" ON public.articles FOR UPDATE TO authenticated USING (
+    ( organization_id IS NULL AND author_id = auth.uid() ) OR -- Personal post: only author
+    ( organization_id IS NOT NULL AND public.is_org_member(auth.uid(), organization_id) ) -- Org post: any org member
 ) WITH CHECK (
-    ( author_id = auth.uid() AND organization_id IS NULL ) OR
-    -- Use helper function for organization check
-    ( organization_id IS NOT NULL AND author_id = auth.uid() AND public.is_org_member(auth.uid(), organization_id) )
-);
-CREATE POLICY "Allow delete if user is author or org member" ON public.articles FOR DELETE TO authenticated USING (
-    ( author_id = auth.uid() AND organization_id IS NULL ) OR
-    -- Use helper function for organization check (maybe check admin role here?)
+    ( organization_id IS NULL AND author_id = auth.uid() ) OR
     ( organization_id IS NOT NULL AND public.is_org_member(auth.uid(), organization_id) )
-    -- Consider: ( organization_id IS NOT NULL AND public.is_org_member_admin(auth.uid(), organization_id) )
+);
+-- UPDATED Delete Policy
+CREATE POLICY "Allow delete if user is author OR org member" ON public.articles FOR DELETE TO authenticated USING (
+    ( organization_id IS NULL AND author_id = auth.uid() ) OR -- Personal post: only author
+    ( organization_id IS NOT NULL AND public.is_org_member(auth.uid(), organization_id) ) -- Org post: any org member
 );
 
 -- Article Comments
@@ -555,17 +557,30 @@ CREATE POLICY "Users can delete their own reactions" ON public.article_reactions
 
 -- Chat Groups
 ALTER TABLE public.chat_groups ENABLE ROW LEVEL SECURITY;
+
+-- Drop existing SELECT policy for authenticated users on chat_groups
 DROP POLICY IF EXISTS "Allow members/admins to view their org groups" ON public.chat_groups;
-DROP POLICY IF EXISTS "Anon can view public groups" ON public.chat_groups;
-DROP POLICY IF EXISTS "Allow org members/admins to create broadcast groups for org" ON public.chat_groups;
-CREATE POLICY "Allow members/admins to view their org groups" ON public.chat_groups FOR SELECT TO authenticated USING (
-    (type = 'bot') OR
-    -- Use helper function for organization check
+
+-- Recreate the SELECT policy to include 'open_group'
+CREATE POLICY "Allow members/admins to view their org groups" ON public.chat_groups 
+FOR SELECT TO authenticated 
+USING (
+    (type = 'bot') OR 
+    (type = 'open_group') OR -- Added condition to allow selecting open groups
+    -- Use helper function for organization check (unchanged)
     (organization_id IS NOT NULL AND public.is_org_member(auth.uid(), organization_id))
 );
-CREATE POLICY "Anon can view public groups" ON public.chat_groups FOR SELECT TO anon USING (
-    type IN ('broadcast', 'bot') AND is_active = true
-);
+
+COMMENT ON POLICY "Allow members/admins to view their org groups" ON public.chat_groups IS 'Allows authenticated users to select bot groups, open groups, or groups associated with organizations they are a member of.';
+
+-- Ensure anonymous users can still see active groups (no change, but good practice to verify)
+DROP POLICY IF EXISTS "Anyone can view active chat groups" ON public.chat_groups;
+CREATE POLICY "Anyone can view active chat groups" ON public.chat_groups 
+FOR SELECT TO anon 
+USING (is_active = true);
+
+-- Drop the insert policy before recreating it
+DROP POLICY IF EXISTS "Allow org members/admins to create broadcast groups for org" ON public.chat_groups;
 CREATE POLICY "Allow org members/admins to create broadcast groups for org" ON public.chat_groups FOR INSERT TO authenticated WITH CHECK (
     type = 'broadcast' AND organization_id IS NOT NULL AND
     -- Use helper function (maybe check admin role?)
@@ -579,22 +594,40 @@ DROP POLICY IF EXISTS "Allow members to view messages in groups they can access"
 DROP POLICY IF EXISTS "Anon can view messages in public groups" ON public.chat_messages;
 DROP POLICY IF EXISTS "Allow members to send messages in groups they can access" ON public.chat_messages;
 DROP POLICY IF EXISTS "Allow users to delete their own messages" ON public.chat_messages;
+
+-- For authenticated users, allow viewing messages based on group access
 CREATE POLICY "Allow members to view messages in groups they can access" ON public.chat_messages FOR SELECT TO authenticated USING (
     chat_group_id IN (SELECT id FROM public.chat_groups) -- Relies on chat_groups SELECT policy using helper function now
 );
-CREATE POLICY "Anon can view messages in public groups" ON public.chat_messages FOR SELECT TO anon USING (
-    chat_group_id IN (SELECT id FROM public.chat_groups WHERE type IN ('broadcast', 'bot') AND is_active = true)
+
+-- For anonymous users, allow viewing all messages in active chat groups
+CREATE POLICY "Allow anyone to view messages in active groups" ON public.chat_messages FOR SELECT TO anon USING (
+    chat_group_id IN (SELECT id FROM public.chat_groups WHERE is_active = true)
 );
+
+-- DROP existing policy before recreating
+DROP POLICY IF EXISTS "Allow members to send messages in groups they can access" ON public.chat_messages;
+DROP POLICY IF EXISTS "Allow members/admins to send messages in their groups" ON public.chat_messages; -- Drop older named policy if exists
+
 CREATE POLICY "Allow members to send messages in groups they can access" ON public.chat_messages FOR INSERT TO authenticated WITH CHECK (
-    user_id = auth.uid() AND
-    chat_group_id IN (SELECT id FROM public.chat_groups)
-    -- Add specific checks for broadcast (only org admins?) vs open groups if they exist
-    -- Example check for broadcast:
-    -- AND (
-    --    (SELECT type FROM public.chat_groups WHERE id = chat_group_id) != 'broadcast' OR
-    --    public.is_org_member_admin(auth.uid(), (SELECT organization_id FROM public.chat_groups WHERE id = chat_group_id))
-    -- )
+    user_id = auth.uid()
+    AND
+    ( -- Check group type and membership explicitly
+      -- Allow insert into 'open_group' directly if the group type IS 'open_group'
+      ( (SELECT type FROM public.chat_groups WHERE id = chat_group_id) = 'open_group' )
+      OR
+      -- Allow insert into 'broadcast' group if user is an organization member
+      ( (SELECT type FROM public.chat_groups WHERE id = chat_group_id) = 'broadcast' AND
+        public.is_org_member(auth.uid(), (SELECT organization_id FROM public.chat_groups WHERE id = chat_group_id))
+      )
+      OR
+      -- Allow insert into 'bot' group (Allow any authenticated user for now)
+      ( (SELECT type FROM public.chat_groups WHERE id = chat_group_id) = 'bot' )
+    )
 );
+COMMENT ON POLICY "Allow members to send messages in groups they can access" ON public.chat_messages IS 'Allows authenticated users to send messages: in any open_group, in broadcast groups if they are a member of the associated org, and in any bot group.';
+
+DROP POLICY IF EXISTS "Allow users to delete their own messages" ON public.chat_messages; -- Drop old policy name if exists
 CREATE POLICY "Allow users to delete their own messages" ON public.chat_messages FOR DELETE TO authenticated USING (user_id = auth.uid());
 
 -- Message Comments
@@ -602,46 +635,40 @@ ALTER TABLE public.message_comments ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow users to view comments in accessible broadcast groups" ON public.message_comments;
 DROP POLICY IF EXISTS "Anon can view comments in public groups" ON public.message_comments;
 DROP POLICY IF EXISTS "Allow users to comment on broadcast messages in accessible groups" ON public.message_comments;
+DROP POLICY IF EXISTS "Allow authenticated users to comment on broadcast messages" ON public.message_comments;
 DROP POLICY IF EXISTS "Allow users to delete their own comments" ON public.message_comments;
-CREATE POLICY "Allow users to view comments in accessible broadcast groups" ON public.message_comments FOR SELECT TO authenticated USING (
-    message_id IN (
-      SELECT m.id FROM public.chat_messages m JOIN public.chat_groups g ON m.chat_group_id = g.id
-      WHERE g.type = 'broadcast' AND m.chat_group_id IN (SELECT id FROM public.chat_groups) -- Relies on chat_groups policy
-    )
-);
-CREATE POLICY "Anon can view comments in public groups" ON public.message_comments FOR SELECT TO anon USING (
-    message_id IN (
-        SELECT m.id FROM public.chat_messages m JOIN public.chat_groups g ON m.chat_group_id = g.id
-        WHERE g.type IN ('broadcast', 'bot') AND g.is_active = true
-    )
-);
-CREATE POLICY "Allow users to comment on broadcast messages in accessible groups" ON public.message_comments FOR INSERT TO authenticated WITH CHECK (
-    user_id = auth.uid() AND message_id IN (
-      SELECT m.id FROM public.chat_messages m JOIN public.chat_groups g ON m.chat_group_id = g.id
-      WHERE g.type = 'broadcast' AND m.chat_group_id IN (SELECT id FROM public.chat_groups) -- Relies on chat_groups policy
-    )
-);
-CREATE POLICY "Allow users to delete their own comments" ON public.message_comments FOR DELETE TO authenticated USING (user_id = auth.uid());
+
+-- First create SELECT policies that ensure everyone can see comments
+CREATE POLICY "Anyone can view message comments" ON public.message_comments 
+FOR SELECT USING (true);
+
+-- Simplified INSERT policy for message comments that just checks auth
+CREATE POLICY "Any authenticated user can comment on messages" ON public.message_comments
+FOR INSERT TO authenticated
+WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Allow users to delete their own comments" ON public.message_comments 
+FOR DELETE TO authenticated USING (user_id = auth.uid());
 
 -- Message Reactions
 ALTER TABLE public.message_reactions ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow users to view reactions in accessible groups" ON public.message_reactions;
 DROP POLICY IF EXISTS "Anon can view reactions in public groups" ON public.message_reactions;
 DROP POLICY IF EXISTS "Allow users to add reactions in accessible groups" ON public.message_reactions;
+DROP POLICY IF EXISTS "Allow authenticated users to react to broadcast messages" ON public.message_reactions;
 DROP POLICY IF EXISTS "Allow users to delete their own reactions" ON public.message_reactions;
-CREATE POLICY "Allow users to view reactions in accessible groups" ON public.message_reactions FOR SELECT TO authenticated USING (
-    message_id IN (SELECT id FROM public.chat_messages) -- Relies on chat_messages SELECT policy
-);
-CREATE POLICY "Anon can view reactions in public groups" ON public.message_reactions FOR SELECT TO anon USING (
-    message_id IN (
-        SELECT m.id FROM public.chat_messages m JOIN public.chat_groups g ON m.chat_group_id = g.id
-        WHERE g.type IN ('broadcast', 'bot') AND g.is_active = true
-    )
-);
-CREATE POLICY "Allow users to add reactions in accessible groups" ON public.message_reactions FOR INSERT TO authenticated WITH CHECK (
-    user_id = auth.uid() AND message_id IN (SELECT id FROM public.chat_messages)
-);
-CREATE POLICY "Allow users to delete their own reactions" ON public.message_reactions FOR DELETE TO authenticated USING (user_id = auth.uid());
+
+-- First create SELECT policies that ensure everyone can see reactions
+CREATE POLICY "Anyone can view message reactions" ON public.message_reactions 
+FOR SELECT USING (true);
+
+-- Simplified INSERT policy for message reactions that just checks auth
+CREATE POLICY "Any authenticated user can react to messages" ON public.message_reactions
+FOR INSERT TO authenticated
+WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Allow users to delete their own reactions" ON public.message_reactions 
+FOR DELETE TO authenticated USING (user_id = auth.uid());
 
 -- Events
 ALTER TABLE public.events ENABLE ROW LEVEL SECURITY;
@@ -652,23 +679,21 @@ DROP POLICY IF EXISTS "Allow delete if user is organizer or org member" ON publi
 CREATE POLICY "Anyone can view published events" ON public.events FOR SELECT USING (is_published = true);
 CREATE POLICY "Allow insert if user is organizer or org member" ON public.events FOR INSERT TO authenticated WITH CHECK (
     ( organizer_id = auth.uid() AND organization_id IS NULL ) OR -- Personal event
-    -- Use helper function for organization check
+    -- Use helper function for organization check (creator must be member)
     ( organization_id IS NOT NULL AND organizer_id = auth.uid() AND public.is_org_member(auth.uid(), organization_id) )
 );
-CREATE POLICY "Allow update if user is organizer or org member" ON public.events FOR UPDATE TO authenticated USING (
-    ( organizer_id = auth.uid() AND organization_id IS NULL ) OR
-    -- Use helper function for organization check
-    ( organization_id IS NOT NULL AND public.is_org_member(auth.uid(), organization_id) )
+-- UPDATED Update Policy
+CREATE POLICY "Allow update if user is organizer OR org member" ON public.events FOR UPDATE TO authenticated USING (
+    ( organization_id IS NULL AND organizer_id = auth.uid() ) OR -- Personal event: only organizer
+    ( organization_id IS NOT NULL AND public.is_org_member(auth.uid(), organization_id) ) -- Org event: any org member
 ) WITH CHECK (
-    ( organizer_id = auth.uid() AND organization_id IS NULL ) OR
-    -- Use helper function for organization check
-    ( organization_id IS NOT NULL AND organizer_id = auth.uid() AND public.is_org_member(auth.uid(), organization_id) )
-);
-CREATE POLICY "Allow delete if user is organizer or org member" ON public.events FOR DELETE TO authenticated USING (
-    ( organizer_id = auth.uid() AND organization_id IS NULL ) OR
-    -- Use helper function for organization check (maybe check admin role here?)
+    ( organization_id IS NULL AND organizer_id = auth.uid() ) OR
     ( organization_id IS NOT NULL AND public.is_org_member(auth.uid(), organization_id) )
-    -- Consider: ( organization_id IS NOT NULL AND public.is_org_member_admin(auth.uid(), organization_id) )
+);
+-- UPDATED Delete Policy
+CREATE POLICY "Allow delete if user is organizer OR org member" ON public.events FOR DELETE TO authenticated USING (
+    ( organization_id IS NULL AND organizer_id = auth.uid() ) OR -- Personal event: only organizer
+    ( organization_id IS NOT NULL AND public.is_org_member(auth.uid(), organization_id) ) -- Org event: any org member
 );
 
 -- Event Comments
@@ -716,6 +741,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.profiles TO authenticated;
 GRANT SELECT ON public.profiles TO anon; -- Allow anon read? Adjust if needed.
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.organizations TO authenticated;
+GRANT SELECT ON public.organizations TO anon; -- Grant SELECT to anonymous users
+
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.organization_members TO authenticated;
 
 GRANT SELECT ON public.articles TO anon, authenticated;
@@ -750,9 +777,9 @@ GRANT SELECT ON public.event_reaction_counts TO anon, authenticated;
 GRANT SELECT ON public.event_attendee_counts TO anon, authenticated;
 GRANT SELECT ON public.article_listings TO anon, authenticated;
 GRANT SELECT ON public.article_comments_with_users TO anon, authenticated;
-GRANT SELECT ON public.chat_group_listings TO authenticated; -- RLS on underlying tables controls rows. Anon will see rows based on underlying table RLS.
-GRANT SELECT ON public.chat_messages_with_users TO anon, authenticated; -- Added anon SELECT
-GRANT SELECT ON public.message_comments_with_users TO anon, authenticated; -- Added anon SELECT
+GRANT SELECT ON public.chat_group_listings TO anon, authenticated; -- Added anon SELECT access
+GRANT SELECT ON public.chat_messages_with_users TO anon, authenticated;
+GRANT SELECT ON public.message_comments_with_users TO anon, authenticated;
 GRANT SELECT ON public.event_listings TO anon, authenticated;
 GRANT SELECT ON public.event_comments_with_users TO anon, authenticated;
 GRANT SELECT ON public.event_attendees_with_users TO anon, authenticated;
@@ -788,6 +815,28 @@ COMMENT ON FUNCTION public.get_article_reactions(UUID) IS 'Retrieves the counts 
 -- Grant execute permission for the new function
 GRANT EXECUTE ON FUNCTION public.get_article_reactions(UUID) TO authenticated;
 
+-- NEW FUNCTION: Get Event Reactions (Counts per emoji)
+CREATE OR REPLACE FUNCTION public.get_event_reactions(event_uuid UUID)
+RETURNS JSON AS $$
+DECLARE reaction_counts JSON;
+BEGIN
+  SELECT json_object_agg(emoji, count) INTO reaction_counts
+  FROM (
+    SELECT emoji, count(*) as count
+    FROM public.event_reactions -- Querying event_reactions table
+    WHERE event_id = event_uuid -- Using event_id column
+    GROUP BY emoji
+  ) as grouped_reactions;
+
+  RETURN COALESCE(reaction_counts, '{}'::JSON); -- Return empty JSON object if no reactions
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION public.get_event_reactions(UUID) IS 'Retrieves the counts of each reaction emoji for a given event UUID.';
+
+-- Grant execute permission for the new function
+GRANT EXECUTE ON FUNCTION public.get_event_reactions(UUID) TO authenticated;
+
 -- NEW FUNCTION: Securely create an organization
 CREATE OR REPLACE FUNCTION public.create_new_organization(org_name TEXT)
 RETURNS TABLE(id uuid, name text) -- Define the return type to match select
@@ -820,7 +869,54 @@ COMMENT ON FUNCTION public.create_new_organization(TEXT) IS 'Creates a new organ
 -- Grant execute on new create organization function
 GRANT EXECUTE ON FUNCTION public.create_new_organization(TEXT) TO authenticated;
 
+-- NEW FUNCTION: Get Message Reactions for a list of messages
+CREATE OR REPLACE FUNCTION public.get_reactions_for_messages(message_ids uuid[])
+RETURNS JSON AS $$
+DECLARE
+  reaction_counts JSON;
+BEGIN
+  SELECT json_object_agg(
+    grouped.message_id, grouped.emoji_counts
+  ) INTO reaction_counts
+  FROM (
+    SELECT
+      mr.message_id,
+      json_object_agg(mr.emoji, mr.count) as emoji_counts
+    FROM (
+      -- Inner query to count emojis per message
+      SELECT message_id, emoji, count(*) as count
+      FROM public.message_reactions
+      WHERE message_id = ANY(message_ids) -- Filter by the input array
+      GROUP BY message_id, emoji
+    ) as mr
+    GROUP BY mr.message_id
+  ) as grouped;
+
+  RETURN COALESCE(reaction_counts, '{}'::JSON); -- Return empty JSON object if no reactions
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION public.get_reactions_for_messages(uuid[]) IS 'Retrieves the counts of each reaction emoji for a given list of message UUIDs, aggregated by message ID.';
+
+-- Grant execute permission for the new function
+GRANT EXECUTE ON FUNCTION public.get_reactions_for_messages(uuid[]) TO authenticated;
+
 -- ====================================================================
 -- End of script
 -- ====================================================================
 COMMIT;
+
+-- Sample article with image (can be executed separately after initialization)
+-- INSERT INTO public.articles (
+--   title,
+--   content,
+--   type,
+--   image_url,
+--   is_published
+-- ) VALUES (
+--   'Projektgebiet Bölkershof am Havelufer',
+--   'Das Projektgebiet Bölkershof an der Havel zeigt eine eindrucksvolle Landschaft mit Blick auf den Fluss. Die grünen Flächen und das ruhige Wasser bieten ideale Bedingungen für nachhaltige Entwicklung und Naturschutz. Dieses Gebiet ist ein wichtiger Teil der lokalen Ökosysteme und bietet zahlreiche Möglichkeiten für Freizeitaktivitäten und Erholung.',
+--   'Verkehr',
+--   'https://supabase.myownapp.net/storage/v1/object/public/article_images/200730-havel-projektgebiet-boelkershof-ifa.jpeg?t=2025-04-02T18%3A53%3A59.423Z',
+--   true
+-- );

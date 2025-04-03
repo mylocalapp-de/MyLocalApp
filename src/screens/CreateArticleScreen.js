@@ -11,12 +11,18 @@ import {
   KeyboardAvoidingView,
   Platform,
   SafeAreaView,
-  Dimensions
+  Dimensions,
+  Image,
+  Button
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
+import 'react-native-get-random-values';
+import { v4 as uuidv4 } from 'uuid';
+import { decode } from 'base64-arraybuffer';
 
 const { height } = Dimensions.get('window');
 const androidPaddingTop = height * 0.03; // 3% of screen height for better scaling
@@ -30,6 +36,8 @@ const CreateArticleScreen = ({ navigation }) => {
   const [content, setContent] = useState('');
   const [type, setType] = useState('');
   const [isPublishing, setIsPublishing] = useState(false);
+  const [imageAsset, setImageAsset] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
   
   // Type selection options
   const articleTypes = [
@@ -63,6 +71,64 @@ const CreateArticleScreen = ({ navigation }) => {
     return true;
   };
   
+  // Function to pick an image
+  const pickImage = async () => {
+    // Request permission
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Berechtigung benötigt', 'Sorry, wir benötigen die Berechtigung, um auf deine Fotos zugreifen zu können.');
+      return;
+    }
+
+    let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.8, // Reduce quality slightly for faster uploads
+      base64: true, // Request base64 data
+    });
+
+    if (!result.canceled) {
+      setImageAsset(result.assets[0]);
+    }
+  };
+
+  // Function to upload image and return URL
+  const uploadImage = async (asset) => {
+    if (!asset || !asset.base64) return null; // Check if asset and base64 data exist
+
+    setIsUploading(true);
+    try {
+        const fileExt = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
+        const fileName = `${uuidv4()}.${fileExt}`;
+        const filePath = `${fileName}`; // Store directly in the root for simplicity, or use orgId/fileName
+
+        const { data, error: uploadError } = await supabase.storage
+            .from('article_images')
+            .upload(filePath, decode(asset.base64), { // Use decode here
+                contentType: asset.mimeType ?? `image/${fileExt}`
+            });
+
+        if (uploadError) {
+            throw uploadError;
+        }
+
+        // Get public URL
+        const { data: urlData } = supabase.storage
+            .from('article_images')
+            .getPublicUrl(filePath);
+
+        return urlData?.publicUrl;
+
+    } catch (error) {
+        console.error('Error uploading image:', error);
+        Alert.alert('Upload Fehler', 'Das Bild konnte nicht hochgeladen werden.');
+        return null;
+    } finally {
+        setIsUploading(false);
+    }
+  };
+
   // Handle article publishing
   const handlePublish = async () => {
     if (!user) {
@@ -72,9 +138,19 @@ const CreateArticleScreen = ({ navigation }) => {
     
     if (!validateForm()) return;
     
+    setIsPublishing(true);
+    let finalImageUrl = null;
+
     try {
-      setIsPublishing(true);
-      
+      // Upload image if one is selected
+      if (imageAsset) {
+        finalImageUrl = await uploadImage(imageAsset);
+        if (!finalImageUrl) {
+          setIsPublishing(false);
+          return;
+        }
+      }
+
       // Insert new article
       const { data, error } = await supabase
         .from('articles')
@@ -84,7 +160,9 @@ const CreateArticleScreen = ({ navigation }) => {
           type: type,
           author_id: user.id,
           organization_id: activeOrganizationId,
-          is_published: true
+          is_published: true,
+          image_url: finalImageUrl,
+          preview_image_url: finalImageUrl
         })
         .select()
         .single();
@@ -113,6 +191,7 @@ const CreateArticleScreen = ({ navigation }) => {
       Alert.alert('Fehler', 'Ein unerwarteter Fehler ist aufgetreten.');
     } finally {
       setIsPublishing(false);
+      setIsUploading(false);
     }
   };
   
@@ -128,19 +207,31 @@ const CreateArticleScreen = ({ navigation }) => {
       return;
     }
     
+    setIsPublishing(true);
+    let finalImageUrl = null;
+
     try {
-      setIsPublishing(true);
-      
+      // Upload image if one is selected
+      if (imageAsset) {
+        finalImageUrl = await uploadImage(imageAsset);
+        if (!finalImageUrl) {
+          setIsPublishing(false);
+          return;
+        }
+      }
+
       // Insert new draft article
       const { data, error } = await supabase
         .from('articles')
         .insert({
           title: title || 'Unbenannter Entwurf',
           content: content || '',
-          type: type || 'Vereine',  // Default type
+          type: type || 'Vereine',
           author_id: user.id,
           organization_id: activeOrganizationId,
-          is_published: false  // Mark as draft
+          is_published: false,
+          image_url: finalImageUrl,
+          preview_image_url: finalImageUrl
         });
       
       if (error) {
@@ -159,6 +250,7 @@ const CreateArticleScreen = ({ navigation }) => {
       Alert.alert('Fehler', 'Ein unerwarteter Fehler ist aufgetreten.');
     } finally {
       setIsPublishing(false);
+      setIsUploading(false);
     }
   };
   
@@ -204,7 +296,7 @@ const CreateArticleScreen = ({ navigation }) => {
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Neuer Artikel</Text>
         <View style={styles.headerRight}>
-          {isPublishing ? (
+          {(isPublishing || isUploading) ? (
             <ActivityIndicator size="small" color="#4285F4" />
           ) : (
             <>
@@ -256,6 +348,28 @@ const CreateArticleScreen = ({ navigation }) => {
             multiline
             textAlignVertical="top"
           />
+
+          {/* Image Upload - only shown for org articles */}
+          {activeOrganizationId && (
+            <>
+              <Text style={styles.inputLabel}>Bild (Optional)</Text>
+              {imageAsset && (
+                <View style={styles.imagePreviewContainer}>
+                    <Image source={{ uri: imageAsset.uri }} style={styles.imagePreview} />
+                    <TouchableOpacity onPress={() => setImageAsset(null)} style={styles.removeImageButton}>
+                        <Ionicons name="close-circle" size={24} color="#ff3b30" />
+                    </TouchableOpacity>
+                </View>
+              )}
+               <TouchableOpacity style={styles.imagePickerButton} onPress={pickImage} disabled={isUploading}>
+                 <Ionicons name="camera" size={20} color="#4285F4" style={{marginRight: 10}} />
+                 <Text style={styles.imagePickerButtonText}>
+                   {imageAsset ? 'Bild ändern' : 'Bild auswählen'}
+                 </Text>
+               </TouchableOpacity>
+              {isUploading && <ActivityIndicator size="small" color="#4285F4" style={{ marginTop: 10}} />}
+            </>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -363,7 +477,41 @@ const styles = StyleSheet.create({
     fontSize: 16,
     minHeight: 200,
     marginBottom: 15,
+    textAlignVertical: 'top',
   },
+  imagePickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#eef4ff',
+    padding: 12,
+    borderRadius: 8,
+    justifyContent: 'center',
+    marginTop: 10,
+  },
+  imagePickerButtonText: {
+    color: '#4285F4',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  imagePreviewContainer: {
+      position: 'relative',
+      marginBottom: 10,
+      alignItems: 'center',
+  },
+  imagePreview: {
+    width: '100%',
+    height: 200,
+    borderRadius: 8,
+    marginTop: 10,
+  },
+  removeImageButton: {
+      position: 'absolute',
+      top: 5,
+      right: 5,
+      backgroundColor: 'rgba(255, 255, 255, 0.7)',
+      borderRadius: 12,
+      padding: 2,
+  }
 });
 
 export default CreateArticleScreen; 

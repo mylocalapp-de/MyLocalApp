@@ -10,15 +10,22 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView
+  SafeAreaView,
+  Image
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+import { useOrganization } from '../context/OrganizationContext';
+import 'react-native-get-random-values';
+import { v4 as uuidv4 } from 'uuid';
+import { decode } from 'base64-arraybuffer';
 
 const EditArticleScreen = ({ navigation, route }) => {
   const { articleId } = route.params;
   const { user } = useAuth();
+  const { activeOrganizationId } = useOrganization();
   
   // Article form state
   const [title, setTitle] = useState('');
@@ -27,6 +34,11 @@ const EditArticleScreen = ({ navigation, route }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [isOrgArticle, setIsOrgArticle] = useState(false); // State to track if it's an org article
+  const [imageUrl, setImageUrl] = useState(''); // Current image URL from DB
+  const [imageAsset, setImageAsset] = useState(null); // State for newly selected image asset
+  const [isUploading, setIsUploading] = useState(false); // State for upload progress
+  const [removeCurrentImage, setRemoveCurrentImage] = useState(false); // State to track image removal
   
   // Type selection options
   const articleTypes = [
@@ -68,16 +80,52 @@ const EditArticleScreen = ({ navigation, route }) => {
         return;
       }
       
-      // Ensure the user is the author
-      if (data.author_id !== user.id) {
-        setError('You are not authorized to edit this article.');
-        return;
+      // --- Authorization Check --- 
+      let canEdit = false;
+      if (!data.organization_id) { // Personal Article
+          // Can only edit personal article if NOT in an org context
+          canEdit = data.author_id === user?.id && !activeOrganizationId;
+      } else { // Organizational Article
+          // Can only edit org article if user is member AND currently in that org's context
+          if (activeOrganizationId !== data.organization_id) {
+               canEdit = false; // Not in the correct org context
+          } else {
+               // User is in the correct org context, now check membership
+               try {
+                  const { data: membership, error: memberError } = await supabase
+                      .from('organization_members')
+                      .select('user_id') // Just need to check if a row exists
+                      .eq('organization_id', data.organization_id)
+                      .eq('user_id', user?.id)
+                      .maybeSingle();
+
+                  if (!memberError && membership) {
+                      canEdit = true; // User is a member
+                  }
+              } catch (e) {
+                  console.error("Unexpected error checking membership:", e);
+                  canEdit = false;
+              }
+          }
       }
+
+      if (!canEdit) {
+          setError('You are not authorized to edit this article.');
+          // Optional: Alert the user as well
+          Alert.alert('Fehler', 'Du bist nicht berechtigt, diesen Artikel zu bearbeiten.');
+          navigation.goBack(); // Go back if not authorized
+          return;
+      }
+      // --- End Authorization Check ---
       
       // Set form values
       setTitle(data.title || '');
       setContent(data.content || '');
       setType(data.type || '');
+      setIsOrgArticle(!!data.organization_id); // Check if it has an org ID
+      setImageUrl(data.image_url || ''); // Load the existing image URL
+      setImageAsset(null); // Reset selected asset
+      setRemoveCurrentImage(false); // Reset removal flag
       
     } catch (err) {
       console.error('Unexpected error fetching article:', err);
@@ -107,44 +155,123 @@ const EditArticleScreen = ({ navigation, route }) => {
     return true;
   };
   
-  // Handle article update
-  const handleUpdate = async () => {
-    if (!user) {
-      Alert.alert('Fehler', 'Du musst angemeldet sein, um einen Artikel zu aktualisieren.');
+  // Function to pick an image (same as in CreateArticleScreen)
+  const pickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Berechtigung benötigt', 'Sorry, wir benötigen die Berechtigung, um auf deine Fotos zugreifen zu können.');
       return;
     }
-    
-    if (!validateForm()) return;
-    
+    let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.8,
+      base64: true,
+    });
+    if (!result.canceled) {
+      setImageAsset(result.assets[0]);
+      setImageUrl(''); // Clear old URL if new image is picked
+      setRemoveCurrentImage(false); // Unset removal flag if new image picked
+    }
+  };
+
+  // Function to upload image and return URL (same as in CreateArticleScreen)
+  const uploadImage = async (asset) => {
+    if (!asset || !asset.base64) return null;
+    setIsUploading(true);
     try {
-      setIsSaving(true);
-      
-      // Directly update the article. RLS policies will enforce that only the author can update.
-      const { error } = await supabase
-        .from('articles')
-        .update({
+        const fileExt = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
+        const fileName = `${uuidv4()}.${fileExt}`;
+        const filePath = `${fileName}`;
+        const { data, error: uploadError } = await supabase.storage
+            .from('article_images')
+            .upload(filePath, decode(asset.base64), { contentType: asset.mimeType ?? `image/${fileExt}` });
+        if (uploadError) throw uploadError;
+        const { data: urlData } = supabase.storage.from('article_images').getPublicUrl(filePath);
+        return urlData?.publicUrl;
+    } catch (error) {
+        console.error('Error uploading image:', error);
+        Alert.alert('Upload Fehler', 'Das Bild konnte nicht hochgeladen werden.');
+        return null;
+    } finally {
+        setIsUploading(false);
+    }
+  };
+
+  // Handle image removal
+  const handleRemoveImage = () => {
+    setImageAsset(null); // Clear any newly selected asset
+    setImageUrl(''); // Clear the displayed URL
+    setRemoveCurrentImage(true); // Flag for removal on save
+  };
+
+  // Handle article update
+  const handleUpdate = async () => {
+    if (!user || !validateForm()) return;
+
+    setIsSaving(true); // Covers upload + DB update
+    let finalImageUrl = imageUrl; // Start with the existing URL
+    let finalPreviewUrl = imageUrl; // Assume same for preview initially
+
+    try {
+      // Scenario 1: New image selected for upload
+      if (imageAsset) {
+        finalImageUrl = await uploadImage(imageAsset);
+        if (!finalImageUrl) {
+          setIsSaving(false);
+          return; // Upload failed, stop update
+        }
+        finalPreviewUrl = finalImageUrl; // Use new image for preview too
+      }
+      // Scenario 2: Existing image flagged for removal
+      else if (removeCurrentImage) {
+        finalImageUrl = null;
+        finalPreviewUrl = null;
+        // TODO: Optionally delete the old image from Supabase storage here
+        // Requires knowing the old file path, not just the URL.
+        // const oldFileName = imageUrl.substring(imageUrl.lastIndexOf('/') + 1);
+        // if (oldFileName) await supabase.storage.from('article_images').remove([oldFileName]);
+      }
+      // Scenario 3: Keep existing image (finalImageUrl already holds it)
+      // No action needed for this case
+
+      // Update the article in the database
+      const updateData = {
           title: title,
           content: content,
-          type: type
-        })
+          type: type,
+      };
+
+      // Only include image URLs in update if it's an org article
+      if (isOrgArticle) {
+          updateData.image_url = finalImageUrl;
+          updateData.preview_image_url = finalPreviewUrl;
+      } else {
+          // Ensure images are nullified if it somehow became a non-org article (edge case)
+          updateData.image_url = null;
+          updateData.preview_image_url = null;
+      }
+
+      const { error } = await supabase
+        .from('articles')
+        .update(updateData)
         .eq('id', articleId); // RLS handles the author_id check
-      
+
       if (error) {
         console.error('Error updating article:', error);
-        Alert.alert('Fehler', 'Artikel konnte nicht aktualisiert werden. Bitte prüfe die RLS Policies oder Datenbankverbindung.');
-        return;
+        Alert.alert('Fehler', 'Artikel konnte nicht aktualisiert werden.');
+        return; // Stop execution here
       }
-      
+
       Alert.alert(
         'Erfolg',
         'Dein Artikel wurde erfolgreich aktualisiert!',
         [
-          { 
-            text: 'OK', 
+          {
+            text: 'OK',
             onPress: () => {
-              // Refresh the home screen when navigating back
               navigation.navigate('HomeList');
-              // Then navigate to the article detail
               setTimeout(() => {
                 navigation.navigate('ArticleDetail', { articleId });
               }, 100);
@@ -157,6 +284,7 @@ const EditArticleScreen = ({ navigation, route }) => {
       Alert.alert('Fehler', 'Ein unerwarteter Fehler ist aufgetreten.');
     } finally {
       setIsSaving(false);
+      setIsUploading(false); // Ensure reset
     }
   };
   
@@ -208,7 +336,7 @@ const EditArticleScreen = ({ navigation, route }) => {
         <Ionicons name="alert-circle-outline" size={40} color="#ff3b30" />
         <Text style={styles.errorText}>{error}</Text>
         <TouchableOpacity 
-          style={styles.backButton}
+          style={styles.backButtonStyle}
           onPress={() => navigation.goBack()}
         >
           <Text style={styles.backButtonText}>Zurück</Text>
@@ -217,6 +345,8 @@ const EditArticleScreen = ({ navigation, route }) => {
     );
   }
   
+  const currentImageUri = imageAsset ? imageAsset.uri : imageUrl;
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -228,7 +358,7 @@ const EditArticleScreen = ({ navigation, route }) => {
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Artikel bearbeiten</Text>
         <View style={styles.headerRight}>
-          {isSaving ? (
+          {(isSaving || isUploading) ? (
             <ActivityIndicator size="small" color="#4285F4" />
           ) : (
             <TouchableOpacity 
@@ -272,6 +402,28 @@ const EditArticleScreen = ({ navigation, route }) => {
             multiline
             textAlignVertical="top"
           />
+          
+          {/* Image Upload/Edit - only shown for org articles */}
+          {isOrgArticle && (
+            <>
+              <Text style={styles.inputLabel}>Bild (Optional)</Text>
+              {currentImageUri ? (
+                <View style={styles.imagePreviewContainer}>
+                  <Image source={{ uri: currentImageUri }} style={styles.imagePreview} />
+                  <TouchableOpacity onPress={handleRemoveImage} style={styles.removeImageButton}>
+                      <Ionicons name="close-circle" size={24} color="#ff3b30" />
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+               <TouchableOpacity style={styles.imagePickerButton} onPress={pickImage} disabled={isUploading}>
+                 <Ionicons name="camera" size={20} color="#4285F4" style={{marginRight: 10}} />
+                 <Text style={styles.imagePickerButtonText}>
+                   {currentImageUri ? 'Bild ersetzen' : 'Bild auswählen'}
+                 </Text>
+               </TouchableOpacity>
+               {isUploading && <ActivityIndicator size="small" color="#4285F4" style={{ marginTop: 10}} />}
+            </>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -305,6 +457,12 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
     marginBottom: 20,
+  },
+  backButtonStyle: {
+    backgroundColor: '#eee',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 5,
   },
   backButtonText: {
     color: '#4285F4',
@@ -397,6 +555,39 @@ const styles = StyleSheet.create({
     fontSize: 16,
     minHeight: 200,
     marginBottom: 15,
+  },
+  imagePickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#eef4ff',
+    padding: 12,
+    borderRadius: 8,
+    justifyContent: 'center',
+    marginTop: 10,
+  },
+  imagePickerButtonText: {
+    color: '#4285F4',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  imagePreviewContainer: {
+      position: 'relative',
+      marginBottom: 10,
+      alignItems: 'center',
+  },
+  imagePreview: {
+    width: '100%',
+    height: 200,
+    borderRadius: 8,
+    marginTop: 10,
+  },
+  removeImageButton: {
+      position: 'absolute',
+      top: 5,
+      right: 5,
+      backgroundColor: 'rgba(255, 255, 255, 0.7)',
+      borderRadius: 12,
+      padding: 2,
   },
 });
 

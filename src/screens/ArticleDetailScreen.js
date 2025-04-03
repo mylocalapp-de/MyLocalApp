@@ -13,11 +13,13 @@ import {
   ActivityIndicator,
   Alert,
   ActionSheetIOS,
-  Dimensions
+  Dimensions,
+  Image
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+import { useOrganization } from '../context/OrganizationContext';
 import { Menu, Provider } from 'react-native-paper';
 
 const { height } = Dimensions.get('window');
@@ -26,6 +28,7 @@ const androidPaddingTop = height * 0.05; // 3% of screen height for better scali
 const ArticleDetailScreen = ({ route, navigation }) => {
   const { articleId } = route.params;
   const { user, displayName } = useAuth();
+  const { activeOrganizationId } = useOrganization();
   
   // State for article data
   const [article, setArticle] = useState(null);
@@ -33,6 +36,7 @@ const ArticleDetailScreen = ({ route, navigation }) => {
   const [error, setError] = useState(null);
   const [authorName, setAuthorName] = useState('Redaktion');
   const [isAuthor, setIsAuthor] = useState(false);
+  const [canEditDelete, setCanEditDelete] = useState(false);
   
   // State for comments and reactions
   const [comment, setComment] = useState('');
@@ -107,10 +111,8 @@ const ArticleDetailScreen = ({ route, navigation }) => {
         setAuthorName('Redaktion'); // Default fallback
       }
       
-      // Check if current user is the author
-      if (user && articleData.author_id === user.id) {
-        setIsAuthor(true);
-      }
+      // Determine if the current user can edit/delete this article
+      await checkEditDeletePermission(articleData);
       
       // Fetch comments
       fetchComments();
@@ -123,6 +125,49 @@ const ArticleDetailScreen = ({ route, navigation }) => {
       setError('An unexpected error occurred.');
     } finally {
       setLoading(false);
+    }
+  };
+  
+  // Function to check if the current user can edit/delete
+  const checkEditDeletePermission = async (articleData) => {
+    if (!user) {
+        setCanEditDelete(false);
+        return;
+    }
+
+    // Case 1: Personal article (no organization)
+    if (!articleData.organization_id) {
+        // Can only edit personal article if NOT in an org context
+        setCanEditDelete(articleData.author_id === user.id && !activeOrganizationId);
+        return;
+    }
+
+    // Case 2: Organizational article
+    if (articleData.organization_id) {
+        // Can only edit org article if user is member AND currently in that org's context
+        if (activeOrganizationId !== articleData.organization_id) {
+             setCanEditDelete(false); // Not in the correct org context
+             return;
+        }
+        // User is in the correct org context, now check membership
+        try {
+            const { data: membership, error } = await supabase
+                .from('organization_members')
+                .select('user_id') // Just need to check if a row exists
+                .eq('organization_id', articleData.organization_id)
+                .eq('user_id', user.id)
+                .maybeSingle();
+
+            if (error) {
+                console.error("Error checking org membership:", error);
+                setCanEditDelete(false);
+            } else {
+                setCanEditDelete(!!membership); // User is a member if a row is found
+            }
+        } catch (e) {
+            console.error("Unexpected error checking membership:", e);
+            setCanEditDelete(false);
+        }
     }
   };
   
@@ -292,7 +337,7 @@ const ArticleDetailScreen = ({ route, navigation }) => {
   
   // Handle article deletion
   const handleDeleteArticle = async () => {
-    if (!user || !isAuthor) {
+    if (!canEditDelete) {
       Alert.alert('Fehler', 'Du bist nicht berechtigt, diesen Artikel zu löschen.');
       return;
     }
@@ -353,7 +398,7 @@ const ArticleDetailScreen = ({ route, navigation }) => {
   
   // Handle article editing
   const handleEditArticle = () => {
-    if (!user || !isAuthor) {
+    if (!canEditDelete) {
       Alert.alert('Fehler', 'Du bist nicht berechtigt, diesen Artikel zu bearbeiten.');
       return;
     }
@@ -485,7 +530,7 @@ const ArticleDetailScreen = ({ route, navigation }) => {
           <View style={styles.headerTitle}>
             <Text style={styles.headerType}>{article.type}</Text>
           </View>
-          {isAuthor && (
+          {canEditDelete && (
             <Menu
               visible={menuVisible}
               onDismiss={closeMenu}
@@ -525,6 +570,16 @@ const ArticleDetailScreen = ({ route, navigation }) => {
           showsVerticalScrollIndicator={false}
         >
           <Text style={styles.title}>{article.title}</Text>
+          
+          {/* Display article image if available */}
+          {article.image_url && (
+            <Image 
+              source={{ uri: article.image_url }} 
+              style={styles.articleImage}
+              resizeMode="cover"
+            />
+          )}
+          
           <View style={styles.articleMeta}>
             <Text style={styles.date}>{article.date}</Text>
             <Text 
@@ -870,6 +925,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     elevation: 4,
     borderRadius: 4,
+  },
+  articleImage: {
+    width: '100%',
+    height: 200,
+    borderRadius: 8,
+    marginVertical: 10,
   },
 });
 

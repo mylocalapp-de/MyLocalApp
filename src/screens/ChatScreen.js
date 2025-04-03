@@ -155,8 +155,11 @@ const ChatScreen = ({ navigation, route }) => {
       
       if (error) {
         console.error('Error fetching chat groups:', error);
-        setError('Could not load chat groups. Please try again later.');
-      } else {
+        // Don't immediately set error - continue with empty data
+        // Anonymous users should still see the UI even if there's a permissions error
+        setChatGroups([]);
+        setFilteredGroups([]);
+      } else if (data && data.length > 0) {
         // Process the data to match the format expected by the component
         const processedData = data.map(group => {
           // Convert database types to UI types
@@ -199,17 +202,23 @@ const ChatScreen = ({ navigation, route }) => {
             type: uiType,
             isBot: false,
             dbType: group.type, // Keep original type for backend operations
-            adminId: group.admin_id,
+            organization_id: group.organization_id,
             tags: group.tags || [] // Include tags for filtering
           };
         });
         
         setChatGroups(processedData);
         setFilteredGroups(processedData); // Initially show all groups
+      } else {
+        // Empty data, but not an error
+        setChatGroups([]);
+        setFilteredGroups([]);
       }
     } catch (err) {
       console.error('Unexpected error fetching chat groups:', err);
-      setError('An unexpected error occurred.');
+      // Don't immediately set error - continue with empty data
+      setChatGroups([]);
+      setFilteredGroups([]);
     } finally {
       setIsLoading(false);
     }

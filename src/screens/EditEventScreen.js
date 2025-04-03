@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,8 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+import { useOrganization } from '../context/OrganizationContext';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 
 const { height } = Dimensions.get('window');
 const androidPaddingTop = height * 0.03;
@@ -25,6 +27,7 @@ const eventCategories = ['Sport', 'Vereine', 'Gemeindeamt', 'Kultur'];
 const EditEventScreen = ({ navigation, route }) => {
   const { eventId } = route.params;
   const { user } = useAuth();
+  const { activeOrganizationId } = useOrganization();
 
   // Event form state
   const [title, setTitle] = useState('');
@@ -67,13 +70,38 @@ const EditEventScreen = ({ navigation, route }) => {
         return;
       }
 
-      // Ensure the user is the organizer
-      if (data.organizer_id !== user?.id) {
-        setError('You are not authorized to edit this event.');
-        Alert.alert('Fehler', 'Du bist nicht berechtigt, dieses Event zu bearbeiten.');
-        navigation.goBack(); // Prevent unauthorized access
-        return;
+      // --- Authorization Check --- 
+      let canEdit = false;
+      if (!data.organization_id) { // Personal Event
+        canEdit = data.organizer_id === user?.id && !activeOrganizationId;
+      } else { // Organizational Event
+        if (activeOrganizationId !== data.organization_id) {
+          canEdit = false;
+        } else {
+          try {
+            const { data: membership, error: memberError } = await supabase
+              .from('organization_members')
+              .select('user_id')
+              .eq('organization_id', data.organization_id)
+              .eq('user_id', user?.id)
+              .maybeSingle();
+            if (!memberError && membership) {
+              canEdit = true;
+            }
+          } catch(e) {
+            console.error("Unexpected error checking membership:", e);
+            canEdit = false;
+          }
+        }
       }
+
+      if (!canEdit) {
+          setError('You are not authorized to edit this event.');
+          Alert.alert('Fehler', 'Du bist nicht berechtigt, dieses Event zu bearbeiten.');
+          navigation.goBack();
+          return;
+      }
+      // --- End Authorization Check ---
 
       // Set form values
       setTitle(data.title || '');
