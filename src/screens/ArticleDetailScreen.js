@@ -14,13 +14,15 @@ import {
   Alert,
   ActionSheetIOS,
   Dimensions,
-  Image
+  Image,
+  useWindowDimensions
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { Menu, Provider } from 'react-native-paper';
+import RenderHTML from 'react-native-render-html';
 
 const { height } = Dimensions.get('window');
 const androidPaddingTop = height * 0.05; // 3% of screen height for better scaling
@@ -29,6 +31,7 @@ const ArticleDetailScreen = ({ route, navigation }) => {
   const { articleId } = route.params;
   const { user, displayName } = useAuth();
   const { activeOrganizationId } = useOrganization();
+  const { width } = useWindowDimensions();
   
   // State for article data
   const [article, setArticle] = useState(null);
@@ -593,7 +596,11 @@ const ArticleDetailScreen = ({ route, navigation }) => {
             </Text>
           </View>
           
-          <Text style={styles.articleContent}>{article.content}</Text>
+          <RenderHTML
+            contentWidth={width - 30}
+            source={{ html: article.content }}
+            tagsStyles={htmlStyles}
+          />
           
           <View style={styles.divider} />
           
@@ -933,5 +940,31 @@ const styles = StyleSheet.create({
     marginVertical: 10,
   },
 });
+
+// Optional: Define custom styles for HTML tags
+const htmlStyles = {
+  p: {
+    fontSize: 16,
+    color: '#444',
+    lineHeight: 24,
+    marginBottom: 10, // Add some spacing between paragraphs
+  },
+  a: {
+    color: '#4285F4', // Style links like the theme color
+    textDecorationLine: 'underline',
+  },
+  b: { 
+      fontWeight: 'bold' 
+  },
+  strong: { 
+      fontWeight: 'bold' 
+  },
+  i: {
+      fontStyle: 'italic'
+  },
+  em: {
+      fontStyle: 'italic'
+  }
+};
 
 export default ArticleDetailScreen; 

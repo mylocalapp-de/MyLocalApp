@@ -1,6 +1,6 @@
 module.exports = {
-  name: "MyLocalApp",
-  slug: "mylocalapp-prototype",
+  name: "MeinHavelaue",
+  slug: "meinhavelaue",
   version: "1.0.0",
   orientation: "portrait",
   icon: "./assets/icon.png",
@@ -15,14 +15,22 @@ module.exports = {
   ],
   ios: {
     supportsTablet: true,
-    bundleIdentifier: "com.pkienast.mylocalappprototype"
+    bundleIdentifier: "com.pkienast.meinhavelaue",
+    infoPlist: {
+      NSPhotoLibraryUsageDescription: "Wir benötigen Zugriff auf deine Fotos, damit du Bilder an Nachrichten anhängen kannst."
+    }
   },
   android: {
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon.png",
       backgroundColor: "#ffffff"
     },
-    package: "com.pkienast.mylocalappprototype"
+    package: "com.pkienast.meinhavelaue",
+    config: {
+      googleMaps: {
+        apiKey: "AIzaSyBahIjWqhGvO9_fn_e1pz4RZUQkeMprdT4"
+      }
+    }
   },
   web: {
     favicon: "./assets/favicon.png"

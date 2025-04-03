@@ -1,3 +1,11 @@
 --- xcodebuild: WARNING: Using the first of multiple matching destinations:
 { platform:iOS Simulator, id:EC9092BC-236F-44A6-865C-C8ED69D62CBD, OS:18.2, name:iPhone 16 Pro }
 { platform:iOS Simulator, id:EC9092BC-236F-44A6-865C-C8ED69D62CBD, OS:18.2, name:iPhone 16 Pro }
+** BUILD FAILED **
+
+
+The following build commands failed:
+	ProcessProductPackaging /Users/pascalkienast/mylocalapp/ios/MeinHavelaue/MeinHavelaue.entitlements /Users/pascalkienast/Library/Developer/Xcode/DerivedData/MeinHavelaue-geaychghjyhmcrcjvexmsxqauwge/Build/Intermediates.noindex/MeinHavelaue.build/Debug-iphonesimulator/MeinHavelaue.build/MeinHavelaue.app.xcent (in target 'MeinHavelaue' from project 'MeinHavelaue')
+	ProcessProductPackaging /Users/pascalkienast/mylocalapp/ios/MeinHavelaue/MeinHavelaue.entitlements /Users/pascalkienast/Library/Developer/Xcode/DerivedData/MeinHavelaue-geaychghjyhmcrcjvexmsxqauwge/Build/Intermediates.noindex/MeinHavelaue.build/Debug-iphonesimulator/MeinHavelaue.build/MeinHavelaue.app-Simulated.xcent (in target 'MeinHavelaue' from project 'MeinHavelaue')
+	Building workspace MeinHavelaue with scheme MeinHavelaue and configuration Debug
+(3 failures)

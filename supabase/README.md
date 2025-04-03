@@ -1,6 +1,6 @@
-# Supabase Setup for MyLocalApp
+# Supabase Setup for MeinHavelaue
 
-This directory contains all the necessary files to set up and configure your Supabase instance for MyLocalApp.
+This directory contains all the necessary files to set up and configure your Supabase instance for MeinHavelaue.
 
 ## Database Structure
 

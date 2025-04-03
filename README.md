@@ -1,4 +1,4 @@
-# MyLocalApp - Village Community App
+# MeinHavelaue - Village Community App
 
 A mobile application designed to strengthen community spirit in rural villages by providing hyper-localized information and interactivity.
 
@@ -65,8 +65,8 @@ A mobile application designed to strengthen community spirit in rural villages b
 
 1. Clone the repository:
 ```
-git clone https://github.com/yourusername/mylocalapp.git
-cd mylocalapp
+git clone https://github.com/yourusername/meinhavelaue.git
+cd meinhavelaue
 ```
 
 2. Install dependencies:

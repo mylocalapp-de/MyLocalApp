@@ -20,6 +20,10 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as ImagePicker from 'expo-image-picker';
+import 'react-native-get-random-values';
+import { v4 as uuidv4 } from 'uuid';
+import { decode } from 'base64-arraybuffer';
 
 const { height } = Dimensions.get('window');
 const androidPaddingTop = height * 0.05; // 5% of screen height for better scaling
@@ -40,6 +44,8 @@ const ChatDetailScreen = ({ route, navigation }) => {
   const [sendingMessage, setSendingMessage] = useState(false);
   const [addingReaction, setAddingReaction] = useState(false);
   const [addingComment, setAddingComment] = useState(false);
+  const [imageAsset, setImageAsset] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
   const flatListRef = useRef(null);
   const [isOrgMember, setIsOrgMember] = useState(false);
 
@@ -105,6 +111,70 @@ const ChatDetailScreen = ({ route, navigation }) => {
       await AsyncStorage.setItem('localUnreadCounts', JSON.stringify(unreadCounts));
     } catch (err) {
       console.error('Error marking chat as viewed:', err);
+    }
+  };
+
+  // Function to pick an image
+  const pickImage = async () => {
+    // Check if user is authenticated
+    if (!user) {
+      showAuthPrompt();
+      return;
+    }
+    
+    // Request permission
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Berechtigung benötigt', 'Sorry, wir benötigen die Berechtigung, um auf deine Fotos zugreifen zu können.');
+      return;
+    }
+
+    let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.8, // Reduce quality slightly for faster uploads
+      base64: true, // Request base64 data
+    });
+
+    if (!result.canceled) {
+      setImageAsset(result.assets[0]);
+    }
+  };
+
+  // Function to upload image and return URL
+  const uploadImage = async (asset) => {
+    if (!asset || !asset.base64) return null; // Check if asset and base64 data exist
+
+    setIsUploading(true);
+    try {
+      const fileExt = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
+      const fileName = `${uuidv4()}.${fileExt}`;
+      const filePath = `${fileName}`; // Store directly in the root for simplicity
+
+      const { data, error: uploadError } = await supabase.storage
+        .from('article_images')
+        .upload(filePath, decode(asset.base64), { // Use decode here
+          contentType: asset.mimeType ?? `image/${fileExt}`
+        });
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('article_images')
+        .getPublicUrl(filePath);
+
+      return urlData?.publicUrl;
+
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      Alert.alert('Upload Fehler', 'Das Bild konnte nicht hochgeladen werden.');
+      return null;
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -213,7 +283,8 @@ const ChatDetailScreen = ({ route, navigation }) => {
           time: formattedTime,
           reactions: reactionsByMessageId[msg.id] || {},
           comments: commentsByMessageId[msg.id] || [],
-          user_id: msg.user_id
+          user_id: msg.user_id,
+          image_url: msg.image_url
         };
       });
       
@@ -258,8 +329,6 @@ const ChatDetailScreen = ({ route, navigation }) => {
       return;
     }
 
-    if (message.trim() === '') return;
-    
     // For broadcast channels, require a user account
     if (isBroadcast() && !isBot() && !user) {
       Alert.alert(
@@ -276,6 +345,9 @@ const ChatDetailScreen = ({ route, navigation }) => {
       return;
     }
     
+    // If neither text nor image, don't proceed
+    if (message.trim() === '' && !imageAsset) return;
+    
     setSendingMessage(true);
     
     try {
@@ -285,20 +357,35 @@ const ChatDetailScreen = ({ route, navigation }) => {
         userId: user?.id,
         isAdmin: isOrgMember,
         text: message.substring(0, 20) + (message.length > 20 ? '...' : ''),
+        hasImage: !!imageAsset,
         commentingOn: commentingOnMessageId
       });
       
-      // For broadcasts, add the comment to the commented message
+      // For comments, we currently only support text (no images)
       if (commentingOnMessageId !== null && !isOpenChat()) {
         await addComment(commentingOnMessageId, message);
         setCommentingOnMessageId(null);
       } else if (isOpenChat() || isBot() || (isBroadcast() && isOrgMember)) {
         // Regular message for open chats, bot, or admin posting to broadcast
+        
+        // If there's an image, upload it first
+        let imageUrl = null;
+        if (imageAsset) {
+          imageUrl = await uploadImage(imageAsset);
+          if (!imageUrl && message.trim() === '') {
+            // If image upload failed and there's no text, exit
+            Alert.alert('Fehler', 'Bild konnte nicht hochgeladen werden. Bitte versuche es später erneut.');
+            setSendingMessage(false);
+            return;
+          }
+        }
+        
         const { data, error } = await supabase
           .from('chat_messages')
           .insert({
             chat_group_id: chatGroup.id,
-            text: message,
+            text: message.trim() || null, // Use null for empty text
+            image_url: imageUrl,
             user_id: user ? user.id : null
           })
           .select();
@@ -311,7 +398,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
           console.log('Message sent successfully:', data);
           
           // Update local chat group object with the last message
-          chatGroup.lastMessage = message;
+          chatGroup.lastMessage = message.trim() || 'Bild';
           chatGroup.time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
           
           // Also update the group's last message time in the chat list via AsyncStorage
@@ -320,7 +407,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
             const lastMessages = JSON.parse(storedLastMessages);
             
             lastMessages[chatGroup.id] = {
-              text: message,
+              text: message.trim() || 'Bild',
               time: chatGroup.time,
               timestamp: Date.now()
             };
@@ -330,6 +417,9 @@ const ChatDetailScreen = ({ route, navigation }) => {
             console.error('Error storing last message:', err);
           }
         }
+        
+        // Clear the image asset
+        setImageAsset(null);
         
         // Refresh messages to include the new one
         await fetchMessages();
@@ -543,7 +633,25 @@ const ChatDetailScreen = ({ route, navigation }) => {
         >
           {/* Display sender name only if it's not me and not a system message */}
           {!isMe && item.sender !== 'System' && <Text style={styles.messageSender}>{item.sender}</Text>}
-          <Text style={styles.messageText}>{item.text}</Text>
+          
+          {/* Display text if present */}
+          {item.text && <Text style={styles.messageText}>{item.text}</Text>}
+          
+          {/* Display image if present */}
+          {item.image_url && (
+            <TouchableOpacity 
+              onPress={() => {
+                // Optional: Implement image preview/full screen view here
+              }}
+            >
+              <Image 
+                source={{ uri: item.image_url }} 
+                style={styles.messageImage} 
+                resizeMode="cover"
+              />
+            </TouchableOpacity>
+          )}
+          
           <Text style={styles.messageTime}>{item.time}</Text>
         </View>
         
@@ -678,27 +786,66 @@ const ChatDetailScreen = ({ route, navigation }) => {
               onChangeText={setMessage}
               multiline
             />
+            
+            {/* Image picker button */}
+            {!commentingOnMessageId && (
+              <TouchableOpacity 
+                style={styles.imageButton}
+                onPress={pickImage}
+                disabled={isUploading || sendingMessage}
+              >
+                <Ionicons 
+                  name="image-outline" 
+                  size={24} 
+                  color={isUploading || sendingMessage ? "#ccc" : "#4285F4"} 
+                />
+              </TouchableOpacity>
+            )}
+            
             <TouchableOpacity 
               style={[
                 styles.sendButton, 
-                (message.trim() === '' || sendingMessage || addingComment) && styles.sendButtonDisabled
+                ((message.trim() === '' && !imageAsset) || sendingMessage || addingComment || isUploading) && styles.sendButtonDisabled
               ]} 
               onPress={sendMessage}
-              disabled={message.trim() === '' || sendingMessage || addingComment}
+              disabled={(message.trim() === '' && !imageAsset) || sendingMessage || addingComment || isUploading}
             >
-              {sendingMessage || addingComment ? (
+              {sendingMessage || addingComment || isUploading ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
                 <Ionicons 
                   name="send" 
                   size={20} 
-                  color={message.trim() === '' ? "#ccc" : "#fff"} 
+                  color={(message.trim() === '' && !imageAsset) ? "#ccc" : "#fff"} 
                 />
               )}
             </TouchableOpacity>
           </View>
         )}
       </KeyboardAvoidingView>
+      
+      {/* Image preview */}
+      {imageAsset && (
+        <View style={styles.imagePreviewContainer}>
+          <Image 
+            source={{ uri: imageAsset.uri }} 
+            style={styles.imagePreview}
+            resizeMode="cover"
+          />
+          <TouchableOpacity 
+            style={styles.removeImageButton}
+            onPress={() => setImageAsset(null)}
+            disabled={isUploading || sendingMessage}
+          >
+            <Ionicons name="close-circle" size={24} color="#ff3b30" />
+          </TouchableOpacity>
+          {isUploading && (
+            <View style={styles.uploadingOverlay}>
+              <ActivityIndicator size="large" color="#ffffff" />
+            </View>
+          )}
+        </View>
+      )}
     </SafeAreaView>
   );
 };
@@ -948,6 +1095,48 @@ const styles = StyleSheet.create({
     color: '#888',
     fontSize: 15,
     textAlign: 'center',
+  },
+  messageImage: {
+    width: 200,
+    height: 200,
+    borderRadius: 8,
+    marginTop: 5,
+    marginBottom: 5,
+  },
+  imageButton: {
+    padding: 10,
+    borderRadius: 20,
+    backgroundColor: '#f1f1f1',
+    marginLeft: 10,
+  },
+  imagePreviewContainer: {
+    marginTop: 10,
+    marginBottom: 10,
+    alignItems: 'center',
+    position: 'relative',
+  },
+  imagePreview: {
+    width: 200,
+    height: 200,
+    borderRadius: 10,
+  },
+  removeImageButton: {
+    position: 'absolute',
+    top: -10,
+    right: -10,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    borderRadius: 12,
+  },
+  uploadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 10,
   },
 });
 

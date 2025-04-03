@@ -65,10 +65,11 @@ const HomeScreen = ({ navigation }) => {
           const publishDate = new Date(article.published_at);
           const formattedDate = `${publishDate.getDate().toString().padStart(2, '0')}.${(publishDate.getMonth() + 1).toString().padStart(2, '0')}.${publishDate.getFullYear()}`;
           
-          // Truncate content to 100 chars with ellipsis
-          const truncatedContent = article.content.length > 100 
-            ? article.content.substring(0, 100) + '...' 
-            : article.content;
+          // Strip HTML tags and then truncate content
+          const plainTextContent = article.content.replace(/<[^>]*>/g, ''); // Remove HTML tags
+          const truncatedContent = plainTextContent.length > 100 
+            ? plainTextContent.substring(0, 100) + '...' 
+            : plainTextContent;
             
           return {
             id: article.id,

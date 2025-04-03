@@ -1,4 +1,4 @@
--- Migration 001: Initial setup for MyLocalApp
+-- Migration 001: Initial setup for MeinHavelaue
 -- This migration creates the basic schema for user management with preferences
 
 -- Enable PostgreSQL extensions

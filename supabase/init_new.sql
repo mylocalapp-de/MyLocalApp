@@ -342,7 +342,8 @@ CREATE OR REPLACE VIEW public.chat_messages_with_users AS
     format_time_german(m.created_at) as time, 
     m.created_at,
     g.type as group_type, -- Include group type for client-side logic if needed
-    g.organization_id -- Include org ID for client-side logic if needed
+    g.organization_id, -- Include org ID for client-side logic if needed
+    m.image_url -- Added image_url at the end to preserve column order
   FROM public.chat_messages m
   LEFT JOIN public.profiles p ON m.user_id = p.id 
   LEFT JOIN public.chat_groups g ON m.chat_group_id = g.id -- Join chat_groups to get type and org_id

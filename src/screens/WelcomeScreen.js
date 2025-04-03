@@ -126,7 +126,7 @@ const WelcomeScreen = ({ navigation }) => {
         style={styles.logo}
         resizeMode="contain"
       />
-      <Text style={styles.welcomeTitle}>Willkommen bei MyLocalApp</Text>
+      <Text style={styles.welcomeTitle}>Willkommen bei MeinHavelaue</Text>
       <Text style={styles.welcomeText}>
         Dein Dorf in einer App - Bleib informiert und verbunden.
       </Text>
