@@ -36,7 +36,7 @@ module.exports = {
     favicon: "./assets/favicon.png"
   },
   updates: {
-    url: "https://u.expo.dev/c24e6957-0c57-447c-b59c-9954f2d036f4"
+    url: "https://u.expo.dev/3adb5b7e-7622-44f3-9375-5f23371e77b7"
   },
   runtimeVersion: "1.0.0",
   extra: {
@@ -44,7 +44,7 @@ module.exports = {
     supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL,
     supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
     eas: {
-      projectId: "c24e6957-0c57-447c-b59c-9954f2d036f4"
+      projectId: "3adb5b7e-7622-44f3-9375-5f23371e77b7"
     }
   },
   owner: "pkienast"
