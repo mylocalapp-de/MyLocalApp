@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   View, 
   Text, 
@@ -8,10 +8,36 @@ import {
   Image,
   ScrollView,
   TextInput,
-  ActivityIndicator
+  ActivityIndicator,
+  Animated,
+  Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
+
+const welcomeImages = [
+  require('../../assets/welcomescreen/birgit-photo-50.png'),
+  require('../../assets/welcomescreen/birgit-photo-43.png'),
+  require('../../assets/welcomescreen/birgit-photo-39.png'),
+  require('../../assets/welcomescreen/birgit-photo-37.png'),
+  require('../../assets/welcomescreen/birgit-photo-33.png'),
+  require('../../assets/welcomescreen/birgit-photo-31.png'),
+  require('../../assets/welcomescreen/birgit-photo-28.png'),
+  require('../../assets/welcomescreen/birgit-photo-27.png'),
+];
+
+const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+const IMAGE_SIZE = screenWidth * 0.4;
+const ANIMATION_DURATION = 40000;
+
+const numRepeats = 4; // Render image set multiple times for density and wrapping
+const horizontalMargin = 10;
+const verticalMargin = 15; // Increased vertical margin slightly
+const imageWidthWithMargin = IMAGE_SIZE + horizontalMargin * 2;
+const imageHeightWithMargin = IMAGE_SIZE * 1.1 + verticalMargin * 2;
+const totalWidth = welcomeImages.length * numRepeats * imageWidthWithMargin;
+const scrollAmount = totalWidth / 2; // Scroll half the total width for looping
+const effectiveAnimationDuration = ANIMATION_DURATION * (numRepeats / 1.5); // Adjust duration factor as needed for speed
 
 const WelcomeScreen = ({ navigation }) => {
   const { createLocalAccount, signIn } = useAuth();
@@ -21,6 +47,26 @@ const WelcomeScreen = ({ navigation }) => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const scrollX = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    scrollX.setValue(0); // Reset on step change or mount
+
+    if (step === 'welcome') {
+        Animated.loop(
+            Animated.timing(scrollX, {
+                toValue: -scrollAmount, // Scroll half the total calculated width
+                duration: effectiveAnimationDuration, // Use adjusted duration
+                useNativeDriver: true,
+                easing: t => t, // Linear easing
+            })
+        ).start();
+    } else {
+        scrollX.stopAnimation(); // Stop animation if navigating away
+    }
+
+    return () => scrollX.stopAnimation(); // Cleanup on unmount/step change
+}, [step, scrollX]); // Rerun effect if step changes
 
   const categories = [
     { id: 'kultur', name: 'Kultur', icon: 'film-outline' },
@@ -38,28 +84,24 @@ const WelcomeScreen = ({ navigation }) => {
   };
 
   const handleCreateLocalAccount = async () => {
-    if (selectedPreferences.length === 0) {
-      setError('Bitte wähle mindestens eine Präferenz aus.');
-      return;
-    }
-
     setLoading(true);
     setError('');
+    const allPreferences = categories.map(category => category.id);
+    setSelectedPreferences(allPreferences);
 
     try {
-      console.log('Creating local account with preferences:', selectedPreferences);
+      console.log('Creating local account with all preferences:', allPreferences);
       console.log('Display name: Neuer Account');
-      const { success, error: contextError } = await createLocalAccount(selectedPreferences, "Neuer Account");
+      const { success, error: contextError } = await createLocalAccount(allPreferences, "Neuer Account");
       
       if (success) {
-        console.log('Local account created successfully, navigating to MainApp via context update.');
-        // Let AuthContext handle navigation by updating hasCompletedOnboarding
+        console.log('Local account created successfully, navigating via context.');
       } else {
         console.error('Error creating local account:', contextError);
         setError(contextError?.message || 'Es gab ein Problem. Bitte versuche es erneut.');
       }
     } catch (err) {
-      console.error('Unexpected error in handleCreateLocalAccount:', err);
+      console.error('Unexpected error in auto account creation:', err);
       setError('Ein unerwarteter Fehler ist aufgetreten.');
     } finally {
       setLoading(false);
@@ -67,7 +109,6 @@ const WelcomeScreen = ({ navigation }) => {
   };
 
   const handleLoginSubmit = async () => {
-    // Validation
     if (!email.trim() || !email.includes('@')) {
       setError('Bitte gib eine gültige E-Mail-Adresse ein');
       return;
@@ -78,7 +119,6 @@ const WelcomeScreen = ({ navigation }) => {
       return;
     }
     
-    // Password length check might be handled by Supabase Auth, but keep client-side check
     if (password.length < 6) { 
       setError('Das Passwort muss mindestens 6 Zeichen lang sein');
       return;
@@ -93,9 +133,6 @@ const WelcomeScreen = ({ navigation }) => {
       
       if (result.success) {
         console.log('Login successful, AppNavigator will handle navigation via AuthContext state.');
-        // No manual navigation needed here.
-        // AuthContext's onAuthStateChange listener sets hasCompletedOnboarding=true,
-        // which triggers AppNavigator to switch to MainApp.
       } else {
         console.error('Login failed:', result.error);
         const errorMessage = result.error?.message;
@@ -104,10 +141,9 @@ const WelcomeScreen = ({ navigation }) => {
             setError('E-Mail oder Passwort ist ungültig. Bitte überprüfe deine Eingaben.');
         } else if (errorMessage?.includes('Email not confirmed')) {
             setError('Bitte bestätige deine E-Mail-Adresse, bevor du dich anmeldest. Überprüfe dein Postfach.');
-        } else if (errorMessage?.includes('rate limit')) { // Catch potential rate limit errors
+        } else if (errorMessage?.includes('rate limit')) {
              setError('Zu viele Anmeldeversuche. Bitte warte einen Moment und versuche es erneut.');
         } else {
-             // Use Supabase error message or a generic fallback
              setError(`Anmeldung fehlgeschlagen: ${errorMessage || 'Unbekannter Fehler'}`);
         }
       }
@@ -120,68 +156,133 @@ const WelcomeScreen = ({ navigation }) => {
   };
 
   const renderWelcome = () => (
-    <View style={styles.contentContainer}>
-      <Image
-        source={require('../../assets/icon.png')}
-        style={styles.logo}
-        resizeMode="contain"
-      />
-      <Text style={styles.welcomeTitle}>Willkommen bei MeinHavelaue</Text>
-      <Text style={styles.welcomeText}>
-        Dein Dorf in einer App - Bleib informiert und verbunden.
-      </Text>
-      
-      <View style={styles.buttonsContainer}>
-        <TouchableOpacity 
+    <View style={styles.welcomeRootContainer}>
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
+        {/* Row 1 (Above center) */}
+        <Animated.View
           style={[
-            styles.primaryButton,
-            loading && styles.buttonDisabled
-          ]}
-          onPress={async () => {
-            setLoading(true);
-            setError('');
-            // Automatically select all preferences
-            const allPreferences = categories.map(category => category.id);
-            setSelectedPreferences(allPreferences);
-            
-            try {
-              console.log('Creating local account with all preferences:', allPreferences);
-              console.log('Display name: Neuer Account');
-              const { success, error } = await createLocalAccount(allPreferences, "Neuer Account");
-              
-              if (success) {
-                console.log('Local account created successfully, navigating to MainApp');
-                // Let AuthContext handle navigation
-              } else {
-                console.error('Error creating local account:', error);
-                setError('Es gab ein Problem. Bitte versuche es erneut.');
-                setStep('welcome');
-              }
-            } catch (err) {
-              console.error('Unexpected error in auto account creation:', err);
-              setError('Ein unerwarteter Fehler ist aufgetreten.');
-              setStep('welcome');
-            } finally {
-              setLoading(false);
+            styles.animatedImageContainer,
+            { 
+              width: totalWidth, 
+              transform: [
+                { translateX: scrollX }, 
+                { translateY: -imageHeightWithMargin } // Position above center
+              ] 
             }
-          }}
-          disabled={loading}
+          ]}
         >
-          {loading ? (
-            <ActivityIndicator color="#fff" size="small" />
-          ) : (
-            <Text style={styles.primaryButtonText}>Neu hier?</Text>
+          {[...Array(numRepeats)].flatMap((_, repeatIndex) =>
+            welcomeImages.map((imgSrc, index) => (
+              <Image
+                key={`img-above-${repeatIndex}-${index}`} // Unique key
+                source={imgSrc}
+                style={[
+                    styles.backgroundImage,
+                    { transform: [{ rotate: `${Math.random() * 25 - 12.5}deg` }] }
+                ]}
+              />
+            ))
           )}
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.secondaryButton}
-          onPress={() => setStep('login')}
+        </Animated.View>
+
+        {/* Row 2 (Center - Original position, offset horizontally) */}
+        <Animated.View
+          style={[
+            styles.animatedImageContainer,
+            { 
+              width: totalWidth, 
+              transform: [
+                // Interpolate scrollX to add a constant horizontal offset
+                { translateX: scrollX.interpolate({ 
+                    inputRange: [-scrollAmount, 0], 
+                    outputRange: [-scrollAmount - (imageWidthWithMargin / 2), -(imageWidthWithMargin / 2)] 
+                  }) 
+                }
+              ] 
+            }
+          ]}
         >
-          <Text style={styles.secondaryButtonText}>Login mit existierendem Account</Text>
-        </TouchableOpacity>
+          {[...Array(numRepeats)].flatMap((_, repeatIndex) =>
+            welcomeImages.map((imgSrc, index) => (
+              <Image
+                key={`img-center-${repeatIndex}-${index}`} // Unique key
+                source={imgSrc}
+                style={[
+                    styles.backgroundImage,
+                    { transform: [{ rotate: `${Math.random() * 25 - 12.5}deg` }] }
+                ]}
+              />
+            ))
+          )}
+        </Animated.View>
+
+        {/* Row 3 (Below center) */}
+        <Animated.View
+          style={[
+            styles.animatedImageContainer,
+            { 
+              width: totalWidth, 
+              transform: [
+                { translateX: scrollX }, 
+                { translateY: imageHeightWithMargin } // Position below center
+              ] 
+            }
+          ]}
+        >
+          {[...Array(numRepeats)].flatMap((_, repeatIndex) =>
+            welcomeImages.map((imgSrc, index) => (
+              <Image
+                key={`img-below-${repeatIndex}-${index}`} // Unique key
+                source={imgSrc}
+                style={[
+                    styles.backgroundImage,
+                    { transform: [{ rotate: `${Math.random() * 25 - 12.5}deg` }] }
+                ]}
+              />
+            ))
+          )}
+        </Animated.View>
+      </View>
+
+      <View style={styles.overlay} pointerEvents="none" />
+
+      <View style={styles.contentContainer}>
+        <Image
+          source={require('../../assets/icon.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        />
+        <Text style={styles.welcomeTitle}>Willkommen bei MeinHavelaue</Text>
+        <Text style={styles.welcomeText}>
+          Dein Dorf in einer App - Bleib informiert und verbunden.
+        </Text>
         
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        <View style={styles.buttonsContainer}>
+          <TouchableOpacity 
+            style={[
+              styles.primaryButton,
+              loading && styles.buttonDisabled
+            ]}
+            onPress={handleCreateLocalAccount}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Text style={styles.primaryButtonText}>Neu hier?</Text>
+            )}
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={styles.secondaryButton}
+            onPress={() => setStep('login')}
+            disabled={loading}
+          >
+            <Text style={styles.secondaryButtonText}>Login mit existierendem Account</Text>
+          </TouchableOpacity>
+          
+          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        </View>
       </View>
     </View>
   );
@@ -316,11 +417,14 @@ const WelcomeScreen = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
-        {step === 'welcome' && renderWelcome()}
-        {step === 'preferences' && renderPreferences()}
-        {step === 'login' && renderLoginForm()}
-      </ScrollView>
+      {step === 'welcome' ? (
+         renderWelcome() 
+      ) : (
+        <ScrollView contentContainerStyle={styles.scrollContainer}>
+          {step === 'preferences' && renderPreferences()}
+          {step === 'login' && renderLoginForm()}
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 };
@@ -330,6 +434,30 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fff',
   },
+  welcomeRootContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  animatedImageContainer: {
+    flexDirection: 'row',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    height: screenHeight,
+    alignItems: 'center',
+  },
+  backgroundImage: {
+    width: IMAGE_SIZE,
+    height: IMAGE_SIZE * 1.1,
+    marginHorizontal: 10,
+    borderRadius: 15,
+    opacity: 0.2,
+  },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(232, 234, 246, 0.33)',
+  },
   scrollContainer: {
     flexGrow: 1,
     padding: 20,
@@ -338,6 +466,8 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 20,
+    width: '100%',
   },
   logo: {
     width: 120,
@@ -347,27 +477,38 @@ const styles = StyleSheet.create({
   welcomeTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#333',
+    color: '#1A237E',
     marginBottom: 15,
     textAlign: 'center',
+    textShadowColor: 'rgba(255, 255, 255, 0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   welcomeText: {
     fontSize: 16,
-    color: '#666',
+    color: '#333',
     textAlign: 'center',
     marginBottom: 40,
+    textShadowColor: 'rgba(255, 255, 255, 0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   buttonsContainer: {
-    width: '100%',
+    width: '90%',
     alignItems: 'center',
   },
   primaryButton: {
-    backgroundColor: '#4285F4',
+    backgroundColor: '#3F51B5',
     borderRadius: 8,
     padding: 16,
     width: '100%',
     alignItems: 'center',
     marginBottom: 15,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
   },
   primaryButtonText: {
     color: '#fff',
@@ -375,14 +516,16 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   secondaryButton: {
-    backgroundColor: '#f5f5f5',
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    borderWidth: 1,
+    borderColor: '#3F51B5',
     borderRadius: 8,
     padding: 16,
     width: '100%',
     alignItems: 'center',
   },
   secondaryButtonText: {
-    color: '#4285F4',
+    color: '#3F51B5',
     fontSize: 16,
     fontWeight: 'bold',
   },
@@ -454,12 +597,18 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   buttonDisabled: {
-    opacity: 0.7,
+    opacity: 0.6,
+    backgroundColor: '#9FA8DA',
   },
   errorText: {
-    color: '#ff3b30',
-    marginTop: 10,
+    color: '#D32F2F',
+    marginTop: 15,
     textAlign: 'center',
+    fontWeight: 'bold',
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 4,
   },
   formContainer: {
     width: '100%',
