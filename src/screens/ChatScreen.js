@@ -201,6 +201,7 @@ const ChatScreen = ({ navigation, route }) => {
             avatar: null,
             type: uiType,
             isBot: false,
+            isPinned: group.is_pinned || false, // Include is_pinned flag
             dbType: group.type, // Keep original type for backend operations
             organization_id: group.organization_id,
             tags: group.tags || [] // Include tags for filtering
@@ -298,7 +299,12 @@ const ChatScreen = ({ navigation, route }) => {
         {renderAvatar(item)}
         <View style={styles.chatInfo}>
           <View style={styles.chatTopLine}>
-            <Text style={styles.chatName}>{item.name}</Text>
+            <View style={styles.chatNameContainer}>
+              {item.isPinned && (
+                <Ionicons name="pin" size={16} color="#666" style={styles.pinIcon} />
+              )}
+              <Text style={styles.chatName}>{item.name}</Text>
+            </View>
             <Text style={styles.chatTime}>{item.time}</Text>
           </View>
           <View style={styles.chatBottomLine}>
@@ -440,6 +446,8 @@ const styles = StyleSheet.create({
   chatInfo: {
     flex: 1,
     justifyContent: 'center',
+    flexShrink: 1,
+    marginRight: 5,
   },
   chatTopLine: {
     flexDirection: 'row',
@@ -450,6 +458,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  chatNameContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 1,
   },
   chatName: {
     fontSize: 16,
@@ -535,6 +548,9 @@ const styles = StyleSheet.create({
     color: '#888',
     fontSize: 15,
     textAlign: 'center',
+  },
+  pinIcon: {
+    marginRight: 5,
   },
 });
 

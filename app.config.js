@@ -3,8 +3,8 @@ module.exports = {
   slug: "meinhavelaue",
   version: "1.0.0",
   orientation: "portrait",
-  // TODO: Replace with properly square (1024x1024) icon images
-  icon: "./assets/icon.png",
+  // Square 1024x1024 icon
+  icon: "./assets/fixed/icon.png",
   userInterfaceStyle: "light",
   splash: {
     image: "./assets/splash.png",
@@ -23,8 +23,8 @@ module.exports = {
   },
   android: {
     adaptiveIcon: {
-      // TODO: Replace with properly square (1024x1024) adaptiveIcon image
-      foregroundImage: "./assets/adaptive-icon.png",
+      // Square 1024x1024 adaptiveIcon
+      foregroundImage: "./assets/fixed/adaptive-icon.png",
       backgroundColor: "#ffffff"
     },
     package: "com.pkienast.meinhavelaue",

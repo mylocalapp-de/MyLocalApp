@@ -97,6 +97,7 @@ CREATE TABLE public.chat_groups (
   type TEXT NOT NULL, -- 'open_group', 'broadcast', 'bot'
   description TEXT,
   tags TEXT[] DEFAULT '{}',
+  is_pinned BOOLEAN DEFAULT false, -- Added pinned flag
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   -- admin_id UUID REFERENCES public.profiles(id), -- Replaced by org admin concept for broadcast
   organization_id UUID REFERENCES public.organizations(id) ON DELETE SET NULL, -- Added Org Link
@@ -310,8 +311,14 @@ CREATE OR REPLACE VIEW public.chat_group_listings AS
     FROM public.chat_messages
   )
   SELECT
-    g.id, g.name, g.type, g.tags, g.organization_id, g.is_active,
-    lm.text as last_message, format_time_german(lm.created_at) as last_message_time,
+    g.id, 
+    g.name, 
+    g.type, 
+    g.tags, 
+    g.organization_id, 
+    g.is_active, 
+    lm.text as last_message, 
+    format_time_german(lm.created_at) as last_message_time,
     lm.created_at as last_message_timestamp,
     COALESCE(org.name, g.name) as display_source, -- Org name or group name
     -- Determine last sender name
@@ -319,13 +326,14 @@ CREATE OR REPLACE VIEW public.chat_group_listings AS
       WHEN g.type = 'broadcast' AND g.organization_id IS NOT NULL THEN COALESCE(org.name, 'Organisation') -- Show Org Name for Org Broadcasts
       ELSE COALESCE(sender_profile.display_name, 'System') -- Show User Name or System otherwise
     END as last_message_sender_name,
-    0 as unread_count -- Placeholder, requires complex logic with RLS/read status
+    0 as unread_count, -- Placeholder, requires complex logic with RLS/read status
+    g.is_pinned -- Moved is_pinned to the end
   FROM public.chat_groups g
   LEFT JOIN LastMessages lm ON g.id = lm.chat_group_id AND lm.rn = 1
   LEFT JOIN public.organizations org ON g.organization_id = org.id
   LEFT JOIN public.profiles sender_profile ON lm.user_id = sender_profile.id
   WHERE g.is_active = true AND g.type != 'bot'
-  ORDER BY lm.created_at DESC NULLS LAST;
+  ORDER BY g.is_pinned DESC, lm.created_at DESC NULLS LAST; -- Sort pinned first
 
 -- Chat Messages
 CREATE OR REPLACE VIEW public.chat_messages_with_users AS
@@ -735,6 +743,59 @@ CREATE POLICY "Authenticated users to set their attendance" ON public.event_atte
 CREATE POLICY "Users can update their own attendance" ON public.event_attendees FOR UPDATE TO authenticated USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
 CREATE POLICY "Users can delete their own attendance" ON public.event_attendees FOR DELETE TO authenticated USING (user_id = auth.uid());
 
+-- ====================================================================
+-- == Additions for Map Data ==
+-- ====================================================================
+
+-- Map Configuration Table (Singleton)
+CREATE TABLE public.map_config (
+  id INTEGER PRIMARY KEY DEFAULT 1, -- Enforce single row
+  initial_latitude NUMERIC NOT NULL,
+  initial_longitude NUMERIC NOT NULL,
+  initial_latitude_delta NUMERIC NOT NULL,
+  initial_longitude_delta NUMERIC NOT NULL,
+  map_filters TEXT[] DEFAULT ARRAY['Alle']::TEXT[], -- Default with 'Alle'
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  CONSTRAINT map_config_singleton CHECK (id = 1)
+);
+COMMENT ON TABLE public.map_config IS 'Stores global map configuration like initial view and filters. Only one row allowed.';
+
+-- Map Points of Interest Table
+CREATE TABLE public.map_pois (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  title TEXT NOT NULL,
+  description TEXT,
+  latitude NUMERIC NOT NULL,
+  longitude NUMERIC NOT NULL,
+  category TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+COMMENT ON TABLE public.map_pois IS 'Stores Points of Interest (POIs) for the map.';
+
+-- ====================================================================
+-- == RLS and Permissions for Map Data ==
+-- ====================================================================
+
+-- map_config RLS
+ALTER TABLE public.map_config ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow anyone to read map config" ON public.map_config;
+DROP POLICY IF EXISTS "Allow admin to update map config" ON public.map_config; -- Assuming admin role needed for updates
+CREATE POLICY "Allow anyone to read map config" ON public.map_config FOR SELECT USING (true);
+-- Add UPDATE/DELETE policies if needed, potentially restricted to specific roles
+
+-- map_pois RLS
+ALTER TABLE public.map_pois ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow anyone to read POIs" ON public.map_pois;
+DROP POLICY IF EXISTS "Allow authenticated users to manage POIs" ON public.map_pois; -- Example: Restrict modification
+CREATE POLICY "Allow anyone to read POIs" ON public.map_pois FOR SELECT USING (true);
+-- Add INSERT/UPDATE/DELETE policies as needed
+
+-- Grant Permissions for Map Tables
+GRANT SELECT ON public.map_config TO anon, authenticated;
+-- GRANT UPDATE ON public.map_config TO authenticated; -- Grant update if needed (e.g., to admin role)
+GRANT SELECT ON public.map_pois TO anon, authenticated;
+-- GRANT INSERT, UPDATE, DELETE ON public.map_pois TO authenticated; -- Grant if users can manage POIs
+
 -- 9. Grant Permissions
 -- Grant basic usage
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
@@ -910,6 +971,63 @@ COMMENT ON FUNCTION public.get_reactions_for_messages(uuid[]) IS 'Retrieves the 
 GRANT EXECUTE ON FUNCTION public.get_reactions_for_messages(uuid[]) TO authenticated;
 
 -- ====================================================================
+-- == Additions for Article Filters and Pinning ==
+-- ====================================================================
+
+-- Article Filters Table
+CREATE TABLE public.article_filters (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  display_order INTEGER DEFAULT 0
+);
+COMMENT ON TABLE public.article_filters IS 'Stores available filter categories for articles and their display order.';
+COMMENT ON COLUMN public.article_filters.name IS 'The unique name of the filter (e.g., Aktuell, Sport).';
+COMMENT ON COLUMN public.article_filters.display_order IS 'Order in which filters should be displayed.';
+
+-- Pinned Articles Table
+CREATE TABLE public.pinned_articles (
+  filter_name TEXT NOT NULL REFERENCES public.article_filters(name) ON DELETE CASCADE,
+  article_id UUID NOT NULL REFERENCES public.articles(id) ON DELETE CASCADE,
+  pinned_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  PRIMARY KEY (filter_name, article_id)
+);
+COMMENT ON TABLE public.pinned_articles IS 'Associates articles with specific filters to mark them as pinned.';
+
+-- RLS for Article Filters
+ALTER TABLE public.article_filters ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow anyone to read article filters" ON public.article_filters;
+-- Add more policies if admin needs to manage filters
+CREATE POLICY "Allow anyone to read article filters" ON public.article_filters FOR SELECT USING (true);
+
+-- RLS for Pinned Articles
+ALTER TABLE public.pinned_articles ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow anyone to read pinned articles" ON public.pinned_articles;
+DROP POLICY IF EXISTS "Allow org members/admins to pin/unpin articles for org filters" ON public.pinned_articles; -- More specific needed
+-- Allow SELECT for now, INSERT/DELETE needs careful consideration based on who can pin
+CREATE POLICY "Allow anyone to read pinned articles" ON public.pinned_articles FOR SELECT USING (true);
+-- TODO: Add INSERT/DELETE policies for pinning, likely restricted based on article ownership/org membership.
+
+-- Grant Permissions for New Tables
+GRANT SELECT ON public.article_filters TO anon, authenticated;
+-- GRANT INSERT, UPDATE, DELETE ON public.article_filters TO ...; -- Add if needed
+
+GRANT SELECT ON public.pinned_articles TO anon, authenticated;
+-- GRANT INSERT, DELETE ON public.pinned_articles TO authenticated; -- Add granular policies later
+
+-- Insert default filters (Example)
+INSERT INTO public.article_filters (name, display_order) VALUES
+('Aktuell', 0),
+('Kultur', 1),
+('Sport', 2),
+('Verkehr', 3),
+('Politik', 4),
+('Vereine', 5),
+('Gemeinde', 6),
+('Polizei', 7),
+('Veranstaltungen', 8)
+ON CONFLICT (name) DO NOTHING; -- Avoid duplicates if script runs multiple times
+
+-- ====================================================================
 -- End of script
 -- ====================================================================
 COMMIT;
@@ -920,11 +1038,12 @@ COMMIT;
 --   content,
 --   type,
 --   image_url,
+--   preview_image_url,
 --   is_published
 -- ) VALUES (
 --   'Projektgebiet Bölkershof am Havelufer',
 --   'Das Projektgebiet Bölkershof an der Havel zeigt eine eindrucksvolle Landschaft mit Blick auf den Fluss. Die grünen Flächen und das ruhige Wasser bieten ideale Bedingungen für nachhaltige Entwicklung und Naturschutz. Dieses Gebiet ist ein wichtiger Teil der lokalen Ökosysteme und bietet zahlreiche Möglichkeiten für Freizeitaktivitäten und Erholung.',
 --   'Verkehr',
 --   'https://supabase.myownapp.net/storage/v1/object/public/article_images/200730-havel-projektgebiet-boelkershof-ifa.jpeg?t=2025-04-02T18%3A53%3A59.423Z',
---   true
+--   'https://supabase.myownapp.net/storage/v1/object/public/article_images/200730-havel-projektgebiet-boelkershof-ifa.jpeg?t=2025-04-02T18%3A53%3A59.423Z',
 -- );

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, ActivityIndicator, Image } from 'react-native';
 import ScreenHeader from '../components/common/ScreenHeader';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,14 +15,15 @@ const HomeScreen = ({ navigation }) => {
   const [articles, setArticles] = useState([]);
   const [filteredArticles, setFilteredArticles] = useState([]);
   const [selectedFilter, setSelectedFilter] = useState('Aktuell');
+  const [availableFilters, setAvailableFilters] = useState(['Aktuell']);
+  const [pinnedArticleIds, setPinnedArticleIds] = useState(new Set());
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingFilters, setIsLoadingFilters] = useState(true);
   const [error, setError] = useState(null);
   
-  // Update filters to match all article types available in CreateArticleScreen
-  const homeFilters = ['Aktuell', 'Kultur', 'Sport', 'Verkehr', 'Politik', 'Vereine', 'Gemeinde', 'Polizei', 'Veranstaltungen'];
-
   // Fetch articles from Supabase
   useEffect(() => {
+    fetchFilters();
     fetchArticles();
   }, []);
 
@@ -39,10 +40,48 @@ const HomeScreen = ({ navigation }) => {
     return unsubscribe;
   }, [navigation]);
 
-  // Apply filter when articles or selectedFilter changes
+  // Apply filter when articles, selectedFilter, or pinned IDs change
   useEffect(() => {
     applyFilter(selectedFilter);
-  }, [articles, selectedFilter]);
+  }, [articles, selectedFilter, pinnedArticleIds, applyFilter]);
+
+  const fetchFilters = async () => {
+    setIsLoadingFilters(true);
+    try {
+      const { data, error } = await supabase
+        .from('article_filters')
+        .select('name')
+        .order('display_order', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching filters:', error);
+        // Keep default 'Aktuell' if fetch fails
+      } else {
+        // Get filter names from the fetched data
+        let filterNames = data.map(f => f.name);
+        
+        // Ensure 'Aktuell' is present and at the beginning
+        if (filterNames.includes('Aktuell')) {
+          // Remove it from its current position
+          filterNames = filterNames.filter(name => name !== 'Aktuell');
+        }
+        // Add 'Aktuell' to the start
+        filterNames.unshift('Aktuell');
+
+        setAvailableFilters(filterNames);
+        
+        // If the initial selected filter is not in the available list anymore (e.g., db changed)
+        // default back to 'Aktuell'
+        if (!filterNames.includes(selectedFilter)) {
+          setSelectedFilter('Aktuell'); 
+        }
+      }
+    } catch (err) {
+      console.error('Unexpected error fetching filters:', err);
+    } finally {
+      setIsLoadingFilters(false);
+    }
+  };
 
   const fetchArticles = async () => {
     try {
@@ -96,26 +135,71 @@ const HomeScreen = ({ navigation }) => {
     }
   };
   
-  // Filter articles based on the selected filter
-  const applyFilter = (filter) => {
-    if (!articles.length) return;
-    
-    if (filter === 'Aktuell') {
-      // Show all articles sorted by date (newest first)
-      setFilteredArticles([...articles].sort((a, b) => 
-        new Date(b.published_at) - new Date(a.published_at)
-      ));
-    } else {
-      // Filter by the selected type
-      setFilteredArticles(
-        articles.filter(article => article.type === filter)
-      );
+  // Fetch pinned article IDs for the selected filter
+  const fetchPinnedArticles = async (filter) => {
+    if (!filter || filter === 'Aktuell') {
+      setPinnedArticleIds(new Set()); // No pins for 'Aktuell'
+      return;
+    }
+    try {
+      const { data, error } = await supabase
+        .from('pinned_articles')
+        .select('article_id')
+        .eq('filter_name', filter);
+
+      if (error) {
+        console.error(`Error fetching pinned articles for ${filter}:`, error);
+        setPinnedArticleIds(new Set());
+      } else {
+        setPinnedArticleIds(new Set(data.map(p => p.article_id)));
+      }
+    } catch (err) {
+      console.error(`Unexpected error fetching pinned articles for ${filter}:`, err);
+      setPinnedArticleIds(new Set());
     }
   };
+  
+  // Filter articles based on the selected filter
+  const applyFilter = useCallback((filter) => {
+    if (!articles.length) return;
+    
+    let sortedArticles = [];
+    if (filter === 'Aktuell') {
+      // Show all articles sorted by date (newest first)
+      sortedArticles = [...articles].sort((a, b) => 
+        new Date(b.published_at) - new Date(a.published_at)
+      );
+    } else {
+      // Filter by the selected type, separating pinned articles
+      const relevantArticles = articles.filter(article => article.type === filter);
+      const pinned = [];
+      const notPinned = [];
+
+      relevantArticles.forEach(article => {
+        if (pinnedArticleIds.has(article.id)) {
+          pinned.push(article);
+        } else {
+          notPinned.push(article);
+        }
+      });
+
+      // Sort pinned articles (e.g., by publish date, or pin date if available)
+      pinned.sort((a, b) => new Date(b.published_at) - new Date(a.published_at)); // Or use pinned_at if fetched
+
+      // Sort non-pinned articles by publish date
+      notPinned.sort((a, b) => new Date(b.published_at) - new Date(a.published_at));
+
+      // Combine: pinned first, then non-pinned
+      sortedArticles = [...pinned, ...notPinned];
+    }
+    setFilteredArticles(sortedArticles);
+  }, [articles, pinnedArticleIds]);
 
   // Handle filter change
   const handleFilterChange = (filter) => {
     setSelectedFilter(filter);
+    // Fetch pinned articles for the new filter (async, effect will re-apply filter)
+    fetchPinnedArticles(filter);
   };
   
   // Open article creation screen (for active organization context)
@@ -130,7 +214,7 @@ const HomeScreen = ({ navigation }) => {
   return (
     <View style={styles.container}>
       <ScreenHeader 
-        filters={homeFilters} 
+        filters={availableFilters} 
         onFilterChange={handleFilterChange} 
         initialFilter={selectedFilter} 
       />
@@ -139,6 +223,11 @@ const HomeScreen = ({ navigation }) => {
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#4285F4" />
           <Text style={styles.loadingText}>Artikel werden geladen...</Text>
+        </View>
+      ) : isLoadingFilters ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="small" color="#4285F4" />
+          <Text style={styles.loadingText}>Filter werden geladen...</Text>
         </View>
       ) : error ? (
         <View style={styles.errorContainer}>
@@ -170,6 +259,10 @@ const HomeScreen = ({ navigation }) => {
                     <Text style={styles.articleType}>{article.type}</Text>
                     <Text style={styles.articleDate}>{article.date}</Text>
                   </View>
+                  {/* Add Pin Icon if article is pinned and filter is not 'Aktuell' */}
+                  {selectedFilter !== 'Aktuell' && pinnedArticleIds.has(article.id) && (
+                    <Ionicons name="pin" size={16} color="#666" style={styles.pinIcon} />
+                  )}
                   <Text 
                     style={article.is_organization_post ? styles.organizationAuthor : (article.author_name === 'Redaktion' ? styles.redaktionAuthor : styles.articleAuthor)}
                   >
@@ -278,6 +371,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 8,
+    position: 'relative', // Needed for absolute positioning of pin icon if desired
   },
   articleInfo: {
     flexDirection: 'row',
@@ -344,6 +438,10 @@ const styles = StyleSheet.create({
     height: 160, // Slightly reduced height for preview list
     borderRadius: 6,
     marginVertical: 8,
+  },
+  pinIcon: {
+    // Style the pin icon (e.g., position it top-right within the header)
+    marginLeft: 8, // Add some space from the author name
   },
 });
 
