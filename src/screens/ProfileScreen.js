@@ -18,6 +18,7 @@ const ProfileScreen = () => {
     activeOrganization,
     isOrganizationActive, 
     switchOrganizationContext,
+    deleteOrganization,
     isLoading: isOrgContextLoading, // Renamed to avoid clash
   } = useOrganization();
 
@@ -424,7 +425,25 @@ const ProfileScreen = () => {
     
     // **** MODIFIED: Call function without await/result handling ****
     console.log(`ProfileScreen: Calling switchOrganizationContext (from OrganizationContext) for orgId: ${orgId} - WITHOUT AWAIT`);
-    switchOrganizationContext(orgId); // Call directly
+    switchOrganizationContext(orgId).then(result => {
+      if (!result.success) {
+        if (result.error && result.error.includes('not found')) {
+          Alert.alert(
+            "Organisation nicht gefunden", 
+            "Diese Organisation existiert nicht mehr. Die Organisationsliste wird aktualisiert.",
+            [{ text: "OK", onPress: () => loadUserProfile() }]
+          );
+        } else {
+          Alert.alert(
+            "Fehler", 
+            result.error || "Konnte nicht zur Organisation wechseln."
+          );
+        }
+      }
+    }).catch(error => {
+      console.error("Error in switchOrganizationContext:", error);
+      Alert.alert("Fehler", "Ein unerwarteter Fehler ist aufgetreten.");
+    });
     
     console.log(`ProfileScreen: Call to switchOrganizationContext initiated (without await).`);
 
@@ -475,6 +494,31 @@ const ProfileScreen = () => {
               },
           ]
       );
+  };
+  
+  // Handle deleting an organization (admin only)
+  const handleDeleteOrg = (orgId, orgName) => {
+    if (!orgId || !orgName) return;
+    Alert.alert(
+      "Organisation löschen",
+      `Möchtest du die Organisation "${orgName}" wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden und entfernt alle Mitglieder aus der Organisation.`,
+      [
+        { text: "Abbrechen", style: "cancel" },
+        {
+          text: "Löschen",
+          style: "destructive",
+          onPress: async () => {
+            const result = await deleteOrganization(orgId);
+            if (result.success) {
+              Alert.alert("Erfolg", `Die Organisation "${orgName}" wurde gelöscht.`);
+              // Context will update automatically
+            } else {
+              Alert.alert("Fehler", result.error || "Löschen fehlgeschlagen.");
+            }
+          },
+        },
+      ]
+    );
   };
   
   // --- Render Functions --- 
@@ -539,6 +583,8 @@ const ProfileScreen = () => {
       }
     };
 
+    const isAdmin = activeOrganization?.currentUserRole === 'admin';
+
     return (
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Organisationsdetails</Text>
@@ -582,14 +628,23 @@ const ProfileScreen = () => {
         
         {/* TODO: Add Edit Organization Button */} 
         
-        <TouchableOpacity 
-            style={[styles.button, styles.leaveButton]} 
-            onPress={() => handleLeaveOrg(activeOrganizationId, activeOrganization.name)}
-            disabled={isOrgContextLoading || authLoading}
-        >
-            {(isOrgContextLoading || authLoading) ? <ActivityIndicator size="small" color="#dc3545" /> : <Text style={styles.leaveButtonText}>Organisation verlassen</Text>}
-        </TouchableOpacity>
-
+        {isAdmin ? (
+          <TouchableOpacity 
+              style={[styles.button, styles.leaveButton]} 
+              onPress={() => handleDeleteOrg(activeOrganizationId, activeOrganization.name)}
+              disabled={isOrgContextLoading || authLoading}
+          >
+              {(isOrgContextLoading || authLoading) ? <ActivityIndicator size="small" color="#dc3545" /> : <Text style={styles.leaveButtonText}>Organisation löschen</Text>}
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity 
+              style={[styles.button, styles.leaveButton]} 
+              onPress={() => handleLeaveOrg(activeOrganizationId, activeOrganization.name)}
+              disabled={isOrgContextLoading || authLoading}
+          >
+              {(isOrgContextLoading || authLoading) ? <ActivityIndicator size="small" color="#dc3545" /> : <Text style={styles.leaveButtonText}>Organisation verlassen</Text>}
+          </TouchableOpacity>
+        )}
       </View>
     );
   };

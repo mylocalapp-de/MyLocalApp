@@ -14,7 +14,7 @@ export const OrganizationProvider = ({ children }) => {
   const [activeOrganizationId, setActiveOrganizationId] = useState(null);
   const [activeOrganization, setActiveOrganization] = useState(null); // Store full org details
   const [isLoading, setIsLoading] = useState(true);
-  const { user, userOrganizations } = useAuth(); // Get user status and userOrganizations
+  const { user, userOrganizations, loadUserProfile } = useAuth(); // Get user status, userOrganizations and loadUserProfile function
 
   // Effect to log changes in userOrganizations (for debugging the trigger)
   useEffect(() => {
@@ -164,6 +164,69 @@ export const OrganizationProvider = ({ children }) => {
     }
   };
 
+  // Function to delete an organization (admin only)
+  const deleteOrganization = async (organizationId) => {
+    setIsLoading(true);
+    console.log(`OrgContext: Starting deleteOrganization for ID: ${organizationId}`);
+
+    if (!user) {
+      console.error("OrgContext: Cannot delete organization - User is not logged in.");
+      setIsLoading(false);
+      return { success: false, error: 'User not logged in.' };
+    }
+
+    try {
+      // Check if user is an admin of the organization
+      const { data: memberData, error: memberError } = await supabase
+        .from('organization_members')
+        .select('role')
+        .eq('organization_id', organizationId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (memberError) {
+        console.error("Error checking admin status:", memberError);
+        throw new Error(`Error checking admin status: ${memberError.message}`);
+      }
+
+      if (!memberData || memberData.role !== 'admin') {
+        console.error("User is not an admin of this organization");
+        return { success: false, error: 'Only admins can delete organizations.' };
+      }
+
+      // The organization is deleted via a DELETE operation
+      // RLS policies will ensure only admins can delete
+      const { error: deleteError } = await supabase
+        .from('organizations')
+        .delete()
+        .eq('id', organizationId);
+
+      if (deleteError) {
+        console.error("Error deleting organization:", deleteError);
+        throw new Error(`Failed to delete organization: ${deleteError.message}`);
+      }
+
+      // Clear active organization if it was the one deleted
+      if (activeOrganizationId === organizationId) {
+        setActiveOrganizationId(null);
+        setActiveOrganization(null);
+        await AsyncStorage.removeItem(ACTIVE_ORG_STORAGE_KEY);
+      }
+      
+      // Refresh user profile data to update the organizations list
+      await loadUserProfile();
+      console.log("Refreshed user profile data after organization deletion");
+
+      console.log(`OrgContext: Successfully deleted organization: ${organizationId}`);
+      return { success: true };
+    } catch (error) {
+      console.error("Unexpected error in deleteOrganization:", error);
+      return { success: false, error: error.message || 'Failed to delete organization.' };
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <OrganizationContext.Provider
         value={{
@@ -171,6 +234,7 @@ export const OrganizationProvider = ({ children }) => {
             activeOrganization, // Provide full details
             isLoading,
             switchOrganizationContext,
+            deleteOrganization, // Add the new function
             isOrganizationActive: !!activeOrganizationId, // Convenience boolean
         }}
     >

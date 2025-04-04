@@ -179,9 +179,15 @@ const ArticleDetailScreen = ({ route, navigation }) => {
     try {
       setLoadingComments(true);
       
+      // Updated query to explicitly join profiles and select display_name
       const { data, error } = await supabase
-        .from('article_comments_with_users')
-        .select('*')
+        .from('article_comments') // Query the base table directly
+        .select(`
+          *,
+          profiles:user_id (
+            display_name
+          )
+        `) // Explicitly select display_name from joined profiles table
         .eq('article_id', articleId)
         .order('created_at', { ascending: true });
       

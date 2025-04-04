@@ -439,6 +439,7 @@ DROP POLICY IF EXISTS "Allow members to read their organization details" ON publ
 DROP POLICY IF EXISTS "Allow any authenticated user to read organization details" ON public.organizations; -- Drop new policy if exists
 DROP POLICY IF EXISTS "Allow admin to manage their organization" ON public.organizations;
 DROP POLICY IF EXISTS "Allow authenticated users to create organizations" ON public.organizations; -- Also drop insert policy
+DROP POLICY IF EXISTS "Allow admin to delete their organization" ON public.organizations; -- Add this line to drop existing policy if any
 
 -- REVISED SELECT Policy: Allow any user (including anonymous) to read organization details.
 -- This is necessary for the chat_group_listings and event_listings views which join with organizations.
@@ -455,6 +456,12 @@ CREATE POLICY "Allow admin to manage their organization" ON public.organizations
 -- Recreate INSERT policy (no change in logic needed here, assumes admin_id is provided on insert)
 CREATE POLICY "Allow authenticated users to create organizations" ON public.organizations
   FOR INSERT TO authenticated WITH CHECK (admin_id = auth.uid()); -- Check creator is the one inserting
+
+-- Add new DELETE policy for organizations (admin only)
+CREATE POLICY "Allow admin to delete their organization" ON public.organizations
+  FOR DELETE TO authenticated
+  USING (public.is_org_member_admin(auth.uid(), id)); -- Only admins can delete organizations
+COMMENT ON POLICY "Allow admin to delete their organization" ON public.organizations IS 'Allows organization admins to delete their organizations.';
 
 -- Organization Members
 ALTER TABLE public.organization_members ENABLE ROW LEVEL SECURITY;
