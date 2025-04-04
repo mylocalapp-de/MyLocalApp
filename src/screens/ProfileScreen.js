@@ -663,7 +663,7 @@ const ProfileScreen = () => {
                                         onPress={() => handleSwitchToOrg(org.id)}
                                         disabled={isOrgContextLoading}
                                     >
-                                        {isOrgContextLoading ? <ActivityIndicator size="small" color="#4285F4" /> : <Text style={styles.buttonSmallText}>Wechseln</Text>}
+                                        {isOrgContextLoading ? <ActivityIndicator size="small" color="#4285F4" /> : <Text style={styles.buttonSmallText}>Zu dieser Organisation wechseln</Text>}
                                     </TouchableOpacity>
                                 </View>
                             ))}
