@@ -12,17 +12,21 @@ import {
   Platform,
   SafeAreaView,
   Dimensions,
-  Image
+  Image,
+  Switch
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker'; // For date/time selection
 import * as ImagePicker from 'expo-image-picker'; // Import ImagePicker
+import { Picker } from '@react-native-picker/picker'; // Import Picker
+import { RRule, RRuleSet, rrulestr, Weekday } from 'rrule'; // Import RRule and Weekday
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import 'react-native-get-random-values'; // Import for uuid
 import { v4 as uuidv4 } from 'uuid'; // Import uuid
 import { decode } from 'base64-arraybuffer'; // Import decode
+import { LinearGradient } from 'expo-linear-gradient'; // Import LinearGradient
 
 const { height } = Dimensions.get('window');
 const androidPaddingTop = height * 0.03;
@@ -44,10 +48,19 @@ const CreateEventScreen = ({ navigation }) => {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
-  const [availableCategories, setAvailableCategories] = useState([]); // State for dynamic categories
+  const [availableEventCategories, setAvailableEventCategories] = useState([]); // { name: string, is_highlighted: boolean }[]
   const [loadingCategories, setLoadingCategories] = useState(true);
   const [imageAsset, setImageAsset] = useState(null); // State for selected image asset
   const [isUploading, setIsUploading] = useState(false); // State for upload progress
+
+  // --- Recurrence State ---
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [recurrenceFreq, setRecurrenceFreq] = useState(RRule.WEEKLY); // Default: Weekly
+  const [recurrenceInterval, setRecurrenceInterval] = useState('1');
+  const [recurrenceDays, setRecurrenceDays] = useState([]); // Array of RRule Weekday constants (e.g., RRule.MO)
+  const [recurrenceEndDate, setRecurrenceEndDate] = useState(null);
+  const [showRecurrenceEndDatePicker, setShowRecurrenceEndDatePicker] = useState(false);
+  // --- End Recurrence State ---
 
   // Fetch categories on mount
   useEffect(() => {
@@ -59,20 +72,31 @@ const CreateEventScreen = ({ navigation }) => {
     try {
       const { data, error } = await supabase
         .from('event_categories')
-        .select('name')
+        .select('name, is_highlighted, is_admin_only') // Select new flags
         .order('display_order', { ascending: true });
 
       if (error) {
         console.error('Error fetching event categories:', error);
         Alert.alert('Fehler', 'Event-Kategorien konnten nicht geladen werden.');
-        setAvailableCategories([]);
+        setAvailableEventCategories([]);
       } else {
-        setAvailableCategories(data?.map(cat => cat.name) || []);
+        // Filter out admin-only categories and map to structure
+        const userVisibleCategories = data
+          .filter(cat => !cat.is_admin_only)
+          .map(cat => ({ 
+            name: cat.name, 
+            is_highlighted: cat.is_highlighted || false 
+          }));
+        setAvailableEventCategories(userVisibleCategories);
+        // Set initial category if list is not empty and none selected
+        if (!category && userVisibleCategories.length > 0) {
+           setCategory(userVisibleCategories[0].name); 
+        }
       }
     } catch (err) {
         console.error('Unexpected error fetching categories:', err);
         Alert.alert('Fehler', 'Ein unerwarteter Fehler ist aufgetreten.');
-        setAvailableCategories([]);
+        setAvailableEventCategories([]);
     } finally {
         setLoadingCategories(false);
     }
@@ -106,7 +130,7 @@ const CreateEventScreen = ({ navigation }) => {
         const fileName = `${uuidv4()}.${fileExt}`;
         const filePath = `${fileName}`; // Store in the root of event_images bucket
         const { data, error: uploadError } = await supabase.storage
-            .from('event_images') // Use 'event_images' bucket
+            .from('event_images') // Corrected bucket name
             .upload(filePath, decode(asset.base64), { contentType: asset.mimeType ?? `image/${fileExt}` });
         if (uploadError) throw uploadError;
         const { data: urlData } = supabase.storage.from('event_images').getPublicUrl(filePath);
@@ -141,6 +165,48 @@ const CreateEventScreen = ({ navigation }) => {
     return true;
   };
 
+  // Function to build RRULE string from state
+  const buildRruleString = () => {
+    if (!isRecurring) return null;
+
+    const interval = parseInt(recurrenceInterval, 10);
+    if (isNaN(interval) || interval < 1) return null; // Basic validation
+
+    const options = {
+      freq: recurrenceFreq,
+      interval: interval,
+      dtstart: date, // Use the main event date as dtstart
+      //wkst: RRule.SU // Optional: define week start day
+    };
+
+    if (recurrenceFreq === RRule.WEEKLY && recurrenceDays.length > 0) {
+      options.byweekday = recurrenceDays;
+    }
+
+    // Add UNTIL if recurrenceEndDate is set
+    if (recurrenceEndDate) {
+        // Ensure UNTIL is set to the end of the selected day in UTC
+        const untilDate = new Date(recurrenceEndDate);
+        untilDate.setUTCHours(23, 59, 59, 999);
+        options.until = untilDate;
+    }
+
+    // Simple validation for weekly recurrence
+    if (recurrenceFreq === RRule.WEEKLY && recurrenceDays.length === 0) {
+        Alert.alert('Fehler', 'Bitte wählen Sie mindestens einen Wochentag für die wöchentliche Wiederholung aus.');
+        return 'INVALID_RULE'; // Indicate invalid rule
+    }
+
+    try {
+      const rule = new RRule(options);
+      return rule.toString();
+    } catch (e) {
+      console.error("Error creating RRULE string:", e);
+      Alert.alert('Fehler', 'Ungültige Wiederholungsregel.');
+      return 'INVALID_RULE';
+    }
+  };
+
   // Handle event publishing
   const handlePublish = async () => {
     if (!user) {
@@ -152,6 +218,8 @@ const CreateEventScreen = ({ navigation }) => {
 
     setIsPublishing(true); // Combined state for upload + publish
     let finalImageUrl = null;
+    let rruleString = null;
+    let recurrenceEnd = null;
 
     try {
       // Upload image if one is selected
@@ -168,20 +236,35 @@ const CreateEventScreen = ({ navigation }) => {
       const formattedDate = date.toISOString().split('T')[0]; // YYYY-MM-DD
       const formattedTime = time.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', hour12: false }); // HH:MM
 
-      // Insert new event with image_url
+      if (isRecurring) {
+          rruleString = buildRruleString();
+          if (rruleString === 'INVALID_RULE') {
+              setIsPublishing(false);
+              setIsUploading(false);
+              return; // Stop publishing if rule is invalid
+          }
+          // Only set recurrenceEnd if the rule is valid and an end date was chosen
+          if (rruleString && recurrenceEndDate) {
+              recurrenceEnd = recurrenceEndDate.toISOString().split('T')[0]; // Format as YYYY-MM-DD
+          }
+      }
+
+      // Insert new event with image_url and recurrence fields
       const { data, error } = await supabase
         .from('events')
         .insert({
           title: title,
           description: description,
-          date: formattedDate,
-          time: `Um ${formattedTime}`, // Match existing format 'Um HH:MM'
+          date: formattedDate, // Start date of the series
+          time: `Um ${formattedTime}`,
           location: location,
           category: category,
-          image_url: finalImageUrl, // Add image_url
+          image_url: finalImageUrl,
           organizer_id: user.id,
           organization_id: activeOrganizationId,
-          is_published: true
+          is_published: true,
+          recurrence_rule: rruleString, // Add recurrence rule
+          recurrence_end_date: recurrenceEnd // Add recurrence end date
         })
         .select()
         .single();
@@ -230,39 +313,96 @@ const CreateEventScreen = ({ navigation }) => {
     setTime(currentTime);
   };
 
-  // Render category selection buttons
+  // Handle recurrence end date selection
+  const onRecurrenceEndDateChange = (event, selectedDate) => {
+      setShowRecurrenceEndDatePicker(Platform.OS === 'ios');
+      if (selectedDate) {
+          // Ensure selected end date is not before the main event start date
+          const startDateOnly = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+          const selectedDateOnly = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate());
+
+          if (selectedDateOnly >= startDateOnly) {
+              setRecurrenceEndDate(selectedDateOnly); // Store only the date part
+          } else {
+              Alert.alert("Ungültiges Datum", "Das Enddatum der Wiederholung darf nicht vor dem Startdatum des Events liegen.");
+              // Keep previous date or null if none was set
+          }
+      }
+  };
+
+  // Toggle weekday selection for weekly recurrence
+  const toggleWeekday = (day) => {
+    setRecurrenceDays(prevDays =>
+      prevDays.includes(day)
+        ? prevDays.filter(d => d !== day)
+        : [...prevDays, day]
+    );
+  };
+
+  // Weekday mapping for UI
+  const weekdays = [
+    { label: 'Mo', value: RRule.MO },
+    { label: 'Di', value: RRule.TU },
+    { label: 'Mi', value: RRule.WE },
+    { label: 'Do', value: RRule.TH },
+    { label: 'Fr', value: RRule.FR },
+    { label: 'Sa', value: RRule.SA },
+    { label: 'So', value: RRule.SU },
+  ];
+
+  // Render category selection buttons - Updated
   const renderCategoryButtons = () => {
+    if (loadingCategories) {
+      return <ActivityIndicator size="small" color="#4285F4" style={styles.loadingIndicator}/>;
+    }
+    if (availableEventCategories.length === 0) {
+      return <Text style={styles.noCategoriesText}>Keine Kategorien zum Auswählen verfügbar.</Text>;
+    }
+
     return (
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.typeButtonsContainer}
       >
-        {loadingCategories ? (
-          <ActivityIndicator size="small" color="#4285F4" />
-        ) : availableCategories.length > 0 ? (
-          availableCategories.map(cat => (
+        {availableEventCategories.map(cat => {
+          const isSelected = category === cat.name;
+          const isHighlighted = cat.is_highlighted && !isSelected;
+
+          const buttonStyle = [
+            styles.typeButtonBase,
+            isSelected ? styles.selectedTypeButton : styles.typeButton,
+            isHighlighted && styles.highlightedTypeButton
+          ];
+
+          const textStyle = [
+            styles.typeButtonText,
+            isSelected && styles.selectedTypeButtonText
+          ];
+
+          return (
             <TouchableOpacity
-              key={cat}
-              style={[
-                styles.typeButton,
-                category === cat && styles.selectedTypeButton
-              ]}
-              onPress={() => setCategory(cat)}
+              key={cat.name}
+              style={buttonStyle}
+              onPress={() => setCategory(cat.name)}
             >
-              <Text
-                style={[
-                  styles.typeButtonText,
-                  category === cat && styles.selectedTypeButtonText
-                ]}
-              >
-                {cat}
-              </Text>
+              {isHighlighted ? (
+                <LinearGradient
+                  colors={['#f0f0f0', '#e0e0e0']}
+                  style={styles.gradientWrapperType}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                >
+                  <Text style={textStyle}>{cat.name}</Text>
+                </LinearGradient>
+              ) : (
+                <View style={styles.textWrapperType}>
+                  <Text style={textStyle}>{cat.name}</Text>
+                </View>
+              )}
             </TouchableOpacity>
-          ))
-        ) : (
-          <Text style={styles.noCategoriesText}>Keine Kategorien verfügbar.</Text>
-        )}
+          );
+        })}
       </ScrollView>
     );
   };
@@ -368,6 +508,104 @@ const CreateEventScreen = ({ navigation }) => {
             />
           )}
 
+          {/* --- Recurrence Section --- */}
+          <View style={styles.recurrenceToggleContainer}>
+            <Text style={styles.inputLabel}>Event wiederholen?</Text>
+            <Switch
+                trackColor={{ false: '#767577', true: '#81b0ff' }}
+                thumbColor={isRecurring ? '#4285F4' : '#f4f3f4'}
+                ios_backgroundColor="#3e3e3e"
+                onValueChange={setIsRecurring}
+                value={isRecurring}
+            />
+          </View>
+
+          {isRecurring && (
+            <View style={styles.recurrenceOptionsContainer}>
+              {/* Frequency Picker */}
+              <Text style={styles.recurrenceLabel}>Häufigkeit</Text>
+              <View style={styles.pickerWrapper}>
+                <Picker
+                  selectedValue={recurrenceFreq}
+                  onValueChange={(itemValue) => setRecurrenceFreq(itemValue)}
+                  style={styles.picker}
+                  itemStyle={styles.pickerItem} // For iOS styling
+                >
+                  <Picker.Item label="Täglich" value={RRule.DAILY} />
+                  <Picker.Item label="Wöchentlich" value={RRule.WEEKLY} />
+                  {/* Add Monthly/Yearly later if needed */}
+                  {/* <Picker.Item label="Monatlich" value={RRule.MONTHLY} /> */}
+                  {/* <Picker.Item label="Jährlich" value={RRule.YEARLY} /> */}
+                </Picker>
+              </View>
+
+              {/* Interval Input */}
+              <Text style={styles.recurrenceLabel}>Intervall (Alle X ...)</Text>
+              <TextInput
+                  style={styles.intervalInput}
+                  placeholder="1"
+                  value={recurrenceInterval}
+                  onChangeText={setRecurrenceInterval}
+                  keyboardType="numeric"
+                  maxLength={2}
+              />
+
+              {/* Day Picker (for Weekly) */}
+              {recurrenceFreq === RRule.WEEKLY && (
+                <View>
+                    <Text style={styles.recurrenceLabel}>An Wochentagen</Text>
+                    <View style={styles.weekdaysContainer}>
+                        {weekdays.map(day => (
+                            <TouchableOpacity
+                                key={day.label}
+                                style={[
+                                    styles.weekdayButton,
+                                    recurrenceDays.includes(day.value) && styles.weekdaySelectedButton
+                                ]}
+                                onPress={() => toggleWeekday(day.value)}
+                            >
+                                <Text style={[
+                                    styles.weekdayText,
+                                    recurrenceDays.includes(day.value) && styles.weekdaySelectedText
+                                ]}>
+                                    {day.label}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                </View>
+              )}
+
+              {/* Recurrence End Date */}
+              <Text style={styles.recurrenceLabel}>Wiederholung endet am (Optional)</Text>
+              <TouchableOpacity onPress={() => setShowRecurrenceEndDatePicker(true)} style={styles.datePickerButton}>
+                <Text style={styles.datePickerText}>
+                  {recurrenceEndDate
+                    ? recurrenceEndDate.toLocaleDateString('de-DE', { year: 'numeric', month: 'long', day: 'numeric' })
+                    : 'Datum auswählen'}
+                </Text>
+                <Ionicons name="calendar-outline" size={20} color="#4285F4" />
+              </TouchableOpacity>
+              {showRecurrenceEndDatePicker && (
+                <DateTimePicker
+                  testID="recurrenceEndPicker"
+                  value={recurrenceEndDate || date} // Start from event date if no end date set
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  onChange={onRecurrenceEndDateChange}
+                  minimumDate={date} // End date cannot be before start date
+                />
+              )}
+              {/* Button to clear end date */}
+              {recurrenceEndDate && (
+                   <TouchableOpacity onPress={() => setRecurrenceEndDate(null)} style={styles.clearDateButton}>
+                       <Text style={styles.clearDateButtonText}>Enddatum löschen</Text>
+                   </TouchableOpacity>
+              )}
+            </View>
+          )}
+          {/* --- End Recurrence Section --- */}
+
           {/* Image Upload Section */}
           <Text style={styles.inputLabel}>Bild (Optional)</Text>
           {imageAsset && (
@@ -452,15 +690,23 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     paddingRight: 20,
   },
-  typeButton: {
-    backgroundColor: '#f1f1f1',
-    paddingHorizontal: 15,
-    paddingVertical: 8,
+  typeButtonBase: { // Base style
     borderRadius: 20,
     marginRight: 8,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  typeButton: {
+    backgroundColor: '#f1f1f1',
+    borderColor: '#ddd',
   },
   selectedTypeButton: {
     backgroundColor: '#4285F4',
+    borderColor: '#4285F4',
+  },
+  highlightedTypeButton: {
+      borderColor: '#bdbdbd',
+      backgroundColor: 'transparent',
   },
   typeButtonText: {
     fontSize: 14,
@@ -536,6 +782,99 @@ const styles = StyleSheet.create({
       fontStyle: 'italic',
       color: '#6c757d',
       paddingVertical: 10,
+  },
+  recurrenceToggleContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 20,
+    marginBottom: 10,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  recurrenceOptionsContainer: {
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  recurrenceLabel: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 5,
+    marginTop: 10,
+  },
+  pickerWrapper: {
+    backgroundColor: '#f8f8f8',
+    borderRadius: 8,
+    marginBottom: 15,
+    // Height is needed for Android Picker
+    height: Platform.OS === 'android' ? 50 : undefined,
+    justifyContent: 'center' // Center Android Picker item
+  },
+  picker: {
+     // Height needed for iOS picker to show within wrapper
+     height: Platform.OS === 'ios' ? 150 : 50,
+  },
+  pickerItem: {
+      height: 150, // Height needed for iOS item selection
+  },
+  intervalInput: {
+    backgroundColor: '#f8f8f8',
+    padding: 12,
+    borderRadius: 8,
+    fontSize: 16,
+    marginBottom: 15,
+    width: '30%', // Smaller width for interval
+  },
+  weekdaysContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 15,
+  },
+  weekdayButton: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 18,
+    width: 36,
+    height: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8f8f8',
+  },
+  weekdaySelectedButton: {
+    backgroundColor: '#4285F4',
+    borderColor: '#4285F4',
+  },
+  weekdayText: {
+    color: '#333',
+    fontSize: 14,
+  },
+  weekdaySelectedText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  clearDateButton: {
+    marginTop: -5, // Adjust position relative to date picker button
+    marginBottom: 15,
+    alignSelf: 'flex-start',
+  },
+  clearDateButtonText: {
+    color: '#ff3b30',
+    fontSize: 13,
+  },
+  loadingIndicator: {
+    marginTop: 10,
+  },
+  gradientWrapperType: {
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  textWrapperType: {
+    paddingHorizontal: 15,
+    paddingVertical: 8,
   },
 });
 

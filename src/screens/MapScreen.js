@@ -90,10 +90,17 @@ const MapScreen = () => {
     );
   }
 
+  // Transform map_filters (string[]) into the structure needed by FilterButtons
+  // Since map doesn't need highlighting, set is_highlighted to false
+  const formattedMapFilters = (mapConfig?.map_filters || ['Alle']).map(filterName => ({
+      name: filterName,
+      is_highlighted: false 
+  }));
+
   return (
     <View style={styles.container}>
       <ScreenHeader
-        filters={mapConfig?.map_filters || ['Alle']} // Use fetched filters, default to ['Alle']
+        filters={formattedMapFilters} // Pass the formatted filters
         onFilterChange={handleFilterChange} // Pass handler down
         initialFilter={activeFilter}      // Pass current filter state
       />

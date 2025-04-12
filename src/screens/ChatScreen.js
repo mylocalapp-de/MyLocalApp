@@ -59,22 +59,26 @@ const ChatScreen = ({ navigation, route }) => {
         setIsLoadingFilters(true);
         const { data, error } = await supabase
           .from('chat_group_tags')
-          .select('name')
+          .select('name, is_highlighted')
           .order('display_order', { ascending: true });
 
         if (error) {
           console.error('Error fetching chat filters:', error);
           // Keep default 'Alle' filter on error
-          setChatFilters(['Alle']);
+          setChatFilters([{ name: 'Alle', is_highlighted: false }]);
         } else if (data) {
-          const fetchedFilters = data.map(tag => tag.name);
-          setChatFilters(['Alle', ...fetchedFilters]); // Prepend 'Alle'
+          // Map to structure { name: string, is_highlighted: boolean }
+          const fetchedFilters = data.map(tag => ({
+            name: tag.name,
+            is_highlighted: tag.is_highlighted || false
+          }));
+          setChatFilters([{ name: 'Alle', is_highlighted: false }, ...fetchedFilters]); // Prepend 'Alle' object
         } else {
-          setChatFilters(['Alle']); // Default if no data
+          setChatFilters([{ name: 'Alle', is_highlighted: false }]); // Default if no data
         }
       } catch (err) {
         console.error('Unexpected error fetching filters:', err);
-        setChatFilters(['Alle']); // Default on unexpected error
+        setChatFilters([{ name: 'Alle', is_highlighted: false }]); // Default on unexpected error
       } finally {
         setIsLoadingFilters(false);
       }

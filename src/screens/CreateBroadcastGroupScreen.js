@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
+import { LinearGradient } from 'expo-linear-gradient'; // Import LinearGradient
 
 const { height } = Dimensions.get('window');
 const androidPaddingTop = height * 0.05;
@@ -35,13 +36,13 @@ const ManageBroadcastGroupsScreen = ({ navigation }) => {
 
   // Data State
   const [existingGroups, setExistingGroups] = useState([]);
-  const [availableTags, setAvailableTags] = useState([]);
+  const [availableTags, setAvailableTags] = useState([]); // Stores { name: string, is_highlighted: boolean }
 
   // Form State (for create/edit)
   const [editingGroup, setEditingGroup] = useState(null); // Stores the group being edited
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [selectedTags, setSelectedTags] = useState([]);
+  const [selectedTags, setSelectedTags] = useState([]); // Stores array of tag names (strings)
 
   // Fetch existing groups and tags
   const fetchData = useCallback(async () => {
@@ -78,7 +79,7 @@ const ManageBroadcastGroupsScreen = ({ navigation }) => {
       // Fetch available tags (only user-selectable ones)
       const { data: tagsData, error: tagsError } = await supabase
         .from('chat_group_tags')
-        .select('name')
+        .select('name, is_highlighted, is_admin_only') // Fetch new flags
         .order('display_order', { ascending: true });
 
       if (tagsError) {
@@ -86,9 +87,13 @@ const ManageBroadcastGroupsScreen = ({ navigation }) => {
         Alert.alert('Fehler', 'Fehler beim Laden der verfügbaren Tags.');
         setAvailableTags([]);
       } else if (tagsData) {
+        // Filter out admin-only tags and map to structure
         const userSelectableTags = tagsData
-          .map(tag => tag.name)
-          .filter(name => name !== 'Offene Gruppen' && name !== 'Ankündigungen');
+          .filter(tag => !tag.is_admin_only) // Exclude admin-only
+          .map(tag => ({ 
+            name: tag.name, 
+            is_highlighted: tag.is_highlighted || false 
+          }));
         setAvailableTags(userSelectableTags);
       } else {
         setAvailableTags([]);
@@ -125,9 +130,13 @@ const ManageBroadcastGroupsScreen = ({ navigation }) => {
       // Pre-fill form for editing
       setName(editingGroup.name || '');
       setDescription(editingGroup.description || '');
-      setSelectedTags(editingGroup.tags || []);
+      // Filter selected tags to only include those available for selection
+      const currentSelectableTags = editingGroup.tags?.filter(tagName => 
+        availableTags.some(at => at.name === tagName)
+      ) || [];
+      setSelectedTags(currentSelectableTags);
     }
-  }, [mode, editingGroup]);
+  }, [mode, editingGroup, availableTags]); // Depend on availableTags for edit mode
 
   // Validate form before submission (Create or Update)
   const validateForm = () => {
@@ -292,9 +301,9 @@ const ManageBroadcastGroupsScreen = ({ navigation }) => {
   };
 
   // Toggle tag selection
-  const toggleTag = (tag) => {
+  const toggleTag = (tagName) => {
     setSelectedTags(prev =>
-      prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
+      prev.includes(tagName) ? prev.filter(t => t !== tagName) : [...prev, tagName]
     );
   };
 
@@ -304,30 +313,49 @@ const ManageBroadcastGroupsScreen = ({ navigation }) => {
       return <ActivityIndicator style={{ marginTop: 10 }} />;
     }
     if (availableTags.length === 0) {
-      return <Text style={styles.infoText}>Keine Tags verfügbar.</Text>;
+      return <Text style={styles.infoText}>Keine Tags zum Auswählen verfügbar.</Text>;
     }
     return (
       <View style={styles.tagButtonsContainer}>
-        {availableTags.map(tag => (
-          <TouchableOpacity
-            key={tag}
-            style={[
-              styles.tagButton,
-              selectedTags.includes(tag) && styles.selectedTagButton
-            ]}
-            onPress={() => toggleTag(tag)}
-            disabled={isSubmitting} // Disable while submitting
-          >
-            <Text
-              style={[
-                styles.tagButtonText,
-                selectedTags.includes(tag) && styles.selectedTagButtonText
-              ]}
+        {availableTags.map(tag => {
+          const isSelected = selectedTags.includes(tag.name);
+          const isHighlighted = tag.is_highlighted && !isSelected;
+
+          const buttonStyle = [
+            styles.tagButtonBase,
+            isSelected ? styles.selectedTagButton : styles.tagButton,
+            isHighlighted && styles.highlightedTagButton
+          ];
+
+          const textStyle = [
+            styles.tagButtonText,
+            isSelected && styles.selectedTagButtonText
+          ];
+
+          return (
+            <TouchableOpacity
+              key={tag.name}
+              style={buttonStyle}
+              onPress={() => toggleTag(tag.name)}
+              disabled={isSubmitting} // Disable while submitting
             >
-              {tag}
-            </Text>
-          </TouchableOpacity>
-        ))}
+             {isHighlighted ? (
+                <LinearGradient
+                  colors={['#f0f0f0', '#e0e0e0']}
+                  style={styles.gradientWrapperTag}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                >
+                  <Text style={textStyle}>{tag.name}</Text>
+                </LinearGradient>
+              ) : (
+                <View style={styles.textWrapperTag}>
+                  <Text style={textStyle}>{tag.name}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          );
+        })}
       </View>
     );
   };
@@ -723,26 +751,40 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     marginBottom: 20,
   },
-  tagButton: {
-    backgroundColor: '#e9ecef', // Light gray unselected tag
-    paddingHorizontal: 15,
-    paddingVertical: 8,
+  tagButtonBase: { // Base style for tags
     borderRadius: 20,
     marginRight: 8,
-    marginBottom: 8, // Added margin bottom
+    marginBottom: 8,
     borderWidth: 1,
+    overflow: 'hidden',
+  },
+  tagButton: { // Style for regular, non-selected tag
+    backgroundColor: '#e9ecef',
     borderColor: '#ced4da',
   },
   selectedTagButton: {
-    backgroundColor: '#4285F4', // Primary blue selected tag
-    borderColor: '#3b78e3', // Slightly darker blue border
+    backgroundColor: '#4285F4',
+    borderColor: '#3b78e3',
+  },
+  highlightedTagButton: {
+    borderColor: '#bdbdbd',
+    backgroundColor: 'transparent',
+  },
+  gradientWrapperTag: {
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  textWrapperTag: {
+    paddingHorizontal: 15,
+    paddingVertical: 8,
   },
   tagButtonText: {
     fontSize: 14,
-    color: '#495057', // Dark gray text for unselected
+    color: '#495057',
   },
   selectedTagButtonText: {
-    color: '#fff', // White text for selected
+    color: '#fff',
     fontWeight: '600',
   },
   infoText: {

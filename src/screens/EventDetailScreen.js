@@ -26,6 +26,69 @@ import { RRule, RRuleSet, rrulestr } from 'rrule';
 const { height } = Dimensions.get('window');
 const androidPaddingTop = height * 0.05; // 3% of screen height for better scaling
 
+// German translations for rrule.toText()
+const germanRuleTranslator = (key, index) => {
+    //console.log(`[germanRuleTranslator] Attempting key: "${key}", index: ${index}`);
+
+    const map = {
+        day: 'Tag', days: 'Tage',
+        week: 'Woche', weeks: 'Wochen',
+        month: 'Monat', months: 'Monate',
+        year: 'Jahr', years: 'Jahre',
+        on: 'am', 'on the': 'am', // Keep both just in case
+        in: 'im', until: 'bis', every: 'Alle',
+        '(~ approximate)': '(~ ungefähr)',
+        and: 'und', or: 'oder',
+        last: 'letzten',
+        st: '.', nd: '.', rd: '.', th: '.',
+        Monday: 'Montag', Tuesday: 'Dienstag', Wednesday: 'Mittwoch',
+        Thursday: 'Donnerstag', Friday: 'Freitag', Saturday: 'Samstag', Sunday: 'Sonntag',
+        January: 'Januar', February: 'Februar', March: 'März', April: 'April',
+        May: 'Mai', June: 'Juni', July: 'Juli', August: 'August',
+        September: 'September', October: 'Oktober', November: 'November', December: 'Dezember'
+    };
+
+    const weekdays = [
+        'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'
+    ];
+     const months = [
+        'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
+        'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'
+    ];
+
+    let translationResult = key; // Default to original key
+
+    // 1. Check direct map first
+    if (map.hasOwnProperty(key)) { // Use hasOwnProperty for safer lookup
+        translationResult = map[key];
+        console.log(`[germanRuleTranslator] Found direct map translation for "${key}": "${translationResult}"`);
+    }
+    // 2. Fallback for generic keys with index
+    else if (key === 'weekday' && index !== undefined && index >= 0 && index < weekdays.length) {
+        translationResult = weekdays[index];
+        console.log(`[germanRuleTranslator] Used generic weekday index ${index}: "${translationResult}"`);
+    }
+    else if (key === 'month' && index !== undefined && index >= 0 && index < months.length) {
+        translationResult = months[index];
+        console.log(`[germanRuleTranslator] Used generic month index ${index}: "${translationResult}"`);
+    }
+    // 3. Handle ordinals
+    else {
+       const ordinalMatch = key.match(/^(\d+)(st|nd|rd|th)$/);
+       if (ordinalMatch) {
+           translationResult = `${ordinalMatch[1]}.`;
+           console.log(`[germanRuleTranslator] Handled ordinal "${key}" as: "${translationResult}"`);
+       } else {
+           // 4. No translation found
+           console.warn(`[germanRuleTranslator] No translation found for key: "${key}"`);
+           // translationResult remains the original key
+       }
+    }
+
+    console.log(`[germanRuleTranslator] Returning for "${key}": "${translationResult}"`);
+    return translationResult;
+};
+
 const EventDetailScreen = ({ route, navigation }) => {
   const { eventId } = route.params;
   const { user, displayName } = useAuth();
@@ -609,36 +672,29 @@ const EventDetailScreen = ({ route, navigation }) => {
       }
 
       const rule = rrulestr(ruleString, { dtstart: startDt });
-      let text = rule.toText((key) => {
-         // Simple German translation map (can be expanded)
-         const translations = {
-             'until': 'bis',
-             'on the': 'am',
-             'in': 'im',
-             'every': 'Alle',
-             'day': 'Tag', 'days': 'Tage',
-             'week': 'Woche', 'weeks': 'Wochen',
-             'month': 'Monat', 'months': 'Monate',
-             'year': 'Jahr', 'years': 'Jahre',
-             'weekday': 'Wochentag',
-             'weekends': 'Wochenenden',
-             // Add more translations for weekdays, months, etc. as needed
-             'Monday': 'Montag', 'Tuesday': 'Dienstag', 'Wednesday': 'Mittwoch',
-             'Thursday': 'Donnerstag', 'Friday': 'Freitag', 'Saturday': 'Samstag', 'Sunday': 'Sonntag',
-             'January': 'Januar', 'February': 'Februar', 'March': 'März', 'April': 'April',
-             'May': 'Mai', 'June': 'Juni', 'July': 'Juli', 'August': 'August',
-             'September': 'September', 'October': 'Oktober', 'November': 'November', 'December': 'Dezember'
-         };
-         return translations[key] || key; // Fallback to original key if no translation
-      });
+      // Pass the translator function to toText()
+      let text = rule.toText(germanRuleTranslator);
 
-      // Capitalize first letter
+      // --- Manual Weekday Replacement --- 
+      const weekdayMap = {
+          'Monday': 'Montag', 'Tuesday': 'Dienstag', 'Wednesday': 'Mittwoch',
+          'Thursday': 'Donnerstag', 'Friday': 'Freitag', 'Saturday': 'Samstag', 'Sunday': 'Sonntag'
+      };
+      // Iterate and replace using regex with word boundaries to avoid partial matches
+      for (const [eng, deu] of Object.entries(weekdayMap)) {
+          const regex = new RegExp(`\\b${eng}\\b`, 'gi'); // \b = word boundary, g = global, i = case-insensitive
+          text = text.replace(regex, deu);
+      }
+      // --- End Manual Replacement ---
+
+      // Capitalize first letter (after potential replacement)
       text = text.charAt(0).toUpperCase() + text.slice(1);
 
       if (endDate) {
          // Ensure endDate is valid before formatting
          const endDt = new Date(endDate);
          if (!isNaN(endDt.getTime())) {
+            // Use German locale for the date part as well
             text += ` bis ${endDt.toLocaleDateString('de-DE', { year: 'numeric', month: 'short', day: 'numeric' })}`;
          }
       }
@@ -676,6 +732,19 @@ const EventDetailScreen = ({ route, navigation }) => {
   // Calculate recurrence text safely after event is loaded
   const recurrenceText = event ? getRecurrenceText(event.recurrence_rule, event.date, event.recurrence_end_date) : null;
 
+  // Add a check to ensure event exists before rendering the main content
+  if (!event) {
+      // This case should ideally not be reached if loading is false and error is null,
+      // but acts as a safeguard against potential race conditions or unexpected states.
+       return (
+            <SafeAreaView style={styles.loadingContainer}>
+                 <Text style={styles.loadingText}>Lade Event-Details...</Text>
+                 {/* Or return null, or a more specific placeholder */}
+            </SafeAreaView>
+       );
+  }
+
+  // --- Now render the main content, guaranteed that 'event' is not null ---
   return (
     <Provider>
       <SafeAreaView style={styles.container}>
@@ -684,6 +753,7 @@ const EventDetailScreen = ({ route, navigation }) => {
             <Ionicons name="arrow-back" size={24} color="#4285F4" />
           </TouchableOpacity>
           <View style={styles.headerTitleContainer}>
+             {/* Access event.title safely here */}
              <Text style={styles.headerTitle}>{event.title}</Text>
           </View>
           {canEditDelete && (
@@ -719,51 +789,58 @@ const EventDetailScreen = ({ route, navigation }) => {
           contentContainerStyle={styles.contentContainer}
           showsVerticalScrollIndicator={false}
         >
+          {/* Access event.title safely here */}
           <Text style={styles.title}>{event.title}</Text>
           <View style={styles.eventMeta}>
+             {/* Access event properties safely here */}
+             {/* Date Item */}
             <View style={styles.eventMetaItem}>
-              <Ionicons name="calendar-outline" size={16} color="#666" />
-              <Text style={styles.eventMetaText}>
-                {(event?.recurrence_rule ? 'Start: ' : '') + (event?.date ? new Date(event.date).toLocaleDateString('de-DE', { year: 'numeric', month: 'short', day: 'numeric' }) : 'Datum unbekannt')}
-              </Text>
-            </View>
-            <View style={styles.eventMetaItem}>
-              <Ionicons name="time-outline" size={16} color="#666" />
-              <Text style={styles.eventMetaText}>{event.time}</Text>
-            </View>
-            <View style={styles.eventMetaItem}>
-              <Ionicons name="location-outline" size={16} color="#666" />
-              <Text style={styles.eventMetaText}>{event.location}</Text>
-            </View>
-            <View style={styles.eventMetaItem}>
-                <Ionicons name="person-outline" size={16} color="#666" />
-                <Text 
-                  style={[styles.eventMetaText, event.organization_id ? styles.organizationOrganizer : styles.eventOrganizer]} 
-                  numberOfLines={1} 
-                  ellipsizeMode="tail"
-                 >
-                  {organizerName}
-                </Text>
-            </View>
+               <Ionicons name="calendar-outline" size={16} color="#666" />
+               <Text style={styles.eventMetaText}>
+                 {(event.recurrence_rule ? 'Start: ' : '') + (event.date ? new Date(event.date).toLocaleDateString('de-DE', { year: 'numeric', month: 'short', day: 'numeric' }) : 'Datum unbekannt')}
+               </Text>
+             </View>
+             {/* Time Item */}
+             <View style={styles.eventMetaItem}>
+               <Ionicons name="time-outline" size={16} color="#666" />
+               <Text style={styles.eventMetaText}>{event.time}</Text>
+             </View>
+             {/* Location Item */}
+             <View style={styles.eventMetaItem}>
+               <Ionicons name="location-outline" size={16} color="#666" />
+               <Text style={styles.eventMetaText}>{event.location}</Text>
+             </View>
+             {/* Organizer Item */}
+             <View style={styles.eventMetaItem}>
+                 <Ionicons name="person-outline" size={16} color="#666" />
+                 <Text
+                   style={[styles.eventMetaText, event.organization_id ? styles.organizationOrganizer : styles.eventOrganizer]}
+                   numberOfLines={1}
+                   ellipsizeMode="tail"
+                  >
+                   {organizerName} 
+                 </Text>
+             </View>
           </View>
           
-          {/* Display recurrence info if available */}
+          {/* Display recurrence info if available (recurrenceText already calculated safely) */}
           {recurrenceText && (
-             <View style={styles.recurrenceInfoContainer}> {/* Use a dedicated container */}
+             <View style={styles.recurrenceInfoContainer}>
                 <Ionicons name="repeat-outline" size={16} color="#666" style={styles.recurrenceIcon} />
                 <Text style={styles.recurrenceText}>{recurrenceText}</Text>
             </View>
           )}
           
-          {/* Display event image if available */}
+          {/* Display event image if available (access event.image_url safely) */}
           {event.image_url && (
-            <Image 
-              source={{ uri: event.image_url }} 
+            <Image
+              source={{ uri: event.image_url }}
               style={styles.eventImage}
               resizeMode="cover"
             />
           )}
           
+          {/* Access event.description safely */}
           <Text style={styles.descriptionTitle}>Beschreibung</Text>
           <Text style={styles.eventDescription}>{event.description}</Text>
           
@@ -1282,6 +1359,20 @@ const styles = StyleSheet.create({
     height: 200, // Adjust height as needed
     borderRadius: 8,
     marginVertical: 15, // Add vertical spacing
+  },
+  recurrenceInfoContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingLeft: 5,
+  },
+  recurrenceIcon: {
+    marginRight: 6,
+  },
+  recurrenceText: {
+    fontSize: 14,
+    color: '#666',
+    flex: 1,
   },
 });
 

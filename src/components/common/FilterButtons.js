@@ -1,19 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 
 const FilterButtons = ({ filters = [], onFilterChange = () => {}, initialFilter = 'Alle' }) => {
-  const [selectedFilter, setSelectedFilter] = useState(initialFilter);
+  const [selectedFilterName, setSelectedFilterName] = useState(initialFilter);
 
-  // Update selected filter if initialFilter prop changes
   useEffect(() => {
-    if (initialFilter && initialFilter !== selectedFilter) {
-      setSelectedFilter(initialFilter);
-    }
+    setSelectedFilterName(initialFilter);
   }, [initialFilter]);
 
-  const selectFilter = (filter) => {
-    setSelectedFilter(filter);
-    onFilterChange(filter); // Pass the selected filter back to parent component
+  const selectFilter = (filterName) => {
+    setSelectedFilterName(filterName);
+    onFilterChange(filterName);
   };
 
   return (
@@ -23,25 +21,47 @@ const FilterButtons = ({ filters = [], onFilterChange = () => {}, initialFilter 
       style={styles.container}
       contentContainerStyle={styles.contentContainer}
     >
-      {filters.map((filter, index) => (
-        <TouchableOpacity
-          key={index}
-          style={[
-            styles.filterButton,
-            selectedFilter === filter && styles.selectedFilter
-          ]}
-          onPress={() => selectFilter(filter)}
-        >
-          <Text 
-            style={[
-              styles.filterText,
-              selectedFilter === filter && styles.selectedFilterText
-            ]}
+      {filters.map((filter, index) => {
+        const isSelected = selectedFilterName === filter.name;
+        const isHighlighted = filter.is_highlighted && !isSelected;
+
+        const buttonStyle = [
+          styles.filterButton,
+          isSelected && styles.selectedFilter,
+        ];
+
+        const textStyle = [
+          styles.filterTextBase,
+          isSelected ? styles.selectedFilterText : styles.filterText,
+        ];
+
+        return (
+          <TouchableOpacity
+            key={filter.name || index}
+            style={buttonStyle}
+            onPress={() => selectFilter(filter.name)}
           >
-            {filter}
-          </Text>
-        </TouchableOpacity>
-      ))}
+            {isHighlighted ? (
+              <LinearGradient
+                colors={['#FFF9C4', '#FFE0B2']}
+                style={styles.gradientWrapper}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <Text style={textStyle}>
+                  {filter.name}
+                </Text>
+              </LinearGradient>
+            ) : (
+              <View style={styles.textWrapper}>
+                <Text style={textStyle}>
+                  {filter.name}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        );
+      })}
     </ScrollView>
   );
 };
@@ -53,22 +73,32 @@ const styles = StyleSheet.create({
   },
   contentContainer: {
     paddingHorizontal: 10,
+    paddingVertical: 5,
   },
   filterButton: {
-    paddingHorizontal: 15,
-    paddingVertical: 5,
     borderRadius: 20,
-    backgroundColor: '#f0f0f0',
     marginRight: 8,
     borderWidth: 1,
     borderColor: '#ddd',
+    overflow: 'hidden',
+    backgroundColor: '#f0f0f0',
   },
   selectedFilter: {
     backgroundColor: '#4285F4',
     borderColor: '#4285F4',
   },
-  filterText: {
+  gradientWrapper: {
+    paddingHorizontal: 15,
+    paddingVertical: 5,
+  },
+  textWrapper: {
+    paddingHorizontal: 15,
+    paddingVertical: 5,
+  },
+  filterTextBase: {
     fontSize: 12,
+  },
+  filterText: {
     color: '#333',
   },
   selectedFilterText: {

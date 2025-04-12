@@ -51,7 +51,7 @@ const format_date_german = (date_value) => {
 };
 
 const CalendarScreen = ({ navigation }) => {
-  const [calendarFilters, setCalendarFilters] = useState(['Alle']);
+  const [calendarFilters, setCalendarFilters] = useState([{ name: 'Alle', is_highlighted: false }]);
   const [loadingFilters, setLoadingFilters] = useState(true);
   const [selectedDates, setSelectedDates] = useState({});
   const [dateRange, setDateRange] = useState({ startDate: '', endDate: '' });
@@ -95,16 +95,20 @@ const CalendarScreen = ({ navigation }) => {
       // Fetch event categories first
       const { data: categoriesData, error: categoriesError } = await supabase
         .from('event_categories')
-        .select('name')
+        .select('name, is_highlighted')
         .order('display_order', { ascending: true });
 
       if (categoriesError) {
         console.error('Error fetching event categories:', categoriesError);
         Alert.alert('Fehler', 'Fehler beim Laden der Event-Kategorien.');
-        setCalendarFilters(['Alle']); // Fallback to default
+        setCalendarFilters([{ name: 'Alle', is_highlighted: false }]); // Fallback
       } else {
-        const fetchedFilters = ['Alle', ...(categoriesData?.map(cat => cat.name) || [])];
-        setCalendarFilters(fetchedFilters);
+        // Map to structure { name: string, is_highlighted: boolean }
+        const fetchedFilters = categoriesData?.map(cat => ({
+            name: cat.name,
+            is_highlighted: cat.is_highlighted || false
+        })) || [];
+        setCalendarFilters([{ name: 'Alle', is_highlighted: false }, ...fetchedFilters]); // Prepend 'Alle' object
       }
       setLoadingFilters(false);
 

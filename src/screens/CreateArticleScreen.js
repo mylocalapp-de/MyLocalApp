@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -23,6 +23,7 @@ import { useOrganization } from '../context/OrganizationContext';
 import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
 import { decode } from 'base64-arraybuffer';
+import { LinearGradient } from 'expo-linear-gradient';
 
 const { height } = Dimensions.get('window');
 const androidPaddingTop = height * 0.03; // 3% of screen height for better scaling
@@ -39,17 +40,49 @@ const CreateArticleScreen = ({ navigation }) => {
   const [imageAsset, setImageAsset] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   
-  // Type selection options
-  const articleTypes = [
-    { id: 'kultur', name: 'Kultur' },
-    { id: 'sport', name: 'Sport' },
-    { id: 'verkehr', name: 'Verkehr' },
-    { id: 'politik', name: 'Politik' },
-    { id: 'vereine', name: 'Vereine' },
-    { id: 'gemeinde', name: 'Gemeinde' },
-    { id: 'polizei', name: 'Polizei' },
-    { id: 'veranstaltungen', name: 'Veranstaltungen' }
-  ];
+  // State for fetched article types/filters
+  const [availableArticleTypes, setAvailableArticleTypes] = useState([]);
+  const [loadingTypes, setLoadingTypes] = useState(true);
+
+  // Fetch article types/filters on mount
+  useEffect(() => {
+    fetchArticleTypes();
+  }, []);
+
+  const fetchArticleTypes = async () => {
+    setLoadingTypes(true);
+    try {
+      const { data, error } = await supabase
+        .from('article_filters')
+        .select('name, is_highlighted, is_admin_only') // Fetch all needed fields
+        .order('display_order', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching article types:', error);
+        Alert.alert('Fehler', 'Artikel-Kategorien konnten nicht geladen werden.');
+        setAvailableArticleTypes([]);
+      } else {
+        // Filter out admin-only types and map to structure
+        const userVisibleTypes = data
+          .filter(item => !item.is_admin_only)
+          .map(item => ({ 
+            name: item.name, 
+            is_highlighted: item.is_highlighted || false 
+          }));
+        setAvailableArticleTypes(userVisibleTypes);
+        // Optionally set a default type if none is selected and list is not empty
+        // if (!type && userVisibleTypes.length > 0) {
+        //   setType(userVisibleTypes[0].name);
+        // }
+      }
+    } catch (err) {
+      console.error('Unexpected error fetching article types:', err);
+      Alert.alert('Fehler', 'Ein unerwarteter Fehler ist aufgetreten.');
+      setAvailableArticleTypes([]);
+    } finally {
+      setLoadingTypes(false);
+    }
+  };
   
   // Validate form before submission
   const validateForm = () => {
@@ -256,31 +289,63 @@ const CreateArticleScreen = ({ navigation }) => {
   
   // Render type selection buttons
   const renderTypeButtons = () => {
+    if (loadingTypes) {
+      return <ActivityIndicator size="small" color="#4285F4" style={styles.loadingIndicator}/>;
+    }
+    if (availableArticleTypes.length === 0) {
+      return <Text style={styles.noTypesText}>Keine Kategorien zum Auswählen verfügbar.</Text>;
+    }
+
     return (
       <ScrollView 
         horizontal 
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.typeButtonsContainer}
       >
-        {articleTypes.map(articleType => (
-          <TouchableOpacity
-            key={articleType.id}
-            style={[
-              styles.typeButton,
-              type === articleType.name && styles.selectedTypeButton
-            ]}
-            onPress={() => setType(articleType.name)}
-          >
-            <Text 
-              style={[
-                styles.typeButtonText,
-                type === articleType.name && styles.selectedTypeButtonText
-              ]}
+        {availableArticleTypes.map(articleType => {
+          const isSelected = type === articleType.name;
+          const isHighlighted = articleType.is_highlighted && !isSelected;
+
+          const buttonStyle = [
+            styles.typeButtonBase, // Base style for layout/border
+            isSelected ? styles.selectedTypeButton : styles.typeButton, // Background for non-highlighted
+            isHighlighted && styles.highlightedTypeButton // Border for highlighted
+          ];
+
+          const textStyle = [
+            styles.typeButtonText,
+            isSelected && styles.selectedTypeButtonText
+            // isHighlighted && styles.highlightedTypeButtonText // Optional separate text style
+          ];
+
+          return (
+            <TouchableOpacity
+              key={articleType.name}
+              style={buttonStyle}
+              onPress={() => setType(articleType.name)}
             >
-              {articleType.name}
-            </Text>
-          </TouchableOpacity>
-        ))}
+              {isHighlighted ? (
+                <LinearGradient
+                  colors={['#f0f0f0', '#e0e0e0']}
+                  style={styles.gradientWrapperType}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                >
+                  <Text style={textStyle}>
+                    {articleType.name}
+                  </Text>
+                </LinearGradient>
+              ) : (
+                 // Need a View wrapper for non-gradient text to apply padding correctly
+                 <View style={styles.textWrapperType}>
+                   <Text style={textStyle}>
+                     {articleType.name}
+                   </Text>
+                 </View>
+              )}
+            </TouchableOpacity>
+          );
+        })}
       </ScrollView>
     );
   };
@@ -444,16 +509,34 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingVertical: 5,
     paddingRight: 20,
+    marginBottom: 10,
+  },
+  typeButtonBase: {
+    borderRadius: 20,
+    marginRight: 8,
+    borderWidth: 1,
+    overflow: 'hidden',
   },
   typeButton: {
     backgroundColor: '#f1f1f1',
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginRight: 8,
+    borderColor: '#ddd',
   },
   selectedTypeButton: {
     backgroundColor: '#4285F4',
+    borderColor: '#4285F4',
+  },
+  highlightedTypeButton: {
+    borderColor: '#bdbdbd',
+    backgroundColor: 'transparent',
+  },
+  gradientWrapperType: {
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  textWrapperType: {
+    paddingHorizontal: 15,
+    paddingVertical: 8,
   },
   typeButtonText: {
     fontSize: 14,
@@ -511,7 +594,15 @@ const styles = StyleSheet.create({
       backgroundColor: 'rgba(255, 255, 255, 0.7)',
       borderRadius: 12,
       padding: 2,
-  }
+  },
+  loadingIndicator: {
+    marginVertical: 10,
+  },
+  noTypesText: {
+    fontStyle: 'italic',
+    color: '#6c757d',
+    paddingVertical: 10,
+  },
 });
 
 export default CreateArticleScreen; 

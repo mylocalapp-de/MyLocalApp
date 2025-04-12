@@ -21,6 +21,7 @@ import { useOrganization } from '../context/OrganizationContext';
 import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
 import { decode } from 'base64-arraybuffer';
+import { LinearGradient } from 'expo-linear-gradient';
 
 const EditArticleScreen = ({ navigation, route }) => {
   const { articleId } = route.params;
@@ -31,6 +32,7 @@ const EditArticleScreen = ({ navigation, route }) => {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [type, setType] = useState('');
+  const [initialType, setInitialType] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -40,22 +42,46 @@ const EditArticleScreen = ({ navigation, route }) => {
   const [isUploading, setIsUploading] = useState(false); // State for upload progress
   const [removeCurrentImage, setRemoveCurrentImage] = useState(false); // State to track image removal
   
-  // Type selection options
-  const articleTypes = [
-    { id: 'kultur', name: 'Kultur' },
-    { id: 'sport', name: 'Sport' },
-    { id: 'verkehr', name: 'Verkehr' },
-    { id: 'politik', name: 'Politik' },
-    { id: 'vereine', name: 'Vereine' },
-    { id: 'gemeinde', name: 'Gemeinde' },
-    { id: 'polizei', name: 'Polizei' },
-    { id: 'veranstaltungen', name: 'Veranstaltungen' }
-  ];
+  // State for fetched article types/filters
+  const [availableArticleTypes, setAvailableArticleTypes] = useState([]);
+  const [loadingTypes, setLoadingTypes] = useState(true);
 
-  // Load article data
+  // Load article data and types
   useEffect(() => {
-    fetchArticle();
+    // Fetch types first, then the article data
+    fetchArticleTypes().then(() => {
+      fetchArticle(); // Fetch article after types are loaded
+    });
   }, [articleId]);
+
+  // Fetch article types (user-selectable only)
+  const fetchArticleTypes = async () => {
+    setLoadingTypes(true);
+    try {
+      const { data, error } = await supabase
+        .from('article_filters')
+        .select('name, is_highlighted, is_admin_only')
+        .order('display_order', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching article types:', error);
+        setAvailableArticleTypes([]);
+      } else {
+        const userVisibleTypes = data
+          .filter(item => !item.is_admin_only)
+          .map(item => ({ 
+            name: item.name, 
+            is_highlighted: item.is_highlighted || false 
+          }));
+        setAvailableArticleTypes(userVisibleTypes);
+      }
+    } catch (err) {
+      console.error('Unexpected error fetching article types:', err);
+      setAvailableArticleTypes([]);
+    } finally {
+      setLoadingTypes(false);
+    }
+  };
 
   // Fetch the article to edit
   const fetchArticle = async () => {
@@ -122,6 +148,7 @@ const EditArticleScreen = ({ navigation, route }) => {
       setTitle(data.title || '');
       setContent(data.content || '');
       setType(data.type || '');
+      setInitialType(data.type || '');
       setIsOrgArticle(!!data.organization_id); // Check if it has an org ID
       setImageUrl(data.image_url || ''); // Load the existing image URL
       setImageAsset(null); // Reset selected asset
@@ -290,37 +317,81 @@ const EditArticleScreen = ({ navigation, route }) => {
   
   // Render type selection buttons
   const renderTypeButtons = () => {
+    if (loadingTypes) {
+      return <ActivityIndicator size="small" color="#4285F4" style={styles.loadingIndicator}/>;
+    }
+    // If the initial type is admin-only, we need to show it even if it's not in availableArticleTypes
+    const displayTypes = [...availableArticleTypes];
+    const initialTypeIsSelectable = availableArticleTypes.some(t => t.name === initialType);
+    if (initialType && !initialTypeIsSelectable) {
+      // Add the initial type (which must be admin-only) to the start of the list for display
+      displayTypes.unshift({ name: initialType, is_highlighted: false }); 
+    }
+
+    if (displayTypes.length === 0) {
+      return <Text style={styles.noTypesText}>Keine Kategorien zum Auswählen verfügbar.</Text>;
+    }
+
     return (
       <ScrollView 
         horizontal 
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.typeButtonsContainer}
       >
-        {articleTypes.map(articleType => (
-          <TouchableOpacity
-            key={articleType.id}
-            style={[
-              styles.typeButton,
-              type === articleType.name && styles.selectedTypeButton
-            ]}
-            onPress={() => setType(articleType.name)}
-          >
-            <Text 
-              style={[
-                styles.typeButtonText,
-                type === articleType.name && styles.selectedTypeButtonText
-              ]}
+        {displayTypes.map(articleType => {
+          const isSelected = type === articleType.name;
+          // Highlight only if explicitly marked AND not selected
+          const isHighlighted = articleType.is_highlighted && !isSelected; 
+          // Check if the button should be disabled (initial admin-only type cannot be changed)
+          const isDisabled = !availableArticleTypes.some(t => t.name === articleType.name) && articleType.name === initialType;
+
+          const buttonStyle = [
+            styles.typeButtonBase,
+            isSelected ? styles.selectedTypeButton : styles.typeButton,
+            isHighlighted && styles.highlightedTypeButton,
+            isDisabled && styles.disabledTypeButton // Style for disabled button
+          ];
+
+          const textStyle = [
+            styles.typeButtonText,
+            isSelected && styles.selectedTypeButtonText,
+            isDisabled && styles.disabledTypeButtonText // Style for disabled text
+          ];
+
+          return (
+            <TouchableOpacity
+              key={articleType.name}
+              style={buttonStyle}
+              onPress={() => setType(articleType.name)}
+              disabled={isDisabled} // Disable button if needed
             >
-              {articleType.name}
-            </Text>
-          </TouchableOpacity>
-        ))}
+              {isHighlighted ? (
+                <LinearGradient
+                  colors={['#f0f0f0', '#e0e0e0']}
+                  style={styles.gradientWrapperType}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                >
+                  <Text style={textStyle}>
+                    {articleType.name}
+                  </Text>
+                </LinearGradient>
+              ) : (
+                 <View style={styles.textWrapperType}>
+                   <Text style={textStyle}>
+                     {articleType.name}
+                   </Text>
+                 </View>
+              )}
+            </TouchableOpacity>
+          );
+        })}
       </ScrollView>
     );
   };
 
   // Show loading state
-  if (isLoading) {
+  if (isLoading || loadingTypes) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#4285F4" />
@@ -522,16 +593,38 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingVertical: 5,
     paddingRight: 20,
+    marginBottom: 10,
+  },
+  typeButtonBase: {
+    borderRadius: 20,
+    marginRight: 8,
+    borderWidth: 1,
+    overflow: 'hidden',
   },
   typeButton: {
     backgroundColor: '#f1f1f1',
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginRight: 8,
+    borderColor: '#ddd',
   },
   selectedTypeButton: {
     backgroundColor: '#4285F4',
+    borderColor: '#4285F4',
+  },
+  highlightedTypeButton: {
+    borderColor: '#bdbdbd', 
+    backgroundColor: 'transparent',
+  },
+  disabledTypeButton: {
+    backgroundColor: '#e0e0e0',
+    borderColor: '#bdbdbd',
+  },
+  gradientWrapperType: {
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  textWrapperType: {
+    paddingHorizontal: 15,
+    paddingVertical: 8,
   },
   typeButtonText: {
     fontSize: 14,
@@ -540,6 +633,9 @@ const styles = StyleSheet.create({
   selectedTypeButtonText: {
     color: '#fff',
     fontWeight: 'bold',
+  },
+  disabledTypeButtonText: {
+      color: '#9e9e9e',
   },
   titleInput: {
     backgroundColor: '#f8f8f8',
@@ -588,6 +684,14 @@ const styles = StyleSheet.create({
       backgroundColor: 'rgba(255, 255, 255, 0.7)',
       borderRadius: 12,
       padding: 2,
+  },
+  loadingIndicator: {
+      marginVertical: 10,
+  },
+  noTypesText: {
+      fontStyle: 'italic',
+      color: '#6c757d',
+      paddingVertical: 10,
   },
 });
 

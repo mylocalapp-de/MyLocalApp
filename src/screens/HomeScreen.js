@@ -15,7 +15,7 @@ const HomeScreen = ({ navigation }) => {
   const [articles, setArticles] = useState([]);
   const [filteredArticles, setFilteredArticles] = useState([]);
   const [selectedFilter, setSelectedFilter] = useState('Aktuell');
-  const [availableFilters, setAvailableFilters] = useState(['Aktuell']);
+  const [availableFilters, setAvailableFilters] = useState([{ name: 'Aktuell', is_highlighted: false }]);
   const [pinnedArticleIds, setPinnedArticleIds] = useState(new Set());
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingFilters, setIsLoadingFilters] = useState(true);
@@ -50,34 +50,40 @@ const HomeScreen = ({ navigation }) => {
     try {
       const { data, error } = await supabase
         .from('article_filters')
-        .select('name')
+        .select('name, is_highlighted') // Select new flag
         .order('display_order', { ascending: true });
 
       if (error) {
         console.error('Error fetching filters:', error);
         // Keep default 'Aktuell' if fetch fails
+        setAvailableFilters([{ name: 'Aktuell', is_highlighted: false }]); // Keep default
       } else {
-        // Get filter names from the fetched data
-        let filterNames = data.map(f => f.name);
+        // Map to the required structure
+        let fetchedFilters = data.map(f => ({ 
+          name: f.name, 
+          is_highlighted: f.is_highlighted || false // Ensure boolean
+        }));
         
         // Ensure 'Aktuell' is present and at the beginning
-        if (filterNames.includes('Aktuell')) {
+        const aktuellExists = fetchedFilters.some(f => f.name === 'Aktuell');
+        if (aktuellExists) {
           // Remove it from its current position
-          filterNames = filterNames.filter(name => name !== 'Aktuell');
+          fetchedFilters = fetchedFilters.filter(f => f.name !== 'Aktuell');
         }
-        // Add 'Aktuell' to the start
-        filterNames.unshift('Aktuell');
+        // Add 'Aktuell' object to the start
+        fetchedFilters.unshift({ name: 'Aktuell', is_highlighted: false });
 
-        setAvailableFilters(filterNames);
+        setAvailableFilters(fetchedFilters);
         
-        // If the initial selected filter is not in the available list anymore (e.g., db changed)
-        // default back to 'Aktuell'
-        if (!filterNames.includes(selectedFilter)) {
-          setSelectedFilter('Aktuell'); 
+        // Check if the current selectedFilter (string) exists in the new array of objects
+        const currentFilterExists = fetchedFilters.some(f => f.name === selectedFilter);
+        if (!currentFilterExists) {
+          setSelectedFilter('Aktuell'); // Default back to 'Aktuell' string
         }
       }
     } catch (err) {
       console.error('Unexpected error fetching filters:', err);
+      setAvailableFilters([{ name: 'Aktuell', is_highlighted: false }]); // Fallback
     } finally {
       setIsLoadingFilters(false);
     }

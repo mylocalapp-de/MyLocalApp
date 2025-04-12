@@ -421,6 +421,76 @@ CREATE OR REPLACE VIEW public.event_attendees_with_users AS
   LEFT JOIN public.profiles p ON a.user_id = p.id ORDER BY a.created_at;
 
 -- ====================================================================
+-- == RPC Function for Deleting Events ==
+-- ====================================================================
+
+CREATE OR REPLACE FUNCTION public.delete_event(p_event_id uuid, p_organizer_id uuid)
+RETURNS boolean AS $$
+DECLARE
+  target_event record;
+  is_member boolean;
+BEGIN
+  -- Get the event details
+  SELECT * INTO target_event FROM public.events WHERE id = p_event_id;
+
+  -- Check if event exists
+  IF target_event IS NULL THEN
+    RAISE WARNING 'Event not found: %', p_event_id;
+    RETURN false;
+  END IF;
+
+  -- Authorization check:
+  -- 1. Personal event: Check if p_organizer_id matches the event's organizer_id
+  IF target_event.organization_id IS NULL THEN
+    IF target_event.organizer_id != p_organizer_id THEN
+      RAISE WARNING 'Permission denied: User % cannot delete personal event %', p_organizer_id, p_event_id;
+      RETURN false; -- Not authorized
+    END IF;
+  -- 2. Organizational event: Check if p_organizer_id is a member of the organization
+  ELSE
+    SELECT EXISTS (
+      SELECT 1 FROM public.organization_members mem
+      WHERE mem.user_id = p_organizer_id AND mem.organization_id = target_event.organization_id
+    ) INTO is_member;
+
+    IF NOT is_member THEN
+       RAISE WARNING 'Permission denied: User % is not a member of organization % for event %', p_organizer_id, target_event.organization_id, p_event_id;
+       RETURN false; -- Not authorized
+    END IF;
+  END IF;
+
+  -- If authorized, delete the event
+  -- RLS policies on DELETE might also apply, but this function provides explicit checks.
+  -- Using SECURITY DEFINER bypasses RLS within the function execution if needed,
+  -- but the initial permission check ensures only authorized users can execute it.
+  DELETE FROM public.events WHERE id = p_event_id;
+
+  -- Check if deletion was successful
+  IF FOUND THEN
+    RETURN true;
+  ELSE
+    -- This case might happen if the event was deleted between the SELECT and DELETE (race condition)
+    RAISE WARNING 'Event % might have been deleted concurrently.', p_event_id;
+    RETURN false;
+  END IF;
+
+EXCEPTION
+    WHEN others THEN
+        -- Log the error or handle it as needed
+        RAISE WARNING 'Error deleting event %: %', p_event_id, SQLERRM;
+        RETURN false;
+
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+-- SECURITY DEFINER allows the function to potentially bypass RLS during its execution,
+-- but the explicit permission checks at the beginning control who can run it.
+
+COMMENT ON FUNCTION public.delete_event(uuid, uuid) IS 'Deletes an event after checking if the requesting user is authorized (either personal organizer or org member). Returns true on success, false on failure/permission denied.';
+
+-- Grant EXECUTE permission on the function to authenticated users
+GRANT EXECUTE ON FUNCTION public.delete_event(uuid, uuid) TO authenticated;
+
+-- ====================================================================
 -- == Helper Functions for RLS (SECURITY DEFINER to bypass recursion) ==
 -- ====================================================================
 
@@ -847,11 +917,15 @@ GRANT SELECT ON public.map_pois TO anon, authenticated;
 CREATE TABLE public.chat_group_tags (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
-  display_order INTEGER DEFAULT 0
+  display_order INTEGER DEFAULT 0,
+  is_admin_only BOOLEAN DEFAULT false, -- Added column
+  is_highlighted BOOLEAN DEFAULT false -- Added column
 );
 COMMENT ON TABLE public.chat_group_tags IS 'Stores available tags for chat groups and their display order.';
 COMMENT ON COLUMN public.chat_group_tags.name IS 'The unique name of the tag (e.g., Kultur, Sport).';
 COMMENT ON COLUMN public.chat_group_tags.display_order IS 'Order in which tags should be displayed.';
+COMMENT ON COLUMN public.chat_group_tags.is_admin_only IS 'If true, this tag is only assignable via database, not shown in create/edit UI.';
+COMMENT ON COLUMN public.chat_group_tags.is_highlighted IS 'If true, display this tag with a visual highlight.';
 
 -- RLS for Chat Group Tags
 ALTER TABLE public.chat_group_tags ENABLE ROW LEVEL SECURITY;
@@ -864,18 +938,18 @@ GRANT SELECT ON public.chat_group_tags TO anon, authenticated;
 -- No INSERT/UPDATE/DELETE grants needed for anon/authenticated if managed by service_role
 
 -- Insert default chat group tags
-INSERT INTO public.chat_group_tags (name, display_order) VALUES
-('Offene Gruppen', 0), -- Example: Keep this separate if it's not a 'tag'
-('Ankündigungen', 1), -- Example: Keep this separate if it's not a 'tag'
-('Vereine', 2),
-('Kultur', 3),
-('Sport', 4),
-('Verkehr', 5),
-('Politik', 6),
-('Gemeinde', 7),
-('Veranstaltungen', 8),
-('Infrastruktur', 9)
-ON CONFLICT (name) DO NOTHING; -- Avoid duplicates
+INSERT INTO public.chat_group_tags (name, display_order, is_highlighted, is_admin_only) VALUES
+('Offene Gruppen', 0, false, true), -- Admin only example
+('Ankündigungen', 1, true, true), -- Admin only and highlighted example
+('Vereine', 2, true, false), -- Highlighted example
+('Kultur', 3, false, false),
+('Sport', 4, false, false),
+('Verkehr', 5, false, false),
+('Politik', 6, false, false),
+('Gemeinde', 7, false, false),
+('Veranstaltungen', 8, false, false),
+('Infrastruktur', 9, false, false)
+ON CONFLICT (name) DO UPDATE SET display_order = EXCLUDED.display_order, is_highlighted = EXCLUDED.is_highlighted, is_admin_only = EXCLUDED.is_admin_only; -- Update existing
 
 -- ====================================================================
 -- == Additions for Event Categories ==
@@ -885,11 +959,15 @@ ON CONFLICT (name) DO NOTHING; -- Avoid duplicates
 CREATE TABLE public.event_categories (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
-  display_order INTEGER DEFAULT 0
+  display_order INTEGER DEFAULT 0,
+  is_admin_only BOOLEAN DEFAULT false, -- Added column
+  is_highlighted BOOLEAN DEFAULT false -- Added column
 );
 COMMENT ON TABLE public.event_categories IS 'Stores available categories for events and their display order.';
 COMMENT ON COLUMN public.event_categories.name IS 'The unique name of the category (e.g., Kultur, Sport).';
 COMMENT ON COLUMN public.event_categories.display_order IS 'Order in which categories should be displayed.';
+COMMENT ON COLUMN public.event_categories.is_admin_only IS 'If true, this category is only assignable via database, not shown in create/edit UI.';
+COMMENT ON COLUMN public.event_categories.is_highlighted IS 'If true, display this category with a visual highlight.';
 
 -- RLS for Event Categories
 ALTER TABLE public.event_categories ENABLE ROW LEVEL SECURITY;
@@ -902,18 +980,59 @@ GRANT SELECT ON public.event_categories TO anon, authenticated;
 -- No INSERT/UPDATE/DELETE grants needed for anon/authenticated if managed by service_role
 
 -- Insert default event categories
-INSERT INTO public.event_categories (name, display_order) VALUES
-('Sport', 0),
-('Vereine', 1),
-('Gemeindeamt', 2),
-('Kultur', 3)
-ON CONFLICT (name) DO NOTHING; -- Avoid duplicates
+INSERT INTO public.event_categories (name, display_order, is_highlighted, is_admin_only) VALUES
+('Sport', 0, false, false),
+('Vereine', 1, true, false), -- Highlighted example
+('Gemeindeamt', 2, false, true), -- Admin only example
+('Kultur', 3, false, false)
+ON CONFLICT (name) DO UPDATE SET display_order = EXCLUDED.display_order, is_highlighted = EXCLUDED.is_highlighted, is_admin_only = EXCLUDED.is_admin_only; -- Update existing
 
 -- ====================================================================
 -- == Additions for Event Categories (RLS Grant) ==
 -- ====================================================================
 -- Grant Permissions for Event Categories Table
 GRANT SELECT ON public.event_categories TO anon, authenticated;
+
+-- ====================================================================
+-- == Additions for Article Filters ==
+-- ====================================================================
+
+-- Article Filters Table (Assuming this table exists or should be created)
+CREATE TABLE IF NOT EXISTS public.article_filters (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  display_order INTEGER DEFAULT 0,
+  is_admin_only BOOLEAN DEFAULT false, -- Added column
+  is_highlighted BOOLEAN DEFAULT false -- Added column
+);
+COMMENT ON TABLE public.article_filters IS 'Stores available filters/categories for articles and their display order.';
+COMMENT ON COLUMN public.article_filters.name IS 'The unique name of the filter (e.g., Kultur, Sport).';
+COMMENT ON COLUMN public.article_filters.display_order IS 'Order in which filters should be displayed.';
+COMMENT ON COLUMN public.article_filters.is_admin_only IS 'If true, this filter is only assignable via database, not shown in create/edit UI.';
+COMMENT ON COLUMN public.article_filters.is_highlighted IS 'If true, display this filter with a visual highlight.';
+
+
+-- RLS for Article Filters
+ALTER TABLE public.article_filters ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow anyone to read article filters" ON public.article_filters;
+-- Management (INSERT/UPDATE/DELETE) should be handled via service_role key (Supabase dashboard/backend)
+CREATE POLICY "Allow anyone to read article filters" ON public.article_filters FOR SELECT USING (true);
+
+-- Grant Permissions for Article Filters
+GRANT SELECT ON public.article_filters TO anon, authenticated;
+-- No INSERT/UPDATE/DELETE grants needed for anon/authenticated if managed by service_role
+
+-- Insert default article filters (Example)
+INSERT INTO public.article_filters (name, display_order, is_highlighted) VALUES
+('Kultur', 0, false),
+('Sport', 1, false),
+('Verkehr', 2, false),
+('Politik', 3, false),
+('Vereine', 4, true), -- Example highlighted filter
+('Gemeinde', 5, false),
+('Polizei', 6, false),
+('Veranstaltungen', 7, true) -- Example highlighted filter
+ON CONFLICT (name) DO UPDATE SET display_order = EXCLUDED.display_order, is_highlighted = EXCLUDED.is_highlighted; -- Update existing
 
 -- ====================================================================
 -- End of script
