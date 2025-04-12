@@ -20,9 +20,8 @@ const ChatScreen = ({ navigation, route }) => {
   const [activeFilter, setActiveFilter] = useState('Alle');
   const [localUnreadCounts, setLocalUnreadCounts] = useState({});
   const [localLastMessages, setLocalLastMessages] = useState({});
-
-  // Filters for the chat screen
-  const chatFilters = ['Alle', 'Offene Gruppen', 'Ankündigungen', 'Vereine', 'Kultur', 'Sport', 'Verkehr'];
+  const [chatFilters, setChatFilters] = useState(['Alle']);
+  const [isLoadingFilters, setIsLoadingFilters] = useState(true);
 
   // Listen for navigation events to update unread counts
   useEffect(() => {
@@ -53,6 +52,37 @@ const ChatScreen = ({ navigation, route }) => {
     loadLocalUnreadCounts();
   }, []);
   
+  // Fetch chat filters (tags) from Supabase
+  useEffect(() => {
+    const fetchFilters = async () => {
+      try {
+        setIsLoadingFilters(true);
+        const { data, error } = await supabase
+          .from('chat_group_tags')
+          .select('name')
+          .order('display_order', { ascending: true });
+
+        if (error) {
+          console.error('Error fetching chat filters:', error);
+          // Keep default 'Alle' filter on error
+          setChatFilters(['Alle']);
+        } else if (data) {
+          const fetchedFilters = data.map(tag => tag.name);
+          setChatFilters(['Alle', ...fetchedFilters]); // Prepend 'Alle'
+        } else {
+          setChatFilters(['Alle']); // Default if no data
+        }
+      } catch (err) {
+        console.error('Unexpected error fetching filters:', err);
+        setChatFilters(['Alle']); // Default on unexpected error
+      } finally {
+        setIsLoadingFilters(false);
+      }
+    };
+
+    fetchFilters();
+  }, []);
+
   // Also refresh when the screen is focused
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
@@ -323,11 +353,13 @@ const ChatScreen = ({ navigation, route }) => {
   };
 
   const renderChatList = () => {
-    if (isLoading) {
+    if (isLoading || isLoadingFilters) {
       return (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#4285F4" />
-          <Text style={styles.loadingText}>Chats werden geladen...</Text>
+          <Text style={styles.loadingText}>
+            {isLoading ? 'Chats werden geladen...' : 'Filter werden geladen...'}
+          </Text>
         </View>
       );
     }

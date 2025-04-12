@@ -21,6 +21,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { Menu, Provider } from 'react-native-paper';
+import { RRule, RRuleSet, rrulestr } from 'rrule';
 
 const { height } = Dimensions.get('window');
 const androidPaddingTop = height * 0.05; // 3% of screen height for better scaling
@@ -69,23 +70,37 @@ const EventDetailScreen = ({ route, navigation }) => {
     fetchAttendeesList();
   }, [eventId, user]);
 
-  // Fetch the full event data from Supabase
+  // Fetch the full event data including recurrence
   const fetchEventData = async () => {
     try {
       setLoading(true);
       setError(null);
       
-      // Fetch the event with organizer info
+      // Fetch the event with organizer and recurrence info
       const { data: eventData, error: eventError } = await supabase
-        .from('events')
+        .from('events') // Query the base table
         .select(`
-          *,
+          id,
+          title,
+          description,
+          date,
+          time,
+          end_time,
+          location,
+          category,
+          image_url,
+          organizer_id,
+          organization_id,
+          is_published,
+          created_at,
           profiles:organizer_id (
             display_name
           ),
           organizations:organization_id (
             name
-          )
+          ),
+          recurrence_rule,
+          recurrence_end_date
         `)
         .eq('id', eventId)
         .single();
@@ -93,11 +108,13 @@ const EventDetailScreen = ({ route, navigation }) => {
       if (eventError) {
         console.error('Error fetching event:', eventError);
         setError('Could not load event. Please try again later.');
+        setLoading(false);
         return;
       }
       
       if (!eventData) {
         setError('Event not found.');
+        setLoading(false);
         return;
       }
       
@@ -112,7 +129,7 @@ const EventDetailScreen = ({ route, navigation }) => {
         setOrganizerName(eventData.profiles.display_name);
       } else {
         // Fallback if profile is somehow missing or name is null
-        setOrganizerName('Organisator'); 
+        setOrganizerName('Redaktion');
       }
       
       // Determine if the current user can edit/delete this event
@@ -580,6 +597,58 @@ const EventDetailScreen = ({ route, navigation }) => {
     );
   };
   
+  // Function to generate human-readable text for recurrence
+  const getRecurrenceText = (ruleString, startDate, endDate) => {
+    if (!ruleString || !startDate) return null;
+    try {
+      // Ensure startDate is valid
+      const startDt = new Date(startDate + 'T00:00:00Z');
+      if (isNaN(startDt.getTime())) {
+          console.warn("Invalid start date for RRULE parsing:", startDate);
+          return "Ungültige Wiederholungsregel (Startdatum)";
+      }
+
+      const rule = rrulestr(ruleString, { dtstart: startDt });
+      let text = rule.toText((key) => {
+         // Simple German translation map (can be expanded)
+         const translations = {
+             'until': 'bis',
+             'on the': 'am',
+             'in': 'im',
+             'every': 'Alle',
+             'day': 'Tag', 'days': 'Tage',
+             'week': 'Woche', 'weeks': 'Wochen',
+             'month': 'Monat', 'months': 'Monate',
+             'year': 'Jahr', 'years': 'Jahre',
+             'weekday': 'Wochentag',
+             'weekends': 'Wochenenden',
+             // Add more translations for weekdays, months, etc. as needed
+             'Monday': 'Montag', 'Tuesday': 'Dienstag', 'Wednesday': 'Mittwoch',
+             'Thursday': 'Donnerstag', 'Friday': 'Freitag', 'Saturday': 'Samstag', 'Sunday': 'Sonntag',
+             'January': 'Januar', 'February': 'Februar', 'March': 'März', 'April': 'April',
+             'May': 'Mai', 'June': 'Juni', 'July': 'Juli', 'August': 'August',
+             'September': 'September', 'October': 'Oktober', 'November': 'November', 'December': 'Dezember'
+         };
+         return translations[key] || key; // Fallback to original key if no translation
+      });
+
+      // Capitalize first letter
+      text = text.charAt(0).toUpperCase() + text.slice(1);
+
+      if (endDate) {
+         // Ensure endDate is valid before formatting
+         const endDt = new Date(endDate);
+         if (!isNaN(endDt.getTime())) {
+            text += ` bis ${endDt.toLocaleDateString('de-DE', { year: 'numeric', month: 'short', day: 'numeric' })}`;
+         }
+      }
+      return `Wiederholt sich: ${text}`;
+    } catch (e) {
+      console.error("Error parsing RRULE for display:", ruleString, e);
+      return "Wiederholungsregel konnte nicht gelesen werden.";
+    }
+  };
+  
   if (loading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
@@ -604,6 +673,9 @@ const EventDetailScreen = ({ route, navigation }) => {
     );
   }
   
+  // Calculate recurrence text safely after event is loaded
+  const recurrenceText = event ? getRecurrenceText(event.recurrence_rule, event.date, event.recurrence_end_date) : null;
+
   return (
     <Provider>
       <SafeAreaView style={styles.container}>
@@ -652,7 +724,7 @@ const EventDetailScreen = ({ route, navigation }) => {
             <View style={styles.eventMetaItem}>
               <Ionicons name="calendar-outline" size={16} color="#666" />
               <Text style={styles.eventMetaText}>
-                {event.date ? new Date(event.date).toLocaleDateString('de-DE', { year: 'numeric', month: 'short', day: 'numeric' }) : 'Datum unbekannt'}
+                {(event?.recurrence_rule ? 'Start: ' : '') + (event?.date ? new Date(event.date).toLocaleDateString('de-DE', { year: 'numeric', month: 'short', day: 'numeric' }) : 'Datum unbekannt')}
               </Text>
             </View>
             <View style={styles.eventMetaItem}>
@@ -674,6 +746,23 @@ const EventDetailScreen = ({ route, navigation }) => {
                 </Text>
             </View>
           </View>
+          
+          {/* Display recurrence info if available */}
+          {recurrenceText && (
+             <View style={styles.recurrenceInfoContainer}> {/* Use a dedicated container */}
+                <Ionicons name="repeat-outline" size={16} color="#666" style={styles.recurrenceIcon} />
+                <Text style={styles.recurrenceText}>{recurrenceText}</Text>
+            </View>
+          )}
+          
+          {/* Display event image if available */}
+          {event.image_url && (
+            <Image 
+              source={{ uri: event.image_url }} 
+              style={styles.eventImage}
+              resizeMode="cover"
+            />
+          )}
           
           <Text style={styles.descriptionTitle}>Beschreibung</Text>
           <Text style={styles.eventDescription}>{event.description}</Text>
@@ -741,8 +830,8 @@ const EventDetailScreen = ({ route, navigation }) => {
                   const formattedTime = `${commentDate.getHours().toString().padStart(2, '0')}:${commentDate.getMinutes().toString().padStart(2, '0')}`;
                   const formattedDate = `${commentDate.getDate().toString().padStart(2, '0')}.${(commentDate.getMonth() + 1).toString().padStart(2, '0')}.${commentDate.getFullYear()}`;
                   
-                  // Get user name from profiles relation
-                  const userName = item.profiles?.display_name || 'Unbekannt';
+                  // Get user name from the view directly
+                  const userName = item.user_name || 'Unbekannt';
 
                   return (
                     <View style={styles.commentItem}>
@@ -1187,6 +1276,12 @@ const styles = StyleSheet.create({
   },
   sendButtonDisabled: {
     backgroundColor: '#f1f1f1',
+  },
+  eventImage: { // Added style for the event image
+    width: '100%',
+    height: 200, // Adjust height as needed
+    borderRadius: 8,
+    marginVertical: 15, // Add vertical spacing
   },
 });
 

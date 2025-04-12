@@ -9,6 +9,7 @@
     "web": "expo start --web"
   },
   "dependencies": {
+    "@expo-google-fonts/lobster": "^0.3.0",
     "@react-native-async-storage/async-storage": "1.23.1",
     "@react-native-community/datetimepicker": "8.2.0",
     "@react-navigation/bottom-tabs": "^6.5.12",
@@ -18,7 +19,9 @@
     "base64-arraybuffer": "^1.0.2",
     "date-fns": "^4.1.0",
     "expo": "~52.0.42",
+    "expo-constants": "~17.0.8",
     "expo-dev-client": "~5.0.18",
+    "expo-font": "~13.0.4",
     "expo-image-picker": "~16.0.6",
     "expo-status-bar": "~2.0.1",
     "expo-system-ui": "~4.0.9",
@@ -37,6 +40,7 @@
     "react-native-screens": "~4.4.0",
     "react-native-url-polyfill": "^2.0.0",
     "react-native-vector-icons": "^10.0.3",
+    "rrule": "^2.8.1",
     "uuid": "^11.1.0"
   },
   "devDependencies": {
@@ -49,7 +53,10 @@
   "expo": {
     "doctor": {
       "reactNativeDirectoryCheck": {
-        "exclude": ["react-native-maps", "react-native-keyboard-aware-scroll-view"],
+        "exclude": [
+          "react-native-maps",
+          "react-native-keyboard-aware-scroll-view"
+        ],
         "listUnknownPackages": false
       }
     }

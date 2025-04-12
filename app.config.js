@@ -49,5 +49,8 @@ module.exports = {
       projectId: "3adb5b7e-7622-44f3-9375-5f23371e77b7"
     }
   },
-  owner: "pkienast"
+  owner: "pkienast",
+  plugins: [
+    "expo-font"
+  ]
 }; 

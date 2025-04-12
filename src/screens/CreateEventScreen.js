@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,19 +11,24 @@ import {
   KeyboardAvoidingView,
   Platform,
   SafeAreaView,
-  Dimensions
+  Dimensions,
+  Image
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker'; // For date/time selection
+import * as ImagePicker from 'expo-image-picker'; // Import ImagePicker
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
+import 'react-native-get-random-values'; // Import for uuid
+import { v4 as uuidv4 } from 'uuid'; // Import uuid
+import { decode } from 'base64-arraybuffer'; // Import decode
 
 const { height } = Dimensions.get('window');
 const androidPaddingTop = height * 0.03;
 
 // Define event categories (similar to CalendarScreen filters, excluding 'Alle')
-const eventCategories = ['Sport', 'Vereine', 'Gemeindeamt', 'Kultur'];
+// const eventCategories = ['Sport', 'Vereine', 'Gemeindeamt', 'Kultur']; // Removed hardcoded
 
 const CreateEventScreen = ({ navigation }) => {
   const { user } = useAuth();
@@ -39,6 +44,81 @@ const CreateEventScreen = ({ navigation }) => {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
+  const [availableCategories, setAvailableCategories] = useState([]); // State for dynamic categories
+  const [loadingCategories, setLoadingCategories] = useState(true);
+  const [imageAsset, setImageAsset] = useState(null); // State for selected image asset
+  const [isUploading, setIsUploading] = useState(false); // State for upload progress
+
+  // Fetch categories on mount
+  useEffect(() => {
+    fetchEventCategories();
+  }, []);
+
+  const fetchEventCategories = async () => {
+    setLoadingCategories(true);
+    try {
+      const { data, error } = await supabase
+        .from('event_categories')
+        .select('name')
+        .order('display_order', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching event categories:', error);
+        Alert.alert('Fehler', 'Event-Kategorien konnten nicht geladen werden.');
+        setAvailableCategories([]);
+      } else {
+        setAvailableCategories(data?.map(cat => cat.name) || []);
+      }
+    } catch (err) {
+        console.error('Unexpected error fetching categories:', err);
+        Alert.alert('Fehler', 'Ein unerwarteter Fehler ist aufgetreten.');
+        setAvailableCategories([]);
+    } finally {
+        setLoadingCategories(false);
+    }
+  };
+
+  // Function to pick an image
+  const pickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Berechtigung benötigt', 'Sorry, wir benötigen die Berechtigung, um auf deine Fotos zugreifen zu können.');
+      return;
+    }
+    let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [16, 9], // Aspect ratio for event images
+      quality: 0.8,
+      base64: true,
+    });
+    if (!result.canceled) {
+      setImageAsset(result.assets[0]);
+    }
+  };
+
+  // Function to upload image and return URL
+  const uploadImage = async (asset) => {
+    if (!asset || !asset.base64) return null;
+    setIsUploading(true);
+    try {
+        const fileExt = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
+        const fileName = `${uuidv4()}.${fileExt}`;
+        const filePath = `${fileName}`; // Store in the root of event_images bucket
+        const { data, error: uploadError } = await supabase.storage
+            .from('event_images') // Use 'event_images' bucket
+            .upload(filePath, decode(asset.base64), { contentType: asset.mimeType ?? `image/${fileExt}` });
+        if (uploadError) throw uploadError;
+        const { data: urlData } = supabase.storage.from('event_images').getPublicUrl(filePath);
+        return urlData?.publicUrl;
+    } catch (error) {
+        console.error('Error uploading image:', error);
+        Alert.alert('Upload Fehler', 'Das Bild konnte nicht hochgeladen werden.');
+        return null;
+    } finally {
+        setIsUploading(false);
+    }
+  };
 
   // Validate form before submission
   const validateForm = () => {
@@ -70,14 +150,25 @@ const CreateEventScreen = ({ navigation }) => {
 
     if (!validateForm()) return;
 
+    setIsPublishing(true); // Combined state for upload + publish
+    let finalImageUrl = null;
+
     try {
-      setIsPublishing(true);
+      // Upload image if one is selected
+      if (imageAsset) {
+        finalImageUrl = await uploadImage(imageAsset);
+        // Stop if upload failed but an image was selected
+        if (!finalImageUrl) {
+           setIsPublishing(false);
+           return;
+        }
+      }
 
       // Format date and time correctly for Supabase
       const formattedDate = date.toISOString().split('T')[0]; // YYYY-MM-DD
       const formattedTime = time.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', hour12: false }); // HH:MM
 
-      // Insert new event
+      // Insert new event with image_url
       const { data, error } = await supabase
         .from('events')
         .insert({
@@ -87,9 +178,10 @@ const CreateEventScreen = ({ navigation }) => {
           time: `Um ${formattedTime}`, // Match existing format 'Um HH:MM'
           location: location,
           category: category,
-          organizer_id: user.id, // Assign the current user as the organizer
-          organization_id: activeOrganizationId, // Add organization ID
-          is_published: true // Publish immediately
+          image_url: finalImageUrl, // Add image_url
+          organizer_id: user.id,
+          organization_id: activeOrganizationId,
+          is_published: true
         })
         .select()
         .single();
@@ -97,6 +189,7 @@ const CreateEventScreen = ({ navigation }) => {
       if (error) {
         console.error('Error publishing event:', error);
         Alert.alert('Fehler', 'Event konnte nicht veröffentlicht werden.');
+        setIsPublishing(false); // Reset state on error
         return;
       }
 
@@ -119,6 +212,7 @@ const CreateEventScreen = ({ navigation }) => {
       Alert.alert('Fehler', 'Ein unerwarteter Fehler ist aufgetreten.');
     } finally {
       setIsPublishing(false);
+      setIsUploading(false); // Ensure upload state is also reset
     }
   };
 
@@ -144,25 +238,31 @@ const CreateEventScreen = ({ navigation }) => {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.typeButtonsContainer}
       >
-        {eventCategories.map(cat => (
-          <TouchableOpacity
-            key={cat}
-            style={[
-              styles.typeButton,
-              category === cat && styles.selectedTypeButton
-            ]}
-            onPress={() => setCategory(cat)}
-          >
-            <Text
+        {loadingCategories ? (
+          <ActivityIndicator size="small" color="#4285F4" />
+        ) : availableCategories.length > 0 ? (
+          availableCategories.map(cat => (
+            <TouchableOpacity
+              key={cat}
               style={[
-                styles.typeButtonText,
-                category === cat && styles.selectedTypeButtonText
+                styles.typeButton,
+                category === cat && styles.selectedTypeButton
               ]}
+              onPress={() => setCategory(cat)}
             >
-              {cat}
-            </Text>
-          </TouchableOpacity>
-        ))}
+              <Text
+                style={[
+                  styles.typeButtonText,
+                  category === cat && styles.selectedTypeButtonText
+                ]}
+              >
+                {cat}
+              </Text>
+            </TouchableOpacity>
+          ))
+        ) : (
+          <Text style={styles.noCategoriesText}>Keine Kategorien verfügbar.</Text>
+        )}
       </ScrollView>
     );
   };
@@ -178,7 +278,7 @@ const CreateEventScreen = ({ navigation }) => {
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Neues Event erstellen</Text>
         <View style={styles.headerRight}>
-          {isPublishing ? (
+          {(isPublishing || isUploading) ? ( // Show loader if publishing or uploading
             <ActivityIndicator size="small" color="#4285F4" />
           ) : (
             <TouchableOpacity
@@ -267,6 +367,24 @@ const CreateEventScreen = ({ navigation }) => {
               onChange={onTimeChange}
             />
           )}
+
+          {/* Image Upload Section */}
+          <Text style={styles.inputLabel}>Bild (Optional)</Text>
+          {imageAsset && (
+            <View style={styles.imagePreviewContainer}>
+              <Image source={{ uri: imageAsset.uri }} style={styles.imagePreview} />
+              <TouchableOpacity onPress={() => setImageAsset(null)} style={styles.removeImageButton}>
+                <Ionicons name="close-circle" size={24} color="#ff3b30" />
+              </TouchableOpacity>
+            </View>
+          )}
+          <TouchableOpacity style={styles.imagePickerButton} onPress={pickImage} disabled={isUploading}>
+            <Ionicons name="camera" size={20} color="#4285F4" style={{ marginRight: 10 }} />
+            <Text style={styles.imagePickerButtonText}>
+              {imageAsset ? 'Bild ändern' : 'Bild auswählen'}
+            </Text>
+          </TouchableOpacity>
+          {isUploading && <ActivityIndicator size="small" color="#4285F4" style={{ marginTop: 10 }} />}
 
         </ScrollView>
       </KeyboardAvoidingView>
@@ -379,6 +497,45 @@ const styles = StyleSheet.create({
   datePickerText: {
     fontSize: 16,
     color: '#333',
+  },
+  imagePickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#eef4ff',
+    padding: 12,
+    borderRadius: 8,
+    justifyContent: 'center',
+    marginTop: 10,
+    marginBottom: 20, // Add margin below
+  },
+  imagePickerButtonText: {
+    color: '#4285F4',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  imagePreviewContainer: {
+      position: 'relative',
+      marginBottom: 10,
+      alignItems: 'center',
+  },
+  imagePreview: {
+    width: '100%',
+    height: 200, // Adjust height as needed
+    borderRadius: 8,
+    marginTop: 10,
+  },
+  removeImageButton: {
+      position: 'absolute',
+      top: 5,
+      right: 5,
+      backgroundColor: 'rgba(255, 255, 255, 0.7)',
+      borderRadius: 12,
+      padding: 2,
+  },
+  noCategoriesText: {
+      fontStyle: 'italic',
+      color: '#6c757d',
+      paddingVertical: 10,
   },
 });
 

@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, SafeAreaView, Dimensions, Platform, ActivityIndicator, Alert } from 'react-native';
+import React, { useState, useEffect, useMemo } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, SafeAreaView, Dimensions, Platform, ActivityIndicator, Alert, Image } from 'react-native';
 import { Calendar, LocaleConfig } from 'react-native-calendars';
 import ScreenHeader from '../components/common/ScreenHeader';
 import { Ionicons } from '@expo/vector-icons';
+import { RRule, RRuleSet, rrulestr } from 'rrule';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
@@ -36,12 +37,28 @@ LocaleConfig.locales['de'] = {
 };
 LocaleConfig.defaultLocale = 'de';
 
+// Helper function to format German date (defined outside component or at the top)
+const format_date_german = (date_value) => {
+    if (!date_value) return '';
+    // Ensure date_value is a Date object
+    const dateObj = date_value instanceof Date ? date_value : new Date(date_value);
+    // Check if dateObj is valid
+    if (isNaN(dateObj.getTime())) {
+        return 'Ungültiges Datum';
+    }
+    // Use UTC methods to format date parts to avoid timezone shifts
+    return `${String(dateObj.getUTCDate()).padStart(2, '0')}.${String(dateObj.getUTCMonth() + 1).padStart(2, '0')}.`;
+};
+
 const CalendarScreen = ({ navigation }) => {
-  const calendarFilters = ['Alle', 'Sport', 'Vereine', 'Gemeindeamt', 'Kultur'];
+  const [calendarFilters, setCalendarFilters] = useState(['Alle']);
+  const [loadingFilters, setLoadingFilters] = useState(true);
   const [selectedDates, setSelectedDates] = useState({});
   const [dateRange, setDateRange] = useState({ startDate: '', endDate: '' });
   const [visibleEvents, setVisibleEvents] = useState([]);
   const [events, setEvents] = useState([]);
+  const [allEventsData, setAllEventsData] = useState([]);
+  const [currentMonthString, setCurrentMonthString] = useState(new Date().toISOString().slice(0, 7));
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeFilter, setActiveFilter] = useState('Alle');
@@ -51,9 +68,9 @@ const CalendarScreen = ({ navigation }) => {
   // Use organization context for active status
   const { isOrganizationActive, activeOrganizationId } = useOrganization();
   
-  // Fetch events from Supabase
+  // Fetch events and categories from Supabase
   useEffect(() => {
-    fetchEvents();
+    fetchEventData();
   }, []);
 
   // Refresh events when screen comes into focus
@@ -62,19 +79,36 @@ const CalendarScreen = ({ navigation }) => {
       // Add a small delay to ensure component is mounted before fetching
       setTimeout(() => {
         console.log('CalendarScreen focused - refreshing events');
-        fetchEvents();
+        fetchEventData();
       }, 100);
     });
     
     return unsubscribe;
   }, [navigation]);
 
-  const fetchEvents = async () => {
+  const fetchEventData = async () => {
+    setIsLoading(true);
+    setLoadingFilters(true);
+    setError(null);
+
     try {
-      setIsLoading(true);
-      setError(null);
-      
-      // Fetch events from the event_listings view
+      // Fetch event categories first
+      const { data: categoriesData, error: categoriesError } = await supabase
+        .from('event_categories')
+        .select('name')
+        .order('display_order', { ascending: true });
+
+      if (categoriesError) {
+        console.error('Error fetching event categories:', categoriesError);
+        Alert.alert('Fehler', 'Fehler beim Laden der Event-Kategorien.');
+        setCalendarFilters(['Alle']); // Fallback to default
+      } else {
+        const fetchedFilters = ['Alle', ...(categoriesData?.map(cat => cat.name) || [])];
+        setCalendarFilters(fetchedFilters);
+      }
+      setLoadingFilters(false);
+
+      // Fetch events including recurrence fields
       const { data, error } = await supabase
         .from('event_listings')
         .select('*');
@@ -82,286 +116,316 @@ const CalendarScreen = ({ navigation }) => {
       if (error) {
         console.error('Error fetching events:', error);
         setError('Could not load events. Please try again later.');
+        setAllEventsData([]);
       } else {
-        // Process and format the event data
-        const formattedEvents = data.map(event => ({
-          id: event.id,
-          title: event.title,
-          time: event.time,
-          date: event.date,
-          location: event.location,
-          category: event.category,
-          description: event.description,
-          attendees: event.attendees || {}, // Attendee data from the view
-          formatted_date: event.formatted_date,
-          organizer_name: event.organizer_name, // Name from the view
-          is_organization_event: event.is_organization_event // Flag from the view
-        }));
-        
-        setEvents(formattedEvents);
-        
-        // Create initial marked dates for events
-        const initialMarkedDates = {};
-        formattedEvents.forEach(event => {
-          initialMarkedDates[event.date] = {
-            marked: true,
-            dotColor: '#4285F4'
-          };
-        });
-        setSelectedDates(initialMarkedDates);
-        
-        // Calculate the start and end of the current week (Monday - Sunday)
+        setAllEventsData(data || []);
+
+        // Set initial date range (e.g., current week) - No change needed here
+        // The initial display will be handled by useMemo based on currentMonthString
         const today = new Date();
-        const currentDayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
-        const diffToMonday = currentDayOfWeek === 0 ? -6 : 1 - currentDayOfWeek; // Adjust for Sunday
+        const currentDayOfWeek = today.getDay();
+        const diffToMonday = currentDayOfWeek === 0 ? -6 : 1 - currentDayOfWeek;
         const monday = new Date(today);
         monday.setDate(today.getDate() + diffToMonday);
-        
         const sunday = new Date(monday);
         sunday.setDate(monday.getDate() + 6);
-
         const mondayString = monday.toISOString().split('T')[0];
         const sundayString = sunday.toISOString().split('T')[0];
-
-        // Set the initial date range to the current week
         setDateRange({ startDate: mondayString, endDate: sundayString });
-        
-        // Mark the current week in the calendar
-        createDateRange(mondayString, sundayString);
+        // Initial marking will be handled by the useMemo below
       }
     } catch (err) {
       console.error('Unexpected error fetching events:', err);
       setError('An unexpected error occurred.');
+      setAllEventsData([]);
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Update visible events whenever the date range or filter changes
+  // Helper function to get dates for a specific month
+  const getMonthBounds = (monthString) => {
+    const year = parseInt(monthString.substring(0, 4), 10);
+    const month = parseInt(monthString.substring(5, 7), 10) - 1; // 0-indexed month
+    // Use UTC to avoid timezone issues when comparing dates
+    const startOfMonth = new Date(Date.UTC(year, month, 1));
+    // Get the end of the last day of the month in UTC
+    const endOfMonth = new Date(Date.UTC(year, month + 1, 0, 23, 59, 59, 999));
+    return { startOfMonth, endOfMonth };
+  };
+
+  // Expand recurring events and generate marked dates using useMemo
+  const processedEvents = useMemo(() => {
+    const { startOfMonth, endOfMonth } = getMonthBounds(currentMonthString);
+    const instances = [];
+    const marked = {};
+
+    allEventsData.forEach(event => {
+      // Ensure event.date is valid before proceeding
+      if (!event.date || isNaN(new Date(event.date).getTime())) {
+        console.warn(`Skipping event ID ${event.id} due to invalid date: ${event.date}`);
+        return; // Skip this event
+      }
+
+      if (event.recurrence_rule) {
+        try {
+          // Ensure dtstart uses UTC for consistency with rule generation
+          const dtstart = new Date(Date.parse(event.date + 'T00:00:00Z'));
+          const options = { dtstart };
+
+          const rule = rrulestr(event.recurrence_rule, options);
+
+          // Ensure recurrence_end_date is treated as the end of that day UTC
+          const recurrenceEndDate = event.recurrence_end_date
+             ? new Date(Date.parse(event.recurrence_end_date + 'T23:59:59.999Z'))
+             : null;
+
+          // Generate instances within the current calendar view bounds (month)
+          // Make sure the 'between' dates are also UTC
+          const dates = rule.between(startOfMonth, endOfMonth, true);
+
+          dates.forEach(instanceDate => {
+            // instanceDate from rrule is already a Date object (should be UTC if dtstart was UTC)
+            if (!recurrenceEndDate || instanceDate <= recurrenceEndDate) {
+              // Format to YYYY-MM-DD string for keys and state
+              const instanceDateString = instanceDate.toISOString().split('T')[0];
+              instances.push({
+                ...event,
+                original_event_id: event.id,
+                id: `${event.id}-${instanceDateString}`,
+                date: instanceDateString, // This is the date of THIS instance
+                // Use the instanceDate (Date object) directly for formatting
+                formatted_date: format_date_german(instanceDate)
+              });
+              marked[instanceDateString] = {
+                ...(marked[instanceDateString] || {}),
+                marked: true,
+                dotColor: '#4285F4'
+              };
+            }
+          });
+        } catch (e) {
+          console.error(`Error parsing RRULE for event ${event.id}: ${event.recurrence_rule}`, e);
+          // Fallback: include original event if it falls within the month
+           const eventDate = new Date(Date.parse(event.date + 'T00:00:00Z'));
+           if (eventDate >= startOfMonth && eventDate <= endOfMonth) {
+               instances.push({ ...event, formatted_date: format_date_german(eventDate) }); // Add formatted date here too
+               marked[event.date] = { ... (marked[event.date] || {}), marked: true, dotColor: '#4285F4' };
+           }
+        }
+      } else {
+        // Handle non-recurring events within the current view bounds
+        const eventDate = new Date(Date.parse(event.date + 'T00:00:00Z'));
+        if (eventDate >= startOfMonth && eventDate <= endOfMonth) {
+            instances.push({ ...event, formatted_date: format_date_german(eventDate) }); // Add formatted date
+            marked[event.date] = {
+               ...(marked[event.date] || {}),
+               marked: true,
+               dotColor: '#4285F4'
+            };
+        }
+      }
+    });
+
+    // Sort instances by date (and maybe time if available consistently)
+    instances.sort((a, b) => {
+        const dateA = new Date(a.date);
+        const dateB = new Date(b.date);
+        if (dateA < dateB) return -1;
+        if (dateA > dateB) return 1;
+        // Optional: Add secondary sort by time if needed and available
+        return 0;
+    });
+
+
+    return { instances, marked };
+  }, [allEventsData, currentMonthString]); // Recalculate when data or month changes
+
+  // Update visible events whenever the date range, filter, or processed events change
   useEffect(() => {
     updateVisibleEvents();
-  }, [dateRange, activeFilter, events]);
+  }, [dateRange, activeFilter, processedEvents.instances]); // Depend on processed instances
+
+  // Update marked dates whenever processed events change or selection occurs
+  useEffect(() => {
+     // Start with the base event markings from recurring/single events for the month
+    let currentMarkedDates = { ...processedEvents.marked };
+
+    // Apply period marking based on dateRange
+    if (dateRange.startDate) {
+        const start = dateRange.startDate;
+        const end = dateRange.endDate || start; // Use start date if end date is not set
+
+        // Ensure start and end dates are valid before proceeding
+        if (start && !isNaN(new Date(start)) && end && !isNaN(new Date(end))) {
+            // Mark start date
+            currentMarkedDates[start] = {
+                ...(currentMarkedDates[start] || {}),
+                selected: true,
+                startingDay: true,
+                endingDay: start === end,
+                color: '#4285F4',
+                textColor: 'white',
+                dotColor: currentMarkedDates[start]?.marked ? 'white' : undefined
+            };
+
+            // Mark dates in between (only if start != end)
+            if (start !== end) {
+                let currentDate = new Date(Date.parse(start + 'T00:00:00Z'));
+                const finalEndDate = new Date(Date.parse(end + 'T00:00:00Z'));
+
+                currentDate.setUTCDate(currentDate.getUTCDate() + 1); // Move to the next day
+
+                while (currentDate < finalEndDate) {
+                    const dateStr = currentDate.toISOString().split('T')[0];
+                    currentMarkedDates[dateStr] = {
+                        ...(currentMarkedDates[dateStr] || {}),
+                        selected: true,
+                        color: '#80b3ff',
+                        textColor: 'white',
+                        dotColor: currentMarkedDates[dateStr]?.marked ? 'white' : undefined
+                    };
+                     currentDate.setUTCDate(currentDate.getUTCDate() + 1);
+                }
+
+                // Mark end date
+                currentMarkedDates[end] = {
+                    ...(currentMarkedDates[end] || {}),
+                    selected: true,
+                    endingDay: true,
+                    color: '#4285F4',
+                    textColor: 'white',
+                    dotColor: currentMarkedDates[end]?.marked ? 'white' : undefined
+                };
+            }
+        } else {
+           console.warn("Invalid date range for marking:", dateRange);
+        }
+    }
+
+    setSelectedDates(currentMarkedDates);
+
+  }, [processedEvents.marked, dateRange]); // Re-run when base marks or range changes
 
   const updateVisibleEvents = () => {
-    // First filter by date range
+    // Filter the processed instances by date range
     let filteredEvents = getEventsInRange();
-    
+
     // Then filter by category if needed
     if (activeFilter !== 'Alle') {
       filteredEvents = filteredEvents.filter(event => event.category === activeFilter);
     }
-    
+
     setVisibleEvents(filteredEvents);
   };
 
-  const onDayPress = (day) => {
-    console.log('Selected day:', day.dateString);
-    
-    // If we already have both start and end date, reset and set new start date
-    if (dateRange.startDate && dateRange.endDate) {
-      setDateRange({ startDate: day.dateString, endDate: '' });
-      
-      // Set marked dates with just the start date highlighted
-      const newSelectedDates = {};
-      
-      // Keep the event markers
-      events.forEach(event => {
-        newSelectedDates[event.date] = {
-          marked: true,
-          dotColor: '#4285F4'
-        };
-      });
-      
-      // Add selection for the clicked date
-      newSelectedDates[day.dateString] = {
-        ...(newSelectedDates[day.dateString] || {}),
-        selected: true,
-        startingDay: true,
-        color: '#4285F4',
-        textColor: 'white',
-        dotColor: newSelectedDates[day.dateString]?.marked ? 'white' : undefined
-      };
-      
-      setSelectedDates(newSelectedDates);
-      return;
-    }
-    
-    // If we don't have a start date yet, set it
-    if (!dateRange.startDate) {
-      setDateRange({ startDate: day.dateString, endDate: '' });
-      
-      // Set marked dates with just the start date highlighted
-      const newSelectedDates = {};
-      
-      // Keep the event markers
-      events.forEach(event => {
-        newSelectedDates[event.date] = {
-          marked: true,
-          dotColor: '#4285F4'
-        };
-      });
-      
-      // Add selection for the clicked date
-      newSelectedDates[day.dateString] = {
-        ...(newSelectedDates[day.dateString] || {}),
-        selected: true,
-        startingDay: true,
-        color: '#4285F4',
-        textColor: 'white',
-        dotColor: newSelectedDates[day.dateString]?.marked ? 'white' : undefined
-      };
-      
-      setSelectedDates(newSelectedDates);
-      return;
-    }
-    
-    // If we have a start date but no end date
-    if (dateRange.startDate && !dateRange.endDate) {
-      // Ensure end date is after start date
-      const start = new Date(dateRange.startDate);
-      const end = new Date(day.dateString);
-      
-      // If trying to select a date before the start date, swap them
-      if (end < start) {
-        const newEndDate = dateRange.startDate;
-        const newStartDate = day.dateString;
-        setDateRange({ startDate: newStartDate, endDate: newEndDate });
-        
-        // Create a range
-        createDateRange(newStartDate, newEndDate);
-      } else {
-        setDateRange({ ...dateRange, endDate: day.dateString });
-        
-        // Create a range
-        createDateRange(dateRange.startDate, day.dateString);
-      }
-    }
-  };
-  
-  // Helper function to create a range of dates
-  const createDateRange = (start, end) => {
-    const range = {};
-    
-    // First, mark all event dates
-    events.forEach(event => {
-      range[event.date] = {
-        marked: true,
-        dotColor: '#4285F4'
-      };
-    });
-    
-    // Mark start date
-    range[start] = {
-      ...(range[start] || {}),
-      selected: true,
-      startingDay: true,
-      endingDay: start === end,
-      color: '#4285F4',
-      textColor: 'white',
-      dotColor: range[start]?.marked ? 'white' : undefined
-    };
-    
-    // Only add dates in between if there's actually a range
-    if (start !== end) {
-      // Mark all dates in between
-      let date = new Date(start);
-      date.setDate(date.getDate() + 1);
-      
-      const endDate = new Date(end);
-      while (date < endDate) {
-        const dateStr = date.toISOString().split('T')[0];
-        range[dateStr] = {
-          ...(range[dateStr] || {}),
-          selected: true,
-          color: '#80b3ff', // lighter blue
-          textColor: 'white',
-          dotColor: range[dateStr]?.marked ? 'white' : undefined
-        };
-        date.setDate(date.getDate() + 1);
-      }
-      
-      // Mark end date
-      range[end] = {
-        ...(range[end] || {}),
-        selected: true,
-        endingDay: true,
-        color: '#4285F4',
-        textColor: 'white',
-        dotColor: range[end]?.marked ? 'white' : undefined
-      };
-    }
-    
-    setSelectedDates(range);
-  };
+  // onDayPress remains largely the same, but relies on the useEffect above for marking
+   const onDayPress = (day) => {
+       console.log('Selected day:', day.dateString);
 
-  // Get events in the selected date range
+       // Ensure day.dateString is valid before setting state
+       if (!day.dateString || isNaN(new Date(day.dateString).getTime())) {
+           console.warn("Invalid date pressed:", day.dateString);
+           return;
+       }
+
+
+       if (dateRange.startDate && dateRange.endDate) {
+           // Reset range, select new start date
+           setDateRange({ startDate: day.dateString, endDate: '' });
+       } else if (!dateRange.startDate) {
+           // Set start date
+           setDateRange({ startDate: day.dateString, endDate: '' });
+       } else {
+           // Set end date (or swap if end < start)
+           const start = new Date(dateRange.startDate);
+           const end = new Date(day.dateString);
+           if (end < start) {
+               setDateRange({ startDate: day.dateString, endDate: dateRange.startDate });
+           } else {
+               setDateRange({ ...dateRange, endDate: day.dateString });
+           }
+       }
+   };
+
+  // Helper to get events (now instances) in the selected range
   const getEventsInRange = () => {
     if (!dateRange.startDate) return [];
-    
-    if (!dateRange.endDate) {
-      // If only one date is selected
-      return events.filter(event => event.date === dateRange.startDate);
+
+    const start = dateRange.startDate;
+    const end = dateRange.endDate || start; // Use start if end is not set
+
+    // Ensure dates are valid before filtering
+    if (!start || isNaN(new Date(start)) || !end || isNaN(new Date(end))) {
+        console.warn("Invalid date range for filtering:", {start, end});
+        return [];
     }
-    
-    // If a date range is selected
-    return events.filter(event => {
-      const eventDate = event.date;
-      return eventDate >= dateRange.startDate && eventDate <= dateRange.endDate;
+
+    return processedEvents.instances.filter(eventInstance => {
+      const eventDate = eventInstance.date;
+      // Ensure instance date is valid
+      if (!eventDate || isNaN(new Date(eventDate))) return false;
+      return eventDate >= start && eventDate <= end;
     });
   };
 
+  // formatDateRange remains the same
   const formatDateRange = () => {
     if (!dateRange.startDate) return '';
-    
+
     const startDate = new Date(dateRange.startDate);
     const formattedStart = `${String(startDate.getDate()).padStart(2, '0')}.${String(startDate.getMonth() + 1).padStart(2, '0')}`;
-    
+
     if (!dateRange.endDate) return `Alle Events am ${formattedStart}`;
-    
+
     const endDate = new Date(dateRange.endDate);
     const formattedEnd = `${String(endDate.getDate()).padStart(2, '0')}.${String(endDate.getMonth() + 1).padStart(2, '0')}`;
-    
+
     return `Alle Events vom ${formattedStart} bis ${formattedEnd}`;
   };
 
+  // renderEvent needs to use the instance date and potentially original ID for navigation
   const renderEvent = ({ item }) => {
-    const eventDate = new Date(item.date);
-    const formattedDate = `${String(eventDate.getDate()).padStart(2, '0')}.${String(eventDate.getMonth() + 1).padStart(2, '0')}.`;
-    
-    // Get attendee count if available
+    // item.formatted_date is now pre-calculated in processedEvents useMemo
+    const formattedDate = item.formatted_date || format_date_german(item.date);
+
+    // Attendee count still comes from the main event definition
     let attendeeCount = 0;
     if (item.attendees && item.attendees.attending) {
-      attendeeCount = parseInt(item.attendees.attending) || 0;
+        attendeeCount = parseInt(item.attendees.attending) || 0;
     }
-    
+
     return (
-      <TouchableOpacity 
+      <TouchableOpacity
         style={styles.eventCard}
-        onPress={() => navigation.navigate('EventDetail', { eventId: item.id })}
+        // Navigate using the ORIGINAL event ID if it exists, otherwise the item's own ID
+        onPress={() => navigation.navigate('EventDetail', { eventId: item.original_event_id || item.id })}
       >
         <View style={styles.eventContainer}>
-          <View style={styles.eventImagePlaceholder}>
-            {/* This is a placeholder for an event image/icon */}
-          </View>
+          {item.image_url ? (
+             <Image source={{ uri: item.image_url }} style={styles.eventImage} />
+          ) : (
+            <View style={styles.eventImagePlaceholder} />
+          )}
           <View style={styles.eventContent}>
             <View style={styles.eventHeader}>
               <Text style={styles.eventTitle}>{item.title}</Text>
               <Ionicons name="chevron-forward" size={24} color="#333" />
             </View>
             <Text style={styles.eventDateTime}>Am {formattedDate} {item.time}</Text>
-            <View style={styles.eventFooter}>
-              <Text style={styles.eventLocation}>Uhr am {item.location}</Text>
-              <Text 
-                style={item.is_organization_event ? styles.organizationOrganizer : styles.eventOrganizer}
-              >
-                {item.organizer_name} 
-              </Text>
-              {attendeeCount > 0 && (
-                <View style={styles.attendeesInfo}>
-                  <Ionicons name="people" size={14} color="#666" />
-                  <Text style={styles.attendeesCount}>{attendeeCount}</Text>
-                </View>
-              )}
+             <View style={styles.eventFooter}>
+               <Text style={styles.eventLocation}>Uhr am {item.location}</Text>
+               <Text
+                  style={item.is_organization_event ? styles.organizationOrganizer : styles.eventOrganizer}
+               >
+                  {item.organizer_name}
+               </Text>
+               {attendeeCount > 0 && (
+                  <View style={styles.attendeesInfo}>
+                     <Ionicons name="people" size={14} color="#666" />
+                     <Text style={styles.attendeesCount}>{attendeeCount}</Text>
+                  </View>
+               )}
             </View>
           </View>
         </View>
@@ -395,6 +459,22 @@ const CalendarScreen = ({ navigation }) => {
     }
   };
 
+  // Update month string when calendar month changes
+  const onMonthChange = (month) => {
+    console.log('Month changed:', month.dateString);
+    setCurrentMonthString(month.dateString.slice(0, 7)); // Update YYYY-MM
+  };
+
+  // Show loading if filters are still loading
+  if (loadingFilters) {
+     return (
+      <SafeAreaView style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#4285F4" />
+        <Text style={styles.loadingText}>Lade Filter...</Text>
+      </SafeAreaView>
+    );
+  }
+
   if (isLoading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
@@ -415,7 +495,9 @@ const CalendarScreen = ({ navigation }) => {
             onDayPress={onDayPress}
             markedDates={selectedDates}
             enableSwipeMonths={true}
-            current={dateRange.startDate || new Date().toISOString().split('T')[0]}
+            current={currentMonthString + '-01'}
+            onMonthChange={onMonthChange}
+            key={currentMonthString}
             hideExtraDays={false}
             style={styles.calendar}
             height={calendarHeight}
@@ -617,6 +699,12 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     backgroundColor: '#eee',
+    marginRight: 15,
+  },
+  eventImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 8,
     marginRight: 15,
   },
   eventContent: {

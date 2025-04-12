@@ -136,17 +136,23 @@ CREATE TABLE public.events (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   title TEXT NOT NULL,
   description TEXT,
-  date DATE,
+  date DATE, -- This is the START date of the event or first occurrence
   time TEXT,
   end_time TEXT,
   location TEXT,
   category TEXT,
   image_url TEXT,
-  organizer_id UUID REFERENCES public.profiles(id), -- Kept original organizer concept for non-org events?
-  organization_id UUID REFERENCES public.organizations(id) ON DELETE SET NULL, -- Added Org Link
+  organizer_id UUID REFERENCES public.profiles(id),
+  organization_id UUID REFERENCES public.organizations(id) ON DELETE SET NULL,
   is_published BOOLEAN DEFAULT true,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  recurrence_rule TEXT NULL, -- Stores the iCalendar RRULE string (e.g., 'FREQ=WEEKLY;BYDAY=MO;INTERVAL=1')
+  recurrence_end_date DATE NULL -- Optional end date for the recurrence
 );
+
+-- Add comments for new columns
+COMMENT ON COLUMN public.events.recurrence_rule IS 'iCalendar RRULE string defining the recurrence pattern.';
+COMMENT ON COLUMN public.events.recurrence_end_date IS 'The date when the recurrence stops.';
 
 CREATE TABLE public.event_comments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -369,17 +375,35 @@ CREATE OR REPLACE VIEW public.message_comments_with_users AS
 -- Event Listings
 CREATE OR REPLACE VIEW public.event_listings AS
   SELECT
-    e.id, e.title, e.description, e.date, format_date_german(e.date) as formatted_date,
-    e.time, e.end_time, e.location, e.category, e.image_url,
-    e.organizer_id, e.organization_id,
-    COALESCE(org.name, p.display_name, 'Unbekannt') as organizer_name, -- Org name or profile name
+    e.id,
+    e.title,
+    e.description,
+    e.date, -- This remains the START date of the event or first occurrence
+    format_date_german(e.date) as formatted_date,
+    e.time,
+    e.end_time,
+    e.location,
+    e.category,
+    e.image_url,
+    e.organizer_id,
+    e.organization_id,
+    e.recurrence_rule,       -- Added recurrence_rule
+    e.recurrence_end_date,   -- Added recurrence_end_date
+    COALESCE(org.name, p.display_name, 'Redaktion') as organizer_name,
     (e.organization_id IS NOT NULL) as is_organization_event,
     (SELECT get_event_attendees(e.id)) as attendees
   FROM public.events e
   LEFT JOIN public.profiles p ON e.organizer_id = p.id
   LEFT JOIN public.organizations org ON e.organization_id = org.id
-  WHERE e.is_published = true
-  ORDER BY e.date ASC, e.time ASC;
+  WHERE e.is_published = true;
+  -- Removed ORDER BY here as filtering/sorting instances needs client-side logic
+
+-- Grant SELECT permission on the view to relevant roles
+GRANT SELECT ON public.event_listings TO anon, authenticated;
+
+-- Note: RLS policies for SELECT on 'events' might need adjustment if you
+-- want fine-grained control over who sees recurrence rules, but the current
+-- 'Anyone can view published events' policy should suffice for reading.
 
 -- Event Comments
 CREATE OR REPLACE VIEW public.event_comments_with_users AS
@@ -604,6 +628,25 @@ CREATE POLICY "Allow org members/admins to create broadcast groups for org" ON p
     -- Consider: public.is_org_member_admin(auth.uid(), organization_id)
 );
 
+-- Allow org admins to update broadcast groups (e.g., rename, change description/tags)
+DROP POLICY IF EXISTS "Allow org admins to update their broadcast groups" ON public.chat_groups;
+DROP POLICY IF EXISTS "Allow org members to update their broadcast groups" ON public.chat_groups; -- Drop new name if exists
+CREATE POLICY "Allow org members to update their broadcast groups" ON public.chat_groups FOR UPDATE TO authenticated USING (
+    type = 'broadcast' AND organization_id IS NOT NULL AND
+    public.is_org_member(auth.uid(), organization_id) -- Any member can update
+) WITH CHECK (
+    type = 'broadcast' AND organization_id IS NOT NULL AND
+    public.is_org_member(auth.uid(), organization_id)
+);
+
+-- Allow org admins to delete broadcast groups
+DROP POLICY IF EXISTS "Allow org admins to delete their broadcast groups" ON public.chat_groups;
+DROP POLICY IF EXISTS "Allow org members to delete their broadcast groups" ON public.chat_groups; -- Drop new name if exists
+CREATE POLICY "Allow org members to delete their broadcast groups" ON public.chat_groups FOR DELETE TO authenticated USING (
+    type = 'broadcast' AND organization_id IS NOT NULL AND
+    public.is_org_member(auth.uid(), organization_id) -- Any member can delete
+);
+
 -- Chat Messages
 ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow members to view messages in groups they can access" ON public.chat_messages;
@@ -796,236 +839,81 @@ GRANT SELECT ON public.map_config TO anon, authenticated;
 GRANT SELECT ON public.map_pois TO anon, authenticated;
 -- GRANT INSERT, UPDATE, DELETE ON public.map_pois TO authenticated; -- Grant if users can manage POIs
 
--- 9. Grant Permissions
--- Grant basic usage
-GRANT USAGE ON SCHEMA public TO anon, authenticated;
-GRANT USAGE ON SCHEMA auth TO anon, authenticated; -- Important for auth functions
-
--- Grant execute on new helper functions
-GRANT EXECUTE ON FUNCTION public.is_org_member(uuid, uuid) TO authenticated;
-GRANT EXECUTE ON FUNCTION public.is_org_member_admin(uuid, uuid) TO authenticated;
-
--- Grant table permissions (RLS enforces row access)
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.profiles TO authenticated;
-GRANT SELECT ON public.profiles TO anon; -- Allow anon read? Adjust if needed.
-
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.organizations TO authenticated;
-GRANT SELECT ON public.organizations TO anon; -- Grant SELECT to anonymous users
-
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.organization_members TO authenticated;
-
-GRANT SELECT ON public.articles TO anon, authenticated;
-GRANT INSERT, UPDATE, DELETE ON public.articles TO authenticated;
-GRANT SELECT ON public.article_comments TO anon, authenticated;
-GRANT INSERT, UPDATE, DELETE ON public.article_comments TO authenticated;
-GRANT SELECT ON public.article_reactions TO anon, authenticated;
-GRANT INSERT, DELETE ON public.article_reactions TO authenticated;
-
-GRANT SELECT ON public.chat_groups TO anon, authenticated; -- Added anon SELECT
-GRANT INSERT, UPDATE, DELETE ON public.chat_groups TO authenticated; -- Granting broadly, RLS controls access
-GRANT SELECT ON public.chat_messages TO anon, authenticated; -- Added anon SELECT
-GRANT INSERT, UPDATE, DELETE ON public.chat_messages TO authenticated;
-GRANT SELECT ON public.message_comments TO anon, authenticated; -- Added anon SELECT
-GRANT INSERT, UPDATE, DELETE ON public.message_comments TO authenticated;
-GRANT SELECT ON public.message_reactions TO anon, authenticated; -- Added anon SELECT
-GRANT INSERT, UPDATE, DELETE ON public.message_reactions TO authenticated; -- Note: Original had INSERT,UPDATE,DELETE here, corrected to match others
-
-GRANT SELECT ON public.events TO anon, authenticated;
-GRANT INSERT, UPDATE, DELETE ON public.events TO authenticated;
-GRANT SELECT ON public.event_comments TO anon, authenticated;
-GRANT INSERT, UPDATE, DELETE ON public.event_comments TO authenticated;
-GRANT SELECT ON public.event_reactions TO anon, authenticated;
-GRANT INSERT, DELETE ON public.event_reactions TO authenticated;
-GRANT SELECT ON public.event_attendees TO anon, authenticated;
-GRANT INSERT, UPDATE, DELETE ON public.event_attendees TO authenticated;
-
--- Grant permissions on Views
-GRANT SELECT ON public.article_reaction_counts TO anon, authenticated;
-GRANT SELECT ON public.message_reaction_counts TO anon, authenticated;
-GRANT SELECT ON public.event_reaction_counts TO anon, authenticated;
-GRANT SELECT ON public.event_attendee_counts TO anon, authenticated;
-GRANT SELECT ON public.article_listings TO anon, authenticated;
-GRANT SELECT ON public.article_comments_with_users TO anon, authenticated;
-GRANT SELECT ON public.chat_group_listings TO anon, authenticated; -- Added anon SELECT access
-GRANT SELECT ON public.chat_messages_with_users TO anon, authenticated;
-GRANT SELECT ON public.message_comments_with_users TO anon, authenticated;
-GRANT SELECT ON public.event_listings TO anon, authenticated;
-GRANT SELECT ON public.event_comments_with_users TO anon, authenticated;
-GRANT SELECT ON public.event_attendees_with_users TO anon, authenticated;
-
--- Grant permissions on Functions
-GRANT EXECUTE ON FUNCTION public.format_date_german(TIMESTAMP WITH TIME ZONE) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.format_date_german(DATE) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.format_time_german(TIMESTAMP WITH TIME ZONE) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.generate_unique_invite_code() TO authenticated;
-GRANT EXECUTE ON FUNCTION public.get_event_attendees(UUID) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.handle_new_user() TO postgres; -- Trigger needs elevated rights
-GRANT EXECUTE ON FUNCTION public.handle_new_organization() TO postgres; -- Trigger needs elevated rights
-
--- NEW FUNCTION: Get Article Reactions (Counts per emoji)
-CREATE OR REPLACE FUNCTION public.get_article_reactions(article_uuid UUID)
-RETURNS JSON AS $$
-DECLARE reaction_counts JSON;
-BEGIN
-  SELECT json_object_agg(emoji, count) INTO reaction_counts
-  FROM (
-    SELECT emoji, count(*) as count
-    FROM public.article_reactions
-    WHERE article_id = article_uuid
-    GROUP BY emoji
-  ) as grouped_reactions;
-
-  RETURN COALESCE(reaction_counts, '{}'::JSON); -- Return empty JSON object if no reactions
-END;
-$$ LANGUAGE plpgsql STABLE; -- SECURITY DEFINER might be needed if SELECT RLS on article_reactions is restrictive, but STABLE is generally preferred.
-
-COMMENT ON FUNCTION public.get_article_reactions(UUID) IS 'Retrieves the counts of each reaction emoji for a given article UUID.';
-
--- Grant execute permission for the new function
-GRANT EXECUTE ON FUNCTION public.get_article_reactions(UUID) TO authenticated;
-
--- NEW FUNCTION: Get Event Reactions (Counts per emoji)
-CREATE OR REPLACE FUNCTION public.get_event_reactions(event_uuid UUID)
-RETURNS JSON AS $$
-DECLARE reaction_counts JSON;
-BEGIN
-  SELECT json_object_agg(emoji, count) INTO reaction_counts
-  FROM (
-    SELECT emoji, count(*) as count
-    FROM public.event_reactions -- Querying event_reactions table
-    WHERE event_id = event_uuid -- Using event_id column
-    GROUP BY emoji
-  ) as grouped_reactions;
-
-  RETURN COALESCE(reaction_counts, '{}'::JSON); -- Return empty JSON object if no reactions
-END;
-$$ LANGUAGE plpgsql STABLE;
-
-COMMENT ON FUNCTION public.get_event_reactions(UUID) IS 'Retrieves the counts of each reaction emoji for a given event UUID.';
-
--- Grant execute permission for the new function
-GRANT EXECUTE ON FUNCTION public.get_event_reactions(UUID) TO authenticated;
-
--- NEW FUNCTION: Securely create an organization
-CREATE OR REPLACE FUNCTION public.create_new_organization(org_name TEXT)
-RETURNS TABLE(id uuid, name text) -- Define the return type to match select
-LANGUAGE plpgsql
-SECURITY DEFINER -- IMPORTANT: Runs with function owner privileges, bypassing RLS for the insert itself
-SET search_path = public -- Ensure it operates in the public schema
-AS $$
-DECLARE
-  _user_id uuid := auth.uid(); -- Get the currently authenticated user's ID
-  _new_org_id uuid;
-BEGIN
-  -- Check if user is authenticated (should always be true if called via authenticated client)
-  IF _user_id IS NULL THEN
-    RAISE EXCEPTION 'User must be authenticated to create an organization.';
-  END IF;
-
-  -- Insert the new organization, providing the creator's ID as admin_id
-  INSERT INTO public.organizations (name, admin_id) 
-  VALUES (org_name, _user_id) 
-  RETURNING organizations.id INTO _new_org_id; -- Get the new ID
-
-  -- The handle_new_organization trigger will automatically add the user to organization_members
-
-  -- Return the ID and name of the newly created org
-  RETURN QUERY SELECT o.id, o.name FROM public.organizations o WHERE o.id = _new_org_id;
-END;
-$$;
-COMMENT ON FUNCTION public.create_new_organization(TEXT) IS 'Creates a new organization, ensuring the creator is set as admin_id and added as the first admin member via trigger. SECURITY DEFINER bypasses INSERT RLS.';
-
--- Grant execute on new create organization function
-GRANT EXECUTE ON FUNCTION public.create_new_organization(TEXT) TO authenticated;
-
--- NEW FUNCTION: Get Message Reactions for a list of messages
-CREATE OR REPLACE FUNCTION public.get_reactions_for_messages(message_ids uuid[])
-RETURNS JSON AS $$
-DECLARE
-  reaction_counts JSON;
-BEGIN
-  SELECT json_object_agg(
-    grouped.message_id, grouped.emoji_counts
-  ) INTO reaction_counts
-  FROM (
-    SELECT
-      mr.message_id,
-      json_object_agg(mr.emoji, mr.count) as emoji_counts
-    FROM (
-      -- Inner query to count emojis per message
-      SELECT message_id, emoji, count(*) as count
-      FROM public.message_reactions
-      WHERE message_id = ANY(message_ids) -- Filter by the input array
-      GROUP BY message_id, emoji
-    ) as mr
-    GROUP BY mr.message_id
-  ) as grouped;
-
-  RETURN COALESCE(reaction_counts, '{}'::JSON); -- Return empty JSON object if no reactions
-END;
-$$ LANGUAGE plpgsql STABLE;
-
-COMMENT ON FUNCTION public.get_reactions_for_messages(uuid[]) IS 'Retrieves the counts of each reaction emoji for a given list of message UUIDs, aggregated by message ID.';
-
--- Grant execute permission for the new function
-GRANT EXECUTE ON FUNCTION public.get_reactions_for_messages(uuid[]) TO authenticated;
-
 -- ====================================================================
--- == Additions for Article Filters and Pinning ==
+-- == Additions for Chat Group Tags ==
 -- ====================================================================
 
--- Article Filters Table
-CREATE TABLE public.article_filters (
+-- Chat Group Tags Table
+CREATE TABLE public.chat_group_tags (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
   display_order INTEGER DEFAULT 0
 );
-COMMENT ON TABLE public.article_filters IS 'Stores available filter categories for articles and their display order.';
-COMMENT ON COLUMN public.article_filters.name IS 'The unique name of the filter (e.g., Aktuell, Sport).';
-COMMENT ON COLUMN public.article_filters.display_order IS 'Order in which filters should be displayed.';
+COMMENT ON TABLE public.chat_group_tags IS 'Stores available tags for chat groups and their display order.';
+COMMENT ON COLUMN public.chat_group_tags.name IS 'The unique name of the tag (e.g., Kultur, Sport).';
+COMMENT ON COLUMN public.chat_group_tags.display_order IS 'Order in which tags should be displayed.';
 
--- Pinned Articles Table
-CREATE TABLE public.pinned_articles (
-  filter_name TEXT NOT NULL REFERENCES public.article_filters(name) ON DELETE CASCADE,
-  article_id UUID NOT NULL REFERENCES public.articles(id) ON DELETE CASCADE,
-  pinned_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-  PRIMARY KEY (filter_name, article_id)
+-- RLS for Chat Group Tags
+ALTER TABLE public.chat_group_tags ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow anyone to read chat group tags" ON public.chat_group_tags;
+-- Management (INSERT/UPDATE/DELETE) should be handled via service_role key (Supabase dashboard/backend)
+CREATE POLICY "Allow anyone to read chat group tags" ON public.chat_group_tags FOR SELECT USING (true);
+
+-- Grant Permissions for Chat Group Tags
+GRANT SELECT ON public.chat_group_tags TO anon, authenticated;
+-- No INSERT/UPDATE/DELETE grants needed for anon/authenticated if managed by service_role
+
+-- Insert default chat group tags
+INSERT INTO public.chat_group_tags (name, display_order) VALUES
+('Offene Gruppen', 0), -- Example: Keep this separate if it's not a 'tag'
+('Ankündigungen', 1), -- Example: Keep this separate if it's not a 'tag'
+('Vereine', 2),
+('Kultur', 3),
+('Sport', 4),
+('Verkehr', 5),
+('Politik', 6),
+('Gemeinde', 7),
+('Veranstaltungen', 8),
+('Infrastruktur', 9)
+ON CONFLICT (name) DO NOTHING; -- Avoid duplicates
+
+-- ====================================================================
+-- == Additions for Event Categories ==
+-- ====================================================================
+
+-- Event Categories Table
+CREATE TABLE public.event_categories (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  display_order INTEGER DEFAULT 0
 );
-COMMENT ON TABLE public.pinned_articles IS 'Associates articles with specific filters to mark them as pinned.';
+COMMENT ON TABLE public.event_categories IS 'Stores available categories for events and their display order.';
+COMMENT ON COLUMN public.event_categories.name IS 'The unique name of the category (e.g., Kultur, Sport).';
+COMMENT ON COLUMN public.event_categories.display_order IS 'Order in which categories should be displayed.';
 
--- RLS for Article Filters
-ALTER TABLE public.article_filters ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "Allow anyone to read article filters" ON public.article_filters;
--- Add more policies if admin needs to manage filters
-CREATE POLICY "Allow anyone to read article filters" ON public.article_filters FOR SELECT USING (true);
+-- RLS for Event Categories
+ALTER TABLE public.event_categories ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow anyone to read event categories" ON public.event_categories;
+-- Management (INSERT/UPDATE/DELETE) should be handled via service_role key (Supabase dashboard/backend)
+CREATE POLICY "Allow anyone to read event categories" ON public.event_categories FOR SELECT USING (true);
 
--- RLS for Pinned Articles
-ALTER TABLE public.pinned_articles ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "Allow anyone to read pinned articles" ON public.pinned_articles;
-DROP POLICY IF EXISTS "Allow org members/admins to pin/unpin articles for org filters" ON public.pinned_articles; -- More specific needed
--- Allow SELECT for now, INSERT/DELETE needs careful consideration based on who can pin
-CREATE POLICY "Allow anyone to read pinned articles" ON public.pinned_articles FOR SELECT USING (true);
--- TODO: Add INSERT/DELETE policies for pinning, likely restricted based on article ownership/org membership.
+-- Grant Permissions for Event Categories
+GRANT SELECT ON public.event_categories TO anon, authenticated;
+-- No INSERT/UPDATE/DELETE grants needed for anon/authenticated if managed by service_role
 
--- Grant Permissions for New Tables
-GRANT SELECT ON public.article_filters TO anon, authenticated;
--- GRANT INSERT, UPDATE, DELETE ON public.article_filters TO ...; -- Add if needed
+-- Insert default event categories
+INSERT INTO public.event_categories (name, display_order) VALUES
+('Sport', 0),
+('Vereine', 1),
+('Gemeindeamt', 2),
+('Kultur', 3)
+ON CONFLICT (name) DO NOTHING; -- Avoid duplicates
 
-GRANT SELECT ON public.pinned_articles TO anon, authenticated;
--- GRANT INSERT, DELETE ON public.pinned_articles TO authenticated; -- Add granular policies later
-
--- Insert default filters (Example)
-INSERT INTO public.article_filters (name, display_order) VALUES
-('Aktuell', 0),
-('Kultur', 1),
-('Sport', 2),
-('Verkehr', 3),
-('Politik', 4),
-('Vereine', 5),
-('Gemeinde', 6),
-('Polizei', 7),
-('Veranstaltungen', 8)
-ON CONFLICT (name) DO NOTHING; -- Avoid duplicates if script runs multiple times
+-- ====================================================================
+-- == Additions for Event Categories (RLS Grant) ==
+-- ====================================================================
+-- Grant Permissions for Event Categories Table
+GRANT SELECT ON public.event_categories TO anon, authenticated;
 
 -- ====================================================================
 -- End of script
