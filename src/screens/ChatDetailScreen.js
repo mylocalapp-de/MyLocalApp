@@ -132,60 +132,74 @@ const ChatDetailScreen = ({ route, navigation }) => {
   // Check subscription status when user, chatGroup, and token are available
   useEffect(() => {
     const checkSubscription = async () => {
-      if (!user || !chatGroup?.id || !expoPushToken) {
+      if (!chatGroup?.id || !expoPushToken) {
         // Reset subscription status if dependencies are missing
         setIsSubscribed(false);
         setCheckingSubscription(false);
-        console.log('Skipping subscription check: Missing user, chatGroup ID, or token.');
+        console.log('Skipping subscription check: Missing chatGroup ID or token.');
         return;
       }
 
-      console.log(`Checking subscription for user ${user.id}, group ${chatGroup.id}, token ${expoPushToken.substring(0, 10)}...`);
+      console.log(`Checking subscription for group ${chatGroup.id}, token ${expoPushToken.substring(0, 10)}...`);
       setCheckingSubscription(true);
+      
       try {
-        const { data, error, count } = await supabase
-          .from('push_notification_subscriptions')
-          .select('*', { count: 'exact', head: true }) // Only fetch count
-          .eq('user_id', user.id)
+        // First check anonymous subscriptions table (works for both logged in and anonymous users)
+        let { data: anonData, error: anonError, count: anonCount } = await supabase
+          .from('anonymous_push_subscriptions')
+          .select('*', { count: 'exact', head: true })
           .eq('chat_group_id', chatGroup.id)
-          .eq('expo_push_token', expoPushToken); // Check with specific token
+          .eq('expo_push_token', expoPushToken);
 
-        if (error) {
-          console.error('Error checking subscription:', error);
-          setIsSubscribed(false); // Assume not subscribed on error
-        } else {
-          console.log(`Subscription check result: count=${count}`);
-          setIsSubscribed(count > 0);
+        if (anonError) {
+          console.error('Error checking anonymous subscription:', anonError);
+        } else if (anonCount > 0) {
+          // Found anonymous subscription
+          console.log(`Anonymous subscription found: count=${anonCount}`);
+          setIsSubscribed(true);
+          setCheckingSubscription(false);
+          return; // Exit early if found
         }
+        
+        // If no anonymous subscription found AND user is logged in, check authenticated subscriptions
+        if (user) {
+          const { data, error, count } = await supabase
+            .from('push_notification_subscriptions')
+            .select('*', { count: 'exact', head: true })
+            .eq('user_id', user.id)
+            .eq('chat_group_id', chatGroup.id);
+
+          if (error) {
+            console.error('Error checking authenticated subscription:', error);
+          } else {
+            console.log(`Authenticated subscription check result: count=${count}`);
+            setIsSubscribed(count > 0);
+            setCheckingSubscription(false);
+            return;
+          }
+        }
+        
+        // If we reach here, no subscription was found
+        setIsSubscribed(false);
       } catch (err) {
         console.error('Unexpected error checking subscription:', err);
         setIsSubscribed(false);
       } finally {
         setCheckingSubscription(false);
-        console.log('Subscription check finished.'); // Log finish
+        console.log('Subscription check finished.');
       }
     };
 
     checkSubscription();
-  }, [user, chatGroup?.id, expoPushToken]); // Dependencies: user, group ID, and token
+  }, [chatGroup?.id, expoPushToken, user]); // Dependencies: group ID, token, and user
 
   // Function to toggle subscription status
   const toggleSubscription = async () => {
-    console.log('toggleSubscription triggered'); // Log entry
-
-    if (!user) {
-      console.log('toggleSubscription: No user logged in, showing auth prompt.');
-      showAuthPrompt();
-      return;
-    }
-    console.log('toggleSubscription: User found:', user.id);
+    console.log('toggleSubscription triggered');
 
     if (!expoPushToken) {
       console.log('toggleSubscription: Expo push token is missing.');
       Alert.alert('Fehler', 'Push Token nicht verfügbar. Bitte versuche es erneut.');
-      // Optionally try registering again:
-      // const token = await registerForPushNotificationsAsync();
-      // if (token) { toggleSubscription(); } // Retry if token obtained
       return;
     }
     console.log('toggleSubscription: Expo push token found:', expoPushToken.substring(0,10) + '...');
@@ -211,46 +225,84 @@ const ChatDetailScreen = ({ route, navigation }) => {
             setTogglingSubscription(true);
             try {
               if (isSubscribed) {
-                // Unsubscribe: Delete the row
-                const { error } = await supabase
-                  .from('push_notification_subscriptions')
+                // UNSUBSCRIBE: Need to check both tables
+                
+                // First try anonymous_push_subscriptions
+                let { error: anonError } = await supabase
+                  .from('anonymous_push_subscriptions')
                   .delete()
-                  .eq('user_id', user.id)
                   .eq('chat_group_id', chatGroup.id)
-                  .eq('expo_push_token', expoPushToken); // Ensure deleting the correct token entry
-
-                if (error) {
-                  throw error;
+                  .eq('expo_push_token', expoPushToken);
+                
+                if (anonError) {
+                  console.error('Error deleting anonymous subscription:', anonError);
                 }
+                
+                // Then try authenticated subscriptions if user exists
+                if (user) {
+                  const { error } = await supabase
+                    .from('push_notification_subscriptions')
+                    .delete()
+                    .eq('user_id', user.id)
+                    .eq('chat_group_id', chatGroup.id);
+                  
+                  if (error) {
+                    console.error('Error deleting authenticated subscription:', error);
+                  }
+                }
+                
                 setIsSubscribed(false);
                 console.log('Successfully unsubscribed.');
               } else {
-                // Subscribe: Insert a new row
-                const { error } = await supabase
-                  .from('push_notification_subscriptions')
-                  .insert({
-                    user_id: user.id,
-                    chat_group_id: chatGroup.id,
-                    expo_push_token: expoPushToken,
-                  });
+                // SUBSCRIBE: Use appropriate table based on login status
+                if (user) {
+                  // Authenticated user: use push_notification_subscriptions
+                  const { error } = await supabase
+                    .from('push_notification_subscriptions')
+                    .insert({
+                      user_id: user.id,
+                      chat_group_id: chatGroup.id,
+                      expo_push_token: expoPushToken,
+                    });
 
-                if (error) {
-                  // Handle potential unique constraint violation gracefully (already subscribed with this token)
-                  if (error.code === '23505') { // Postgres unique violation code
-                     console.warn('Subscription already exists for this user, group, and token.');
-                     setIsSubscribed(true); // Correct state if it was somehow false
+                  if (error) {
+                    // Handle potential unique constraint violation
+                    if (error.code === '23505') {
+                      console.warn('Subscription already exists for this user and group.');
+                      setIsSubscribed(true);
+                    } else {
+                      throw error;
+                    }
                   } else {
-                     throw error; // Rethrow other errors
+                    setIsSubscribed(true);
+                    console.log('Successfully subscribed authenticated user.');
                   }
                 } else {
-                  setIsSubscribed(true);
-                  console.log('Successfully subscribed.');
+                  // Anonymous user: use anonymous_push_subscriptions
+                  const { error } = await supabase
+                    .from('anonymous_push_subscriptions')
+                    .insert({
+                      chat_group_id: chatGroup.id,
+                      expo_push_token: expoPushToken,
+                    });
+
+                  if (error) {
+                    // Handle potential unique constraint violation
+                    if (error.code === '23505') {
+                      console.warn('Anonymous subscription already exists for this token and group.');
+                      setIsSubscribed(true);
+                    } else {
+                      throw error;
+                    }
+                  } else {
+                    setIsSubscribed(true);
+                    console.log('Successfully subscribed anonymous user.');
+                  }
                 }
               }
             } catch (err) {
               console.error(`Error ${action} subscription:`, err);
               Alert.alert('Fehler', `Abonnement konnte nicht ${action} werden.`);
-              // Optionally revert UI state on error, though it might be out of sync
             } finally {
               setTogglingSubscription(false);
             }
@@ -897,12 +949,12 @@ const ChatDetailScreen = ({ route, navigation }) => {
         </TouchableOpacity>
 
         {/* Notification Bell Icon */}
-        {/* Only show bell for non-bot chats and if user is logged in */}
-        {!isBot() && user && (
+        {/* Only show bell for non-bot chats if token is available */}
+        {!isBot() && expoPushToken && (
           <TouchableOpacity 
             style={styles.notificationButton} 
             onPress={toggleSubscription}
-            disabled={checkingSubscription || togglingSubscription || !expoPushToken} // Disable while checking/toggling or if no token
+            disabled={checkingSubscription || togglingSubscription} // No longer need !expoPushToken condition since we check above
           >
             {checkingSubscription || togglingSubscription ? (
               <ActivityIndicator size="small" color="#4285F4" />
@@ -910,7 +962,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
               <Ionicons 
                 name={isSubscribed ? "notifications" : "notifications-outline"} 
                 size={24} 
-                color={isSubscribed ? "#4285F4" : (checkingSubscription || !expoPushToken ? "#ccc" : "#666")} // Indicate disabled/subscribed state
+                color={isSubscribed ? "#4285F4" : "#666"} // Simplified color logic
               />
             )}
           </TouchableOpacity>

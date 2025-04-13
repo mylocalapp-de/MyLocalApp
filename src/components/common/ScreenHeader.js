@@ -47,7 +47,7 @@ const styles = StyleSheet.create({
   appName: {
     fontSize: 28,
     color: '#333',
-    paddingBottom: 5,
+    paddingBottom: 0,
   },
 });
 

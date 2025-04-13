@@ -19,6 +19,10 @@
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "android": {
+        "serviceAccountKeyPath": "/Users/pascalkienast/Downloads/leafy-audio-456723-s7-a4359ad71433.json"
+      }
+    }
   }
 }

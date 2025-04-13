@@ -521,6 +521,73 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 COMMENT ON FUNCTION public.is_org_member_admin(uuid, uuid) IS 'Checks if a user is an admin of an organization. SECURITY DEFINER bypasses RLS.';
 
+-- ====================================================================
+-- == RPC Function for Transferring Admin Role ==
+-- ====================================================================
+
+CREATE OR REPLACE FUNCTION public.set_organization_admin(p_organization_id uuid, p_new_admin_user_id uuid)
+RETURNS boolean AS $$
+DECLARE
+  current_user_id uuid := auth.uid();
+  current_admin_id uuid;
+  new_admin_exists boolean;
+BEGIN
+  -- 1. Verify the caller is the current admin
+  SELECT user_id INTO current_admin_id
+  FROM public.organization_members
+  WHERE organization_id = p_organization_id AND role = 'admin'
+  LIMIT 1;
+
+  IF current_admin_id IS NULL OR current_admin_id <> current_user_id THEN
+    RAISE EXCEPTION 'Permission denied: Only the current admin can transfer ownership.';
+  END IF;
+
+  -- 2. Verify the target user exists and is a member of the organization
+  SELECT EXISTS (
+    SELECT 1 FROM public.organization_members
+    WHERE organization_id = p_organization_id AND user_id = p_new_admin_user_id
+  ) INTO new_admin_exists;
+
+  IF NOT new_admin_exists THEN
+    RAISE EXCEPTION 'Target user is not a member of this organization.';
+  END IF;
+
+  -- 3. Verify the target user is not the current admin
+  IF p_new_admin_user_id = current_user_id THEN
+    RAISE EXCEPTION 'Cannot transfer admin role to yourself.';
+  END IF;
+
+  -- 4. Perform the transfer within a transaction
+  BEGIN
+    -- Update current admin to member
+    UPDATE public.organization_members
+    SET role = 'member'
+    WHERE organization_id = p_organization_id AND user_id = current_user_id;
+
+    -- Update target user to admin
+    UPDATE public.organization_members
+    SET role = 'admin'
+    WHERE organization_id = p_organization_id AND user_id = p_new_admin_user_id;
+
+    -- Optional: Update the organizations table admin_id (if still used)
+    -- UPDATE public.organizations SET admin_id = p_new_admin_user_id WHERE id = p_organization_id;
+
+  EXCEPTION
+    WHEN others THEN
+      RAISE WARNING 'Error during admin transfer transaction: %', SQLERRM;
+      RETURN false;
+  END;
+
+  RETURN true; -- Success
+
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+COMMENT ON FUNCTION public.set_organization_admin(uuid, uuid) IS 'Transfers the admin role from the current admin (caller) to another member within the organization.';
+
+-- Grant EXECUTE permission on the function to authenticated users
+GRANT EXECUTE ON FUNCTION public.set_organization_admin(uuid, uuid) TO authenticated;
+
 -- 8. Enable RLS and Define Policies
 -- Profiles
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
@@ -573,10 +640,7 @@ DROP POLICY IF EXISTS "Allow members to view membership of their orgs" ON public
 DROP POLICY IF EXISTS "Allow admin to manage members in their org" ON public.organization_members;
 DROP POLICY IF EXISTS "Allow users to join an organization (insert)" ON public.organization_members;
 DROP POLICY IF EXISTS "Allow users to leave an organization (delete)" ON public.organization_members;
--- Drop the potentially new named policy if it exists from previous runs
-DROP POLICY IF EXISTS "prevent_last_admin_leave" ON public.organization_members;
--- Drop the policy we are about to recreate with a potentially different name
-DROP POLICY IF EXISTS "Allow authenticated users to add themselves to an organization" ON public.organization_members;
+DROP POLICY IF EXISTS "Allow admin to remove other members" ON public.organization_members; -- Drop policy if exists
 
 -- Revised SELECT Policy (Using SECURITY DEFINER function)
 CREATE POLICY "Allow members to view membership of their orgs" ON public.organization_members
@@ -596,26 +660,34 @@ CREATE POLICY "Allow authenticated users to add themselves to an organization" O
   WITH CHECK (user_id = auth.uid());
 COMMENT ON POLICY "Allow authenticated users to add themselves to an organization" ON public.organization_members IS 'Ensures a user can only insert a membership row for themselves.';
 
--- REVISED DELETE Policy: Prevent last admin from leaving
-CREATE POLICY "prevent_last_admin_leave" ON public.organization_members
+-- REVISED DELETE Policy: Prevent last admin from leaving (combined with allow admin to remove others)
+DROP POLICY IF EXISTS "prevent_last_admin_leave" ON public.organization_members;
+CREATE POLICY "prevent_last_admin_leave_or_remove_others" ON public.organization_members
   FOR DELETE TO authenticated
   USING (
-    user_id = auth.uid() -- User must be deleting themselves
-    AND
-    (
-      role <> 'admin' -- Allow if they are not an admin
-      OR
-      -- OR if they ARE an admin, check if other admins exist
+    ( -- Case 1: User is deleting themselves
+      user_id = auth.uid()
+      AND
       (
-        SELECT count(*)
-        FROM public.organization_members other_admins
-        WHERE other_admins.organization_id = organization_members.organization_id -- In the same org
-          AND other_admins.role = 'admin' -- Who are admins
-          AND other_admins.user_id <> organization_members.user_id -- And are not this user
-      ) > 0 -- At least one other admin must exist
+        role <> 'admin' -- Allow if they are not an admin
+        OR
+        -- OR if they ARE an admin, check if other admins exist
+        (
+          SELECT count(*)
+          FROM public.organization_members other_admins
+          WHERE other_admins.organization_id = organization_members.organization_id -- In the same org
+            AND other_admins.role = 'admin' -- Who are admins
+            AND other_admins.user_id <> organization_members.user_id -- And are not this user
+        ) > 0 -- At least one other admin must exist
+      )
+    )
+    OR
+    ( -- Case 2: Admin is deleting someone else
+      public.is_org_member_admin(auth.uid(), organization_id) -- Caller must be admin
+      AND user_id != auth.uid() -- Cannot remove self via this path
     )
   );
-COMMENT ON POLICY "prevent_last_admin_leave" ON public.organization_members IS 'Allows users to delete their own membership, unless they are the sole administrator remaining in the organization.';
+COMMENT ON POLICY "prevent_last_admin_leave_or_remove_others" ON public.organization_members IS 'Allows users to delete their own membership (unless they are the sole admin) OR allows admins to delete other members.';
 
 -- Articles
 ALTER TABLE public.articles ENABLE ROW LEVEL SECURITY;
@@ -1072,6 +1144,47 @@ CREATE POLICY "Users can delete their own subscriptions" ON public.push_notifica
 
 -- Grant Permissions
 GRANT SELECT, INSERT, DELETE ON public.push_notification_subscriptions TO authenticated;
+
+-- ====================================================================
+-- == Additions for Anonymous Push Notification Subscriptions ==
+-- ====================================================================
+
+-- Anonymous Push Notification Subscriptions Table
+CREATE TABLE public.anonymous_push_subscriptions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  chat_group_id UUID NOT NULL REFERENCES public.chat_groups(id) ON DELETE CASCADE,
+  expo_push_token TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  UNIQUE (chat_group_id, expo_push_token) -- Ensure a device is only subscribed once per group anonymously
+);
+COMMENT ON TABLE public.anonymous_push_subscriptions IS 'Stores anonymous (non-logged-in user) subscriptions to chat groups for push notifications.';
+COMMENT ON COLUMN public.anonymous_push_subscriptions.expo_push_token IS 'The Expo push token for the specific app installation.';
+
+-- RLS for Anonymous Push Notification Subscriptions
+ALTER TABLE public.anonymous_push_subscriptions ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow anonymous select" ON public.anonymous_push_subscriptions;
+DROP POLICY IF EXISTS "Allow anonymous insert" ON public.anonymous_push_subscriptions;
+DROP POLICY IF EXISTS "Allow anonymous delete based on token" ON public.anonymous_push_subscriptions;
+
+-- Allow anonymous users to select subscriptions matching their token (needed for checking status)
+CREATE POLICY "Allow anonymous select based on token" ON public.anonymous_push_subscriptions
+  FOR SELECT TO anon
+  USING (true); -- Allow selecting any row, client must filter by token
+  -- More secure would be to pass token in a function/header, but this is simpler for now
+
+-- Allow anonymous users to insert subscriptions
+CREATE POLICY "Allow anonymous insert" ON public.anonymous_push_subscriptions
+  FOR INSERT TO anon
+  WITH CHECK (true);
+
+-- Allow anonymous users to delete subscriptions matching their token (less secure, relies on client sending correct token)
+CREATE POLICY "Allow anonymous delete based on token" ON public.anonymous_push_subscriptions
+  FOR DELETE TO anon
+  USING (true); -- Allow deletion attempt, client must provide correct token in WHERE clause
+
+-- Grant Permissions to anonymous role
+GRANT SELECT, INSERT, DELETE ON public.anonymous_push_subscriptions TO anon;
 
 -- ====================================================================
 -- == Final Commit ==
