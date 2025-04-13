@@ -1035,7 +1035,46 @@ INSERT INTO public.article_filters (name, display_order, is_highlighted) VALUES
 ON CONFLICT (name) DO UPDATE SET display_order = EXCLUDED.display_order, is_highlighted = EXCLUDED.is_highlighted; -- Update existing
 
 -- ====================================================================
--- End of script
+-- == Additions for Push Notification Subscriptions ==
+-- ====================================================================
+
+-- Push Notification Subscriptions Table
+CREATE TABLE public.push_notification_subscriptions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  chat_group_id UUID NOT NULL REFERENCES public.chat_groups(id) ON DELETE CASCADE,
+  expo_push_token TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  UNIQUE (user_id, chat_group_id) -- Ensure a user is only subscribed once per group
+);
+COMMENT ON TABLE public.push_notification_subscriptions IS 'Stores user subscriptions to chat groups for push notifications.';
+COMMENT ON COLUMN public.push_notification_subscriptions.expo_push_token IS 'The Expo push token for the user device.';
+
+-- RLS for Push Notification Subscriptions
+ALTER TABLE public.push_notification_subscriptions ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can manage their own subscriptions" ON public.push_notification_subscriptions;
+
+-- Allow users to select their own subscriptions (e.g., to check status)
+CREATE POLICY "Users can view their own subscriptions" ON public.push_notification_subscriptions
+  FOR SELECT TO authenticated
+  USING (auth.uid() = user_id);
+
+-- Allow users to insert their own subscriptions
+CREATE POLICY "Users can insert their own subscriptions" ON public.push_notification_subscriptions
+  FOR INSERT TO authenticated
+  WITH CHECK (auth.uid() = user_id);
+
+-- Allow users to delete their own subscriptions (unsubscribe)
+CREATE POLICY "Users can delete their own subscriptions" ON public.push_notification_subscriptions
+  FOR DELETE TO authenticated
+  USING (auth.uid() = user_id);
+
+-- Grant Permissions
+GRANT SELECT, INSERT, DELETE ON public.push_notification_subscriptions TO authenticated;
+
+-- ====================================================================
+-- == Final Commit ==
 -- ====================================================================
 COMMIT;
 

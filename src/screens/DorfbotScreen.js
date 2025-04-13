@@ -9,10 +9,16 @@ import {
   KeyboardAvoidingView, 
   Platform,
   SafeAreaView,
-  ActivityIndicator
+  ActivityIndicator,
+  Alert
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// Assuming EXPO_PUBLIC_SUPABASE_URL is set in your environment (e.g., .env file)
+// Make sure to install cross-env or use expo-constants if direct process.env access is problematic
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
+const API_ENDPOINT = 'https://admin.mylocalapp.de/api/knowledge/chat/stream';
 
 const STORAGE_KEY = 'dorfbot_messages';
 
@@ -33,7 +39,9 @@ const DorfbotScreen = ({ navigation }) => {
       setLoading(true);
       const storedMessages = await AsyncStorage.getItem(STORAGE_KEY);
       if (storedMessages) {
-        setMessages(JSON.parse(storedMessages));
+        const parsedMessages = JSON.parse(storedMessages);
+        // Filter out any incomplete/streaming messages from previous sessions if necessary
+        setMessages(parsedMessages.filter(m => m.streaming !== true));
       } else {
         // Add welcome message if no messages exist
         const welcomeMessage = {
@@ -47,6 +55,8 @@ const DorfbotScreen = ({ navigation }) => {
       }
     } catch (error) {
       console.error('Error loading messages:', error);
+      // Optionally show an alert to the user
+      Alert.alert("Fehler", "Nachrichten konnten nicht geladen werden.");
     } finally {
       setLoading(false);
     }
@@ -61,53 +71,236 @@ const DorfbotScreen = ({ navigation }) => {
   };
 
   const sendMessage = async () => {
-    if (message.trim() === '') return;
-    
-    setSending(true);
-    
-    try {
-      // Add user message
-      const userMessage = {
-        id: Date.now().toString(),
-        text: message,
-        isBot: false,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      };
-      
-      const updatedMessages = [...messages, userMessage];
-      setMessages(updatedMessages);
-      setMessage('');
-      
-      // Save to local storage
-      await saveMessages(updatedMessages);
-      
-      // Simulate bot thinking (1 second delay)
-      setTimeout(async () => {
-        // Add bot response
-        const botMessage = {
-          id: (Date.now() + 1).toString(),
-          text: "Antwort", // Simple placeholder response as requested
-          isBot: true,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        };
-        
-        const finalMessages = [...updatedMessages, botMessage];
-        setMessages(finalMessages);
-        
-        // Save to local storage again with bot response
-        await saveMessages(finalMessages);
-        
-        // Scroll to bottom
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd();
-        }, 100);
-        
-        setSending(false);
-      }, 1000);
-    } catch (error) {
-      console.error('Error sending message:', error);
-      setSending(false);
+    if (message.trim() === '' || sending) return; // Prevent multiple sends
+
+    if (!SUPABASE_URL) {
+      Alert.alert("Konfigurationsfehler", "Die Supabase URL ist nicht gesetzt. Bitte überprüfe die Umgebungsvariablen.");
+      console.error("EXPO_PUBLIC_SUPABASE_URL is not defined.");
+      return;
     }
+
+    setSending(true);
+
+    const userMessage = {
+      id: Date.now().toString(),
+      text: message,
+      isBot: false,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+
+    // Prepare messages for API (map isBot to role)
+    const apiMessages = [...messages, userMessage].map(msg => ({
+      role: msg.isBot ? 'assistant' : 'user',
+      content: msg.text
+    }));
+
+    // Add user message immediately
+    const updatedMessages = [...messages, userMessage];
+    setMessages(updatedMessages);
+    const currentUserMessage = message; // Store current message before clearing
+    setMessage('');
+
+    // Save messages up to user's input
+    await saveMessages(updatedMessages);
+
+    // Add a placeholder for the bot's response
+    const botMessageId = (Date.now() + 1).toString();
+    const botPlaceholderMessage = {
+      id: botMessageId,
+      text: "", // Start with empty text
+      isBot: true,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      streaming: true // Flag to indicate streaming
+    };
+
+    setMessages(prevMessages => [...prevMessages, botPlaceholderMessage]);
+
+    // Scroll down after adding messages
+    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+
+
+    // --- Using XMLHttpRequest instead of fetch ---
+    const xhr = new XMLHttpRequest();
+    let streamedText = "";
+    let lastResponseLength = 0;
+
+    xhr.open('POST', API_ENDPOINT, true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.setRequestHeader('X-Supabase-Url', SUPABASE_URL);
+    xhr.setRequestHeader('Accept', 'text/plain'); // Keep accepting text/plain
+
+    // --- Event Listener for Progress (Streaming) ---
+    xhr.onprogress = () => {
+      const currentResponseText = xhr.responseText;
+      const chunk = currentResponseText.substring(lastResponseLength);
+      lastResponseLength = currentResponseText.length;
+
+      // Parse the new chunk for Vercel AI SDK format (0:"...")
+      const lines = chunk.split('\n').filter(line => line.startsWith('0:"'));
+      lines.forEach(line => {
+        try {
+          const contentMatch = line.match(/^0:"(.*)"$/);
+          if (contentMatch && contentMatch[1]) {
+            const parsedContent = JSON.parse(`"${contentMatch[1]}"`);
+            streamedText += parsedContent;
+
+            // Update the specific bot message in the state
+            setMessages(prevMessages =>
+              prevMessages.map(msg =>
+                msg.id === botMessageId
+                  ? { ...msg, text: streamedText }
+                  : msg
+              )
+            );
+
+            // Scroll as content streams in
+            setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 50);
+          }
+        } catch (e) {
+          console.error("Error parsing stream chunk:", line, e);
+        }
+      });
+    };
+
+    // --- Event Listener for Request Completion ---
+    xhr.onload = async () => {
+      if (xhr.status === 200) {
+        // Ensure final state is captured
+        setMessages(prevMessages =>
+          prevMessages.map(msg =>
+            msg.id === botMessageId
+              ? { ...msg, text: streamedText, streaming: false } // Mark as complete
+              : msg
+          )
+        );
+
+        // Save final messages to AsyncStorage
+        const finalMessages = messages.map(msg =>
+          msg.id === botMessageId
+              ? { ...msg, text: streamedText, streaming: false }
+              : msg
+          );
+        // Need to use the state setter's callback or useEffect to get the *really* final state for saving
+        // For simplicity here, we reconstruct based on the last update
+        const finalMessagesToSave = [...updatedMessages, { ...botPlaceholderMessage, text: streamedText, streaming: false }];
+        await saveMessages(finalMessagesToSave);
+        setSending(false);
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 200);
+      } else {
+        // Handle HTTP errors (non-200 status)
+        const errorText = xhr.responseText || `HTTP Error ${xhr.status}`;
+        console.error('XHR Error:', errorText);
+        handleRequestError(new Error(errorText), botMessageId, updatedMessages, botPlaceholderMessage);
+      }
+    };
+
+    // --- Event Listener for Network Errors ---
+    xhr.onerror = async () => {
+      const errorText = 'Network request failed';
+      console.error('XHR Network Error');
+      handleRequestError(new Error(errorText), botMessageId, updatedMessages, botPlaceholderMessage);
+    };
+
+    // --- Send the Request ---
+    xhr.send(JSON.stringify({ messages: apiMessages }));
+
+    // --- Moved Error Handling Logic to a Helper Function ---
+    const handleRequestError = async (error, currentBotId, userMessages, placeholder) => {
+       console.error('Error during XHR request:', error);
+       const errorMessageText = `Fehler: ${error.message || 'Unbekannter Fehler'}`;
+       Alert.alert("Fehler", `Nachricht konnte nicht gesendet werden: ${error.message}`);
+
+        setMessages(prevMessages =>
+         prevMessages.map(msg =>
+           msg.id === currentBotId
+             ? { ...msg, text: errorMessageText, streaming: false, isError: true }
+             : msg
+         )
+       );
+
+        const errorMessagesToSave = [...userMessages, { ...placeholder, text: errorMessageText, streaming: false, isError: true }];
+        await saveMessages(errorMessagesToSave);
+        setSending(false);
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 200);
+    }
+
+    /*
+    // --- Original fetch logic (commented out) ---
+       // eslint-disable-next-line no-constant-condition
+       while (true) {
+         const { value, done } = await reader.read();
+         if (done) {
+           break;
+         }
+
+         const chunk = decoder.decode(value, { stream: true });
+         // Reverted to manual parsing for Vercel AI SDK Stream format (e.g., 0:"text")
+         const lines = chunk.split('\n').filter(line => line.startsWith('0:"'));
+         lines.forEach(line => {
+           try {
+             // Extract content within quotes, unescaping JSON string content
+             const contentMatch = line.match(/^0:"(.*)"$/);
+             if (contentMatch && contentMatch[1]) {
+               const parsedContent = JSON.parse(`"${contentMatch[1]}"`); // Use JSON.parse for proper unescaping
+               streamedText += parsedContent;
+               // Update the specific bot message in the state
+               setMessages(prevMessages =>
+                 prevMessages.map(msg =>
+                   msg.id === botMessageId
+                     ? { ...msg, text: streamedText }
+                     : msg
+                 )
+               );
+                // Scroll as content streams in
+               setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 50);
+             }
+           } catch (e) {
+             console.error("Error parsing stream chunk:", line, e);
+           }
+         });
+       }
+
+       // Streaming finished, update the final message state and save
+       setMessages(prevMessages =>
+         prevMessages.map(msg =>
+           msg.id === botMessageId
+             ? { ...msg, text: streamedText, streaming: false } // Mark as complete
+             : msg
+         )
+       );
+       const finalMessages = messages.map(msg =>
+         msg.id === botMessageId
+             ? { ...msg, text: streamedText, streaming: false } // Ensure final save has complete message
+             : msg
+         );
+
+       await saveMessages(finalMessages);
+
+
+    } catch (error) {
+      console.error('Error sending message or processing stream:', error);
+      Alert.alert("Fehler", `Nachricht konnte nicht gesendet werden: ${error.message}`);
+      // Update placeholder to show error or remove it
+       setMessages(prevMessages =>
+        prevMessages.map(msg =>
+          msg.id === botMessageId
+            ? { ...msg, text: `Fehler: ${error.message || 'Unbekannter Fehler beim Streamen'}`, streaming: false, isError: true } // Indicate error
+            : msg
+        )
+      );
+       const errorMessages = messages.map(msg =>
+        msg.id === botMessageId
+            ? { ...msg, text: `Fehler: ${error.message || 'Unbekannter Fehler beim Streamen'}`, streaming: false, isError: true }
+            : msg
+        );
+       await saveMessages(errorMessages); // Save state with error message
+    } finally {
+      // This needs to be handled within onload/onerror for XHR
+      setSending(false);
+       // Ensure scroll to end after all updates
+      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 200);
+    }
+    */
   };
 
   const clearConversation = async () => {
@@ -128,14 +321,18 @@ const DorfbotScreen = ({ navigation }) => {
 
   const renderItem = ({ item }) => (
     <View style={styles.messageContainer}>
-      <View 
+      <View
         style={[
-          styles.messageBubble, 
-          item.isBot ? styles.botMessage : styles.myMessage
+          styles.messageBubble,
+          item.isBot ? styles.botMessage : styles.myMessage,
+          item.isError ? styles.errorMessage : null, // Style for error messages
+          item.streaming && styles.streamingMessage // Style for streaming indicator
         ]}
       >
-        <Text style={styles.messageText}>{item.text}</Text>
-        <Text style={styles.messageTime}>{item.time}</Text>
+        <Text style={[styles.messageText, item.isError ? styles.errorText : null]}>{item.text}</Text>
+         {/* Show blinking cursor or indicator if streaming */}
+        {item.streaming && <ActivityIndicator size="small" color="#fff" style={styles.streamingIndicator} />}
+        {!item.streaming && <Text style={[styles.messageTime, item.isError ? styles.errorTime : null]}>{item.time}</Text>}
       </View>
     </View>
   );
@@ -267,7 +464,7 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 5,
   },
   botMessage: {
-    backgroundColor: '#34A853',
+    backgroundColor: '#34A853', // Google Green
     alignSelf: 'flex-start',
     borderBottomLeftRadius: 5,
   },
@@ -281,6 +478,27 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
     marginTop: 4,
   },
+  errorMessage: {
+    backgroundColor: '#DB4437', // Google Red
+    borderColor: '#c53929',
+    borderWidth: 1,
+  },
+  errorText: {
+    color: '#fff',
+    fontStyle: 'italic',
+  },
+  errorTime: {
+     color: 'rgba(255, 255, 255, 0.7)',
+  },
+  streamingMessage: {
+    // Optional: slightly different style while streaming
+    paddingBottom: 18, // Make space for time/indicator
+   },
+   streamingIndicator: {
+     position: 'absolute',
+     bottom: 4,
+     right: 8,
+   },
   inputContainer: {
     padding: 10,
     borderTopWidth: 1,

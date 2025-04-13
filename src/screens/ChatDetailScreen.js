@@ -24,9 +24,23 @@ import * as ImagePicker from 'expo-image-picker';
 import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
 import { decode } from 'base64-arraybuffer';
+// --- Push Notification Imports ---
+import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
+import Constants from 'expo-constants';
+// ------------------------------
 
 const { height } = Dimensions.get('window');
 const androidPaddingTop = height * 0.05; // 5% of screen height for better scaling
+
+// Configure Notification Handler (optional, but good practice)
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: false,
+    shouldSetBadge: false,
+  }),
+});
 
 const ChatDetailScreen = ({ route, navigation }) => {
   const { chatGroup, onReturn } = route.params;
@@ -48,6 +62,204 @@ const ChatDetailScreen = ({ route, navigation }) => {
   const [isUploading, setIsUploading] = useState(false);
   const flatListRef = useRef(null);
   const [isOrgMember, setIsOrgMember] = useState(false);
+  // --- Push Notification State ---
+  const [expoPushToken, setExpoPushToken] = useState('');
+  const [isSubscribed, setIsSubscribed] = useState(false);
+  const [checkingSubscription, setCheckingSubscription] = useState(false);
+  const [togglingSubscription, setTogglingSubscription] = useState(false); // For loading indicator on toggle
+  // -----------------------------
+
+  // --- Push Notification Logic ---
+  // Function to register for push notifications and get token
+  async function registerForPushNotificationsAsync() {
+    let token;
+    if (!Device.isDevice) {
+      console.log('Push notifications require a physical device, skipping registration.');
+      return null;
+    }
+
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    let finalStatus = existingStatus;
+
+    if (existingStatus !== 'granted') {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+    }
+    if (finalStatus !== 'granted') {
+      Alert.alert('Berechtigung benötigt', 'Push-Benachrichtigungen können nicht aktiviert werden, da die Berechtigung fehlt.');
+      return null;
+    }
+
+    // Get the token that identifies this device
+    try {
+      const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+      if (!projectId) {
+        console.error('Project ID not found. Make sure eas.json is configured.');
+        Alert.alert('Fehler', 'Projekt-ID für Push-Benachrichtigungen nicht gefunden.');
+        return null;
+      }
+      token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+      console.log('Expo Push Token:', token);
+      setExpoPushToken(token); // Store token in state
+    } catch (e) {
+      console.error("Error getting push token:", e);
+      Alert.alert('Fehler', 'Push-Token konnte nicht abgerufen werden.');
+      return null;
+    }
+
+    // Android specific setup
+    if (Platform.OS === 'android') {
+      Notifications.setNotificationChannelAsync('default', {
+        name: 'default',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#FF231F7C',
+      });
+    }
+
+    return token;
+  }
+
+  // Get push token on mount if not already available
+  useEffect(() => {
+    if (!expoPushToken) {
+      console.log('Attempting to register for push notifications...');
+      registerForPushNotificationsAsync();
+    }
+  }, []);
+
+
+  // Check subscription status when user, chatGroup, and token are available
+  useEffect(() => {
+    const checkSubscription = async () => {
+      if (!user || !chatGroup?.id || !expoPushToken) {
+        // Reset subscription status if dependencies are missing
+        setIsSubscribed(false);
+        setCheckingSubscription(false);
+        console.log('Skipping subscription check: Missing user, chatGroup ID, or token.');
+        return;
+      }
+
+      console.log(`Checking subscription for user ${user.id}, group ${chatGroup.id}, token ${expoPushToken.substring(0, 10)}...`);
+      setCheckingSubscription(true);
+      try {
+        const { data, error, count } = await supabase
+          .from('push_notification_subscriptions')
+          .select('*', { count: 'exact', head: true }) // Only fetch count
+          .eq('user_id', user.id)
+          .eq('chat_group_id', chatGroup.id)
+          .eq('expo_push_token', expoPushToken); // Check with specific token
+
+        if (error) {
+          console.error('Error checking subscription:', error);
+          setIsSubscribed(false); // Assume not subscribed on error
+        } else {
+          console.log(`Subscription check result: count=${count}`);
+          setIsSubscribed(count > 0);
+        }
+      } catch (err) {
+        console.error('Unexpected error checking subscription:', err);
+        setIsSubscribed(false);
+      } finally {
+        setCheckingSubscription(false);
+        console.log('Subscription check finished.'); // Log finish
+      }
+    };
+
+    checkSubscription();
+  }, [user, chatGroup?.id, expoPushToken]); // Dependencies: user, group ID, and token
+
+  // Function to toggle subscription status
+  const toggleSubscription = async () => {
+    console.log('toggleSubscription triggered'); // Log entry
+
+    if (!user) {
+      console.log('toggleSubscription: No user logged in, showing auth prompt.');
+      showAuthPrompt();
+      return;
+    }
+    console.log('toggleSubscription: User found:', user.id);
+
+    if (!expoPushToken) {
+      console.log('toggleSubscription: Expo push token is missing.');
+      Alert.alert('Fehler', 'Push Token nicht verfügbar. Bitte versuche es erneut.');
+      // Optionally try registering again:
+      // const token = await registerForPushNotificationsAsync();
+      // if (token) { toggleSubscription(); } // Retry if token obtained
+      return;
+    }
+    console.log('toggleSubscription: Expo push token found:', expoPushToken.substring(0,10) + '...');
+
+    if (checkingSubscription || togglingSubscription) {
+        console.log(`toggleSubscription: Aborting, already in progress (checking: ${checkingSubscription}, toggling: ${togglingSubscription})`);
+        return; // Prevent multiple simultaneous toggles
+    }
+    console.log(`toggleSubscription: Proceeding. isSubscribed: ${isSubscribed}`);
+
+    const action = isSubscribed ? 'deaktivieren' : 'aktivieren';
+    const title = `Benachrichtigungen ${action}?`;
+    const message = `Möchtest du Push-Benachrichtigungen für neue Nachrichten in dieser Gruppe ${isSubscribed ? 'nicht mehr erhalten' : 'erhalten'}?`;
+
+    Alert.alert(
+      title,
+      message,
+      [
+        { text: "Abbrechen", style: "cancel" },
+        {
+          text: "Ja",
+          onPress: async () => {
+            setTogglingSubscription(true);
+            try {
+              if (isSubscribed) {
+                // Unsubscribe: Delete the row
+                const { error } = await supabase
+                  .from('push_notification_subscriptions')
+                  .delete()
+                  .eq('user_id', user.id)
+                  .eq('chat_group_id', chatGroup.id)
+                  .eq('expo_push_token', expoPushToken); // Ensure deleting the correct token entry
+
+                if (error) {
+                  throw error;
+                }
+                setIsSubscribed(false);
+                console.log('Successfully unsubscribed.');
+              } else {
+                // Subscribe: Insert a new row
+                const { error } = await supabase
+                  .from('push_notification_subscriptions')
+                  .insert({
+                    user_id: user.id,
+                    chat_group_id: chatGroup.id,
+                    expo_push_token: expoPushToken,
+                  });
+
+                if (error) {
+                  // Handle potential unique constraint violation gracefully (already subscribed with this token)
+                  if (error.code === '23505') { // Postgres unique violation code
+                     console.warn('Subscription already exists for this user, group, and token.');
+                     setIsSubscribed(true); // Correct state if it was somehow false
+                  } else {
+                     throw error; // Rethrow other errors
+                  }
+                } else {
+                  setIsSubscribed(true);
+                  console.log('Successfully subscribed.');
+                }
+              }
+            } catch (err) {
+              console.error(`Error ${action} subscription:`, err);
+              Alert.alert('Fehler', `Abonnement konnte nicht ${action} werden.`);
+              // Optionally revert UI state on error, though it might be out of sync
+            } finally {
+              setTogglingSubscription(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+  // ------------------------------
 
   // Check if user is member of the org associated with this chat group
   useEffect(() => {
@@ -663,35 +875,54 @@ const ChatDetailScreen = ({ route, navigation }) => {
     );
   };
 
-  const renderHeader = () => (
-    <View style={styles.header}>
-      <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-        <Ionicons name="arrow-back" size={24} color="#4285F4" />
-      </TouchableOpacity>
-      
-      <TouchableOpacity 
-        style={styles.headerTitle}
-      >
-        <Text style={styles.headerName}>{chatGroup.name}</Text>
-        <Text style={styles.headerType}>
-          {isOpenChat() ? 'Offene Gruppe' : isBroadcast() ? 'Ankündigungen' : 'KI Assistent'}
-        </Text>
-      </TouchableOpacity>
-    </View>
-  );
+  // Render Header with Notification Bell
+  const renderHeader = () => {
+    // Log state before rendering button
+    console.log(`Render Header: checking=${checkingSubscription}, toggling=${togglingSubscription}, hasToken=${!!expoPushToken}`);
+
+    return (
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+          <Ionicons name="arrow-back" size={24} color="#4285F4" />
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={styles.headerTitleContainer} // Use a container for title and type
+          // onPress={handleHeaderPress} // Optional: If you want title press action
+        >
+          <Text style={styles.headerName}>{chatGroup.name}</Text>
+          <Text style={styles.headerType}>
+            {isOpenChat() ? 'Offene Gruppe' : isBroadcast() ? 'Ankündigungen' : 'KI Assistent'}
+          </Text>
+        </TouchableOpacity>
+
+        {/* Notification Bell Icon */}
+        {/* Only show bell for non-bot chats and if user is logged in */}
+        {!isBot() && user && (
+          <TouchableOpacity 
+            style={styles.notificationButton} 
+            onPress={toggleSubscription}
+            disabled={checkingSubscription || togglingSubscription || !expoPushToken} // Disable while checking/toggling or if no token
+          >
+            {checkingSubscription || togglingSubscription ? (
+              <ActivityIndicator size="small" color="#4285F4" />
+            ) : (
+              <Ionicons 
+                name={isSubscribed ? "notifications" : "notifications-outline"} 
+                size={24} 
+                color={isSubscribed ? "#4285F4" : (checkingSubscription || !expoPushToken ? "#ccc" : "#666")} // Indicate disabled/subscribed state
+              />
+            )}
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  };
 
   if (loading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={24} color="#4285F4" />
-          </TouchableOpacity>
-          
-          <View style={styles.headerTitle}>
-            <Text style={styles.headerName}>{chatGroup.name}</Text>
-          </View>
-        </View>
+        {renderHeader()}
         <View style={styles.centerContent}>
           <ActivityIndicator size="large" color="#4285F4" />
           <Text style={styles.loadingText}>Nachrichten werden geladen...</Text>
@@ -703,15 +934,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
   if (error) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={24} color="#4285F4" />
-          </TouchableOpacity>
-          
-          <View style={styles.headerTitle}>
-            <Text style={styles.headerName}>{chatGroup.name}</Text>
-          </View>
-        </View>
+        {renderHeader()}
         <View style={styles.centerContent}>
           <Ionicons name="alert-circle-outline" size={40} color="#ff3b30" />
           <Text style={styles.errorText}>{error}</Text>
@@ -867,8 +1090,10 @@ const styles = StyleSheet.create({
   backButton: {
     paddingRight: 10,
   },
-  headerTitle: {
+  headerTitleContainer: { // Container for name and type
     flex: 1,
+    marginLeft: 10, // Add some margin from back button
+    marginRight: 10, // Add margin before notification button
   },
   headerName: {
     fontSize: 16,
@@ -1090,6 +1315,7 @@ const styles = StyleSheet.create({
     padding: 40,
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: 10,
   },
   emptyText: {
     color: '#888',
@@ -1137,6 +1363,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderRadius: 10,
+  },
+  notificationButton: { // Style for the bell button
+    padding: 5, // Add padding for easier tapping
   },
 });
 
