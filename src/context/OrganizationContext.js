@@ -14,16 +14,55 @@ export const OrganizationProvider = ({ children }) => {
   const [activeOrganizationId, setActiveOrganizationId] = useState(null);
   const [activeOrganization, setActiveOrganization] = useState(null); // Store full org details
   const [isLoading, setIsLoading] = useState(true);
-  const { user, userOrganizations, loadUserProfile } = useAuth(); // Get user status, userOrganizations and loadUserProfile function
+  const {
+      user,
+      userOrganizations,
+      loadUserProfile,
+      removeOrganizationMember, // Get from AuthContext
+      transferOrganizationAdmin // Get from AuthContext
+  } = useAuth(); // Get user status, userOrganizations and loadUserProfile function
 
   // Effect to log changes in userOrganizations (for debugging the trigger)
   useEffect(() => {
-    if (!isLoading && user) { // Only log after initial load and if user is logged in
+    // REMOVED THE AUTOMATIC SWITCH LOGIC - Let UI handle redirection
+    if (user && !isLoading) { 
         console.log('OrgContext: Detected change in userOrganizations:', userOrganizations);
-        // TODO: Add logic here later to check if an org was *just* added
-        // and trigger switchOrganizationContext if necessary.
+        // NO LONGER attempting switchOrganizationContext(null) from here
     }
-  }, [userOrganizations, isLoading, user]);
+    // Keep dependencies
+  }, [userOrganizations, user, activeOrganizationId, isLoading]);
+
+  // <<< NEW useEffect to update activeOrganization state on role change >>>
+  useEffect(() => {
+    // Only run if a user is logged in, an org is active, and we have the lists
+    if (user && activeOrganizationId && activeOrganization && userOrganizations) {
+        // Find the membership details for the *currently logged-in user* in the *active organization*
+        const updatedOrgMembershipForCurrentUser = userOrganizations.find(
+            org => org.id === activeOrganizationId // Match the active org ID
+            // No user ID check needed here, userOrganizations is already filtered by AuthContext for the logged-in user
+        );
+        
+        const newRoleForCurrentUser = updatedOrgMembershipForCurrentUser?.role;
+        
+        // console.log(`OrgContext Check: Active Org ID: ${activeOrganizationId}, Current User: ${user.id}, Current Role in State: ${activeOrganization.currentUserRole}, New Role from userOrgs for this user: ${newRoleForCurrentUser}`);
+        
+        // Update the activeOrganization state ONLY if the *current user's* role has changed
+        if (newRoleForCurrentUser && newRoleForCurrentUser !== activeOrganization.currentUserRole) {
+            console.log(`OrgContext: Detected role change for CURRENT USER (${user.id}) in active org ${activeOrganizationId}. Updating role from ${activeOrganization.currentUserRole} to ${newRoleForCurrentUser}.`);
+            setActiveOrganization(prev => {
+                if (!prev) return null; // Safety check
+                return {
+                    ...prev,
+                    currentUserRole: newRoleForCurrentUser,
+                    // Re-evaluate invite code visibility based on the current user's new role
+                    invite_code: newRoleForCurrentUser === 'admin' ? prev.invite_code : null 
+                };
+            });
+        }
+    }
+    // Depend on userOrganizations, activeOrganizationId, and user object (to get user.id)
+    // Also depend on activeOrganization itself to prevent potential stale closures, though the primary trigger is userOrganizations
+  }, [userOrganizations, activeOrganizationId, user, activeOrganization]); 
 
   // Load active organization from storage on mount
   useEffect(() => {
@@ -135,9 +174,16 @@ export const OrganizationProvider = ({ children }) => {
                currentUserRole: memberData.role,
            };
 
+          // --- BEGIN STATE UPDATES ---
+          console.log(`OrgContext: [${switchTimestamp}] Updating state: Setting active ID to ${organizationId}`);
           setActiveOrganizationId(organizationId);
+          console.log(`OrgContext: [${switchTimestamp}] Updating state: Setting active Org details:`, orgDetails);
           setActiveOrganization(orgDetails);
+          console.log(`OrgContext: [${switchTimestamp}] Updating state: Saving active ID to AsyncStorage`);
           await AsyncStorage.setItem(ACTIVE_ORG_STORAGE_KEY, organizationId);
+          console.log(`OrgContext: [${switchTimestamp}] State updates complete. Preparing to return success.`);
+          // --- END STATE UPDATES ---
+
           console.log(`OrgContext: [${switchTimestamp}] Successfully switched context. State updated for organization:`, orgDetails);
           return { success: true, data: orgDetails };
         } else {
@@ -149,18 +195,21 @@ export const OrganizationProvider = ({ children }) => {
           return { success: false, error: 'Organization not found or access denied.' };
         }
       }
-      console.log(`OrgContext: [${switchTimestamp}] END switchOrganizationContext (Successful switch/clear).`);
+      console.log(`OrgContext: [${switchTimestamp}] END switchOrganizationContext (Successful switch/clear). Preparing to return success.`);
       return { success: true };
     } catch (error) {
        console.error(`OrgContext: [${switchTimestamp}] Unexpected error in switchOrganizationContext:`, error);
+       console.log(`OrgContext: [${switchTimestamp}] Resetting state due to error.`);
        setActiveOrganizationId(null);
        setActiveOrganization(null);
        await AsyncStorage.removeItem(ACTIVE_ORG_STORAGE_KEY);
        console.log(`OrgContext: [${switchTimestamp}] END switchOrganizationContext (Caught error). State cleared.`);
        return { success: false, error: error.message || 'Failed to switch organization.' };
     } finally {
+      console.log(`OrgContext: [${switchTimestamp}] Entering FINALLY block for switchOrganizationContext.`);
       setIsLoading(false);
-      console.log(`OrgContext: [${switchTimestamp}] FINALLY block switchOrganizationContext. isLoading set to false.`);
+      // console.log(`OrgContext: [${switchTimestamp}] FINALLY block switchOrganizationContext. isLoading set to false.`); // Line 202 - Temporarily commented out for debugging
+      console.log(`OrgContext: [${switchTimestamp}] Exiting FINALLY block. isLoading is now false.`);
     }
   };
 
@@ -236,6 +285,9 @@ export const OrganizationProvider = ({ children }) => {
             switchOrganizationContext,
             deleteOrganization, // Add the new function
             isOrganizationActive: !!activeOrganizationId, // Convenience boolean
+            // Member management functions passed through
+            removeOrganizationMember,
+            transferOrganizationAdmin,
         }}
     >
       {children}

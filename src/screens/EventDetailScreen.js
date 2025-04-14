@@ -20,6 +20,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
+import { useNetwork } from '../context/NetworkContext';
+import { loadOfflineData } from '../utils/storageUtils';
 import { Menu, Provider } from 'react-native-paper';
 import { RRule, RRuleSet, rrulestr } from 'rrule';
 
@@ -61,7 +63,7 @@ const germanRuleTranslator = (key, index) => {
     // 1. Check direct map first
     if (map.hasOwnProperty(key)) { // Use hasOwnProperty for safer lookup
         translationResult = map[key];
-        console.log(`[germanRuleTranslator] Found direct map translation for "${key}": "${translationResult}"`);
+        //console.log(`[germanRuleTranslator] Found direct map translation for "${key}": "${translationResult}"`);
     }
     // 2. Fallback for generic keys with index
     else if (key === 'weekday' && index !== undefined && index >= 0 && index < weekdays.length) {
@@ -93,9 +95,11 @@ const EventDetailScreen = ({ route, navigation }) => {
   const { eventId } = route.params;
   const { user, displayName } = useAuth();
   const { activeOrganizationId } = useOrganization();
+  const { isOfflineMode, isConnected } = useNetwork();
   
   // State for event data
   const [event, setEvent] = useState(null);
+  const [isFullEventAvailable, setIsFullEventAvailable] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [organizerName, setOrganizerName] = useState('Organisator');
@@ -126,15 +130,64 @@ const EventDetailScreen = ({ route, navigation }) => {
   const openMenu = () => setMenuVisible(true);
   const closeMenu = () => setMenuVisible(false);
   
-  // Load event, comments, reactions, and attendance on component mount
+  // Load event data based on mode
   useEffect(() => {
-    fetchEventData();
-    fetchUserAttendanceStatus();
-    fetchAttendeesList();
-  }, [eventId, user]);
+    if (isOfflineMode) {
+      loadEventFromStorage();
+    } else {
+      fetchEventData(); // Fetch full data online
+      // Only fetch interactive data if online
+      fetchUserAttendanceStatus();
+      fetchAttendeesList();
+    }
+  }, [eventId, isOfflineMode, user]); // Add user dependency for attendance status
+
+  // Load event data from storage
+  const loadEventFromStorage = async () => {
+    console.log(`[EventDetailScreen] Loading event ${eventId} from offline storage...`);
+    setLoading(true);
+    setError(null);
+    setEvent(null);
+    setIsFullEventAvailable(false); // Assume partial initially
+    setComments([]);
+    setReactions({});
+    setAttendees({ attending: 0, maybe: 0, declined: 0 });
+    setUserStatus(null);
+    setAttendeesList([]);
+
+    try {
+      // Load the events list (from event_listings view)
+      const offlineEventsList = await loadOfflineData('events');
+
+      if (offlineEventsList) {
+        const eventFromList = offlineEventsList.find(item => item.id === eventId);
+
+        if (eventFromList) {
+          setEvent(eventFromList); // Set the data from the listing
+          setOrganizerName(eventFromList.organizer_name || 'Organisator'); // Use name from listing
+          setCanEditDelete(false); // Cannot edit/delete offline
+          setIsFullEventAvailable(true); // Assume listing data is sufficient for now
+          console.log(`[EventDetailScreen] Found event ${eventId} in offline list.`);
+        } else {
+          setError('Event offline nicht gefunden.');
+          console.log(`[EventDetailScreen] Event ${eventId} not found in offline list.`);
+        }
+      } else {
+        setError('Offline-Eventdaten nicht verfügbar.');
+        console.log('[EventDetailScreen] Offline events list not found.');
+      }
+    } catch (err) {
+      console.error('[EventDetailScreen] Error loading event from storage:', err);
+      setError('Fehler beim Laden des Offline-Events.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Fetch the full event data including recurrence
   const fetchEventData = async () => {
+    if (isOfflineMode) return; // Prevent fetch if offline
+
     try {
       setLoading(true);
       setError(null);
@@ -217,7 +270,7 @@ const EventDetailScreen = ({ route, navigation }) => {
   
   // Function to check if the current user can edit/delete event
   const checkEditDeletePermission = async (eventData) => {
-    if (!user) {
+    if (isOfflineMode || !user) {
         setCanEditDelete(false);
         return;
     }
@@ -260,6 +313,8 @@ const EventDetailScreen = ({ route, navigation }) => {
   
   // Fetch comments for the event
   const fetchComments = async () => {
+    if (isOfflineMode) return; // Prevent fetch if offline
+
     try {
       setLoadingComments(true);
       
@@ -284,6 +339,8 @@ const EventDetailScreen = ({ route, navigation }) => {
   
   // Fetch reaction counts for the event
   const fetchReactions = async () => {
+    if (isOfflineMode) return; // Prevent fetch if offline
+
     try {
       const { data, error } = await supabase
         .rpc('get_event_reactions', { event_uuid: eventId });
@@ -301,6 +358,8 @@ const EventDetailScreen = ({ route, navigation }) => {
   
   // Fetch attendee counts
   const fetchAttendeeCounts = async () => {
+    if (isOfflineMode) return; // Prevent fetch if offline
+
     try {
       const { data, error } = await supabase
         .rpc('get_event_attendees', { event_uuid: eventId });
@@ -317,7 +376,7 @@ const EventDetailScreen = ({ route, navigation }) => {
   
   // Fetch the current user's attendance status
   const fetchUserAttendanceStatus = async () => {
-    if (!user) {
+    if (isOfflineMode || !user) {
       setUserStatus(null);
       return;
     }
@@ -341,6 +400,8 @@ const EventDetailScreen = ({ route, navigation }) => {
   
   // Fetch the list of attendees (names and avatars)
   const fetchAttendeesList = async () => {
+    if (isOfflineMode) return; // Prevent fetch if offline
+
     try {
       setLoadingAttendeesList(true);
       const { data, error } = await supabase
@@ -381,6 +442,10 @@ const EventDetailScreen = ({ route, navigation }) => {
   
   // Handle user changing their attendance status
   const handleSetAttendance = async (status) => {
+    if (isOfflineMode) { // Add offline check
+        Alert.alert("Offline", "Teilnahmestatus kann offline nicht geändert werden.");
+        return;
+    }
     // Check if user is authenticated
     if (!user) {
       showAuthPrompt();
@@ -428,6 +493,10 @@ const EventDetailScreen = ({ route, navigation }) => {
   
   // Handle event deletion
   const handleDeleteEvent = async () => {
+    if (isOfflineMode) { // Add offline check
+        Alert.alert("Offline", "Löschen ist offline nicht verfügbar.");
+        return;
+    }
     // Re-check permission
     if (!canEditDelete) {
       Alert.alert('Fehler', 'Du bist nicht berechtigt, dieses Event zu löschen.');
@@ -479,6 +548,10 @@ const EventDetailScreen = ({ route, navigation }) => {
 
   // Handle event editing
   const handleEditEvent = () => {
+    if (isOfflineMode) { // Add offline check
+        Alert.alert("Offline", "Bearbeiten ist offline nicht verfügbar.");
+        return;
+    }
     // Re-check permission
     if (!canEditDelete) {
       Alert.alert('Fehler', 'Du bist nicht berechtigt, dieses Event zu bearbeiten.');
@@ -514,6 +587,7 @@ const EventDetailScreen = ({ route, navigation }) => {
   
   // Add a comment
   const addComment = async () => {
+    if (isOfflineMode) return; // Prevent add if offline
     // Check if user is authenticated
     if (!user) {
       showAuthPrompt();
@@ -554,6 +628,7 @@ const EventDetailScreen = ({ route, navigation }) => {
   
   // Add a reaction
   const addReaction = async (emoji) => {
+    if (isOfflineMode) return; // Prevent add if offline
     // Check if user is authenticated
     if (!user) {
       showAuthPrompt();
@@ -756,7 +831,7 @@ const EventDetailScreen = ({ route, navigation }) => {
              {/* Access event.title safely here */}
              <Text style={styles.headerTitle}>{event.title}</Text>
           </View>
-          {canEditDelete && (
+          {canEditDelete && !isOfflineMode && (
             <Menu
               visible={menuVisible}
               onDismiss={closeMenu}
@@ -846,150 +921,155 @@ const EventDetailScreen = ({ route, navigation }) => {
           
           <View style={styles.divider} />
           
-          <Text style={styles.sectionTitle}>Nimmst du teil?</Text>
-          <View style={styles.attendanceButtonsContainer}>
-            <TouchableOpacity
-              style={[styles.attendanceButton, userStatus === 'attending' && styles.attendingSelected]}
-              onPress={() => handleSetAttendance('attending')}
-              disabled={updatingStatus}
-            >
-              <Ionicons name={userStatus === 'attending' ? "checkmark-circle" : "checkmark-circle-outline"} size={20} color={userStatus === 'attending' ? '#fff' : '#4CAF50'} />
-              <Text style={[styles.attendanceButtonText, userStatus === 'attending' && styles.selectedText]}>Ja ({attendees.attending || 0})</Text>
-              {updatingStatus && userStatus === 'attending' && <ActivityIndicator size="small" color="#fff" style={styles.buttonLoader}/>}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.attendanceButton, userStatus === 'maybe' && styles.maybeSelected]}
-              onPress={() => handleSetAttendance('maybe')}
-              disabled={updatingStatus}
-            >
-              <Ionicons name={userStatus === 'maybe' ? "help-circle" : "help-circle-outline"} size={20} color={userStatus === 'maybe' ? '#fff' : '#FFC107'} />
-              <Text style={[styles.attendanceButtonText, userStatus === 'maybe' && styles.selectedText]}>Vielleicht ({attendees.maybe || 0})</Text>
-               {updatingStatus && userStatus === 'maybe' && <ActivityIndicator size="small" color="#fff" style={styles.buttonLoader}/>}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.attendanceButton, userStatus === 'declined' && styles.declinedSelected]}
-              onPress={() => handleSetAttendance('declined')}
-               disabled={updatingStatus}
-            >
-              <Ionicons name={userStatus === 'declined' ? "close-circle" : "close-circle-outline"} size={20} color={userStatus === 'declined' ? '#fff' : '#F44336'} />
-              <Text style={[styles.attendanceButtonText, userStatus === 'declined' && styles.selectedText]}>Nein ({attendees.declined || 0})</Text>
-              {updatingStatus && userStatus === 'declined' && <ActivityIndicator size="small" color="#fff" style={styles.buttonLoader}/>}
-            </TouchableOpacity>
-          </View>
-          
-          <View style={styles.divider} />
-          
-          {renderReactions()}
-          
-          <View style={styles.actionBar}>
-            <TouchableOpacity 
-              style={styles.actionButton}
-              onPress={() => setShowEmojiPicker(!showEmojiPicker)}
-            >
-              <Ionicons name="happy-outline" size={20} color="#4285F4" />
-              <Text style={styles.actionText}>Reaktion</Text>
-            </TouchableOpacity>
-            
-            {renderEmojiPicker()}
-          </View>
-          
-          <View style={styles.commentsSection}>
-            <Text style={styles.commentsHeader}>Kommentare ({comments.length})</Text>
-            
-            {loadingComments ? (
-              <ActivityIndicator size="small" color="#4285F4" style={styles.commentsLoading} />
-            ) : (
-              <FlatList
-                data={comments}
-                renderItem={({ item }) => {
-                  // Format comment time
-                  const commentDate = new Date(item.created_at);
-                  const formattedTime = `${commentDate.getHours().toString().padStart(2, '0')}:${commentDate.getMinutes().toString().padStart(2, '0')}`;
-                  const formattedDate = `${commentDate.getDate().toString().padStart(2, '0')}.${(commentDate.getMonth() + 1).toString().padStart(2, '0')}.${commentDate.getFullYear()}`;
-                  
-                  // Get user name from the view directly
-                  const userName = item.user_name || 'Unbekannt';
-
-                  return (
-                    <View style={styles.commentItem}>
-                      <View style={styles.commentHeader}>
-                        <Text style={styles.commentUser}>{userName}</Text> 
-                        <Text style={styles.commentTime}>{`${formattedDate} ${formattedTime}`}</Text>
-                      </View>
-                      <Text style={styles.commentText}>{item.text}</Text>
-                    </View>
-                  );
-                }}
-                keyExtractor={item => item.id.toString()}
-                scrollEnabled={false}
-                ListEmptyComponent={
-                  <Text style={styles.emptyCommentsText}>
-                    Noch keine Kommentare. Sei der Erste, der einen Kommentar hinterlässt!
-                  </Text>
-                }
-              />
-            )}
-          </View>
-          
-          <View style={styles.divider} />
-          
-          <View style={styles.attendeesSection}>
-            <Text style={styles.sectionTitle}>Teilnehmerliste ({attendeesList.length})</Text>
-            {loadingAttendeesList ? (
-              <ActivityIndicator size="small" color="#4285F4" />
-            ) : attendeesList.length > 0 ? (
-              attendeesList.map(item => {
-                // Get user name from the view directly
-                const attendeeName = item.user_name; // Corrected: Use user_name from the view
-                
-                return (
-                  <View key={item.user_id} style={styles.attendeeItem}>
-                    <Image
-                      source={require('../../assets/avatar_placeholder.png')} // Always use placeholder
-                      style={styles.attendeeAvatar}
-                    />
-                    <Text style={styles.attendeeName}>{attendeeName}</Text>
-                    <View style={[styles.statusBadge, styles[`statusBadge_${item.status}`]]}>
-                      <Text style={styles.statusBadgeText}>{item.status === 'attending' ? 'Nimmt teil' : item.status === 'maybe' ? 'Vielleicht' : 'Abgelehnt'}</Text>
-                    </View>
+          {/* Conditionally render interactive sections */} 
+          {!isOfflineMode && (
+              <>
+                  <Text style={styles.sectionTitle}>Nimmst du teil?</Text>
+                  <View style={styles.attendanceButtonsContainer}>
+                    <TouchableOpacity
+                      style={[styles.attendanceButton, userStatus === 'attending' && styles.attendingSelected]}
+                      onPress={() => handleSetAttendance('attending')}
+                      disabled={updatingStatus}
+                    >
+                      <Ionicons name={userStatus === 'attending' ? "checkmark-circle" : "checkmark-circle-outline"} size={20} color={userStatus === 'attending' ? '#fff' : '#4CAF50'} />
+                      <Text style={[styles.attendanceButtonText, userStatus === 'attending' && styles.selectedText]}>Ja ({attendees.attending || 0})</Text>
+                      {updatingStatus && userStatus === 'attending' && <ActivityIndicator size="small" color="#fff" style={styles.buttonLoader}/>}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.attendanceButton, userStatus === 'maybe' && styles.maybeSelected]}
+                      onPress={() => handleSetAttendance('maybe')}
+                      disabled={updatingStatus}
+                    >
+                      <Ionicons name={userStatus === 'maybe' ? "help-circle" : "help-circle-outline"} size={20} color={userStatus === 'maybe' ? '#fff' : '#FFC107'} />
+                      <Text style={[styles.attendanceButtonText, userStatus === 'maybe' && styles.selectedText]}>Vielleicht ({attendees.maybe || 0})</Text>
+                       {updatingStatus && userStatus === 'maybe' && <ActivityIndicator size="small" color="#fff" style={styles.buttonLoader}/>}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.attendanceButton, userStatus === 'declined' && styles.declinedSelected]}
+                      onPress={() => handleSetAttendance('declined')}
+                       disabled={updatingStatus}
+                    >
+                      <Ionicons name={userStatus === 'declined' ? "close-circle" : "close-circle-outline"} size={20} color={userStatus === 'declined' ? '#fff' : '#F44336'} />
+                      <Text style={[styles.attendanceButtonText, userStatus === 'declined' && styles.selectedText]}>Nein ({attendees.declined || 0})</Text>
+                      {updatingStatus && userStatus === 'declined' && <ActivityIndicator size="small" color="#fff" style={styles.buttonLoader}/>}
+                    </TouchableOpacity>
                   </View>
-                );
-              })
-            ) : (
-              <Text style={styles.noAttendeesText}>Noch keine Teilnehmer registriert.</Text>
-            )}
-          </View>
+
+                  <View style={styles.divider} />
+                  {renderReactions()}
+                  <View style={styles.actionBar}>
+                    <TouchableOpacity 
+                      style={styles.actionButton}
+                      onPress={() => setShowEmojiPicker(!showEmojiPicker)}
+                    >
+                      <Ionicons name="happy-outline" size={20} color="#4285F4" />
+                      <Text style={styles.actionText}>Reaktion</Text>
+                    </TouchableOpacity>
+                    
+                    {renderEmojiPicker()}
+                  </View>
+
+                  <View style={styles.commentsSection}>
+                    <Text style={styles.commentsHeader}>Kommentare ({comments.length})</Text>
+                    
+                    {loadingComments ? (
+                      <ActivityIndicator size="small" color="#4285F4" style={styles.commentsLoading} />
+                    ) : (
+                      <FlatList
+                        data={comments}
+                        renderItem={({ item }) => {
+                          // Format comment time
+                          const commentDate = new Date(item.created_at);
+                          const formattedTime = `${commentDate.getHours().toString().padStart(2, '0')}:${commentDate.getMinutes().toString().padStart(2, '0')}`;
+                          const formattedDate = `${commentDate.getDate().toString().padStart(2, '0')}.${(commentDate.getMonth() + 1).toString().padStart(2, '0')}.${commentDate.getFullYear()}`;
+                          
+                          // Get user name from the view directly
+                          const userName = item.user_name || 'Unbekannt';
+
+                          return (
+                            <View style={styles.commentItem}>
+                              <View style={styles.commentHeader}>
+                                <Text style={styles.commentUser}>{userName}</Text> 
+                                <Text style={styles.commentTime}>{`${formattedDate} ${formattedTime}`}</Text>
+                              </View>
+                              <Text style={styles.commentText}>{item.text}</Text>
+                            </View>
+                          );
+                        }}
+                        keyExtractor={item => item.id.toString()}
+                        scrollEnabled={false}
+                        ListEmptyComponent={
+                          <Text style={styles.emptyCommentsText}>
+                            Noch keine Kommentare. Sei der Erste, der einen Kommentar hinterlässt!
+                          </Text>
+                        }
+                      />
+                    )}
+                  </View>
+
+                  <View style={styles.divider} />
+                  <View style={styles.attendeesSection}>
+                    <Text style={styles.sectionTitle}>Teilnehmerliste ({attendeesList.length})</Text>
+                    {loadingAttendeesList ? (
+                      <ActivityIndicator size="small" color="#4285F4" />
+                    ) : attendeesList.length > 0 ? (
+                      attendeesList.map(item => {
+                        // Get user name from the view directly
+                        const attendeeName = item.user_name; // Corrected: Use user_name from the view
+                        
+                        return (
+                          <View key={item.user_id} style={styles.attendeeItem}>
+                            <Image
+                              source={require('../../assets/avatar_placeholder.png')} // Always use placeholder
+                              style={styles.attendeeAvatar}
+                            />
+                            <Text style={styles.attendeeName}>{attendeeName}</Text>
+                            <View style={[styles.statusBadge, styles[`statusBadge_${item.status}`]]}>
+                              <Text style={styles.statusBadgeText}>{item.status === 'attending' ? 'Nimmt teil' : item.status === 'maybe' ? 'Vielleicht' : 'Abgelehnt'}</Text>
+                            </View>
+                          </View>
+                        );
+                      })
+                    ) : (
+                      <Text style={styles.noAttendeesText}>Noch keine Teilnehmer registriert.</Text>
+                    )}
+                  </View>
+              </>
+          )}
         </ScrollView>
         
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 90}
-          style={styles.inputContainer}
-        >
-          <View style={styles.inputRow}>
-            <TextInput
-              style={styles.input}
-              placeholder="Schreibe einen Kommentar..."
-              value={comment}
-              onChangeText={setComment}
-              multiline
-            />
-            <TouchableOpacity 
-              style={[
-                styles.sendButton, 
-                (comment.trim() === '' || addingComment) && styles.sendButtonDisabled
-              ]} 
-              onPress={addComment}
-              disabled={comment.trim() === '' || addingComment}
+        {/* Conditionally render comment input */} 
+        {!isOfflineMode && (
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+              keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 90}
+              style={styles.inputContainer}
             >
-              {addingComment ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Ionicons name="send" size={20} color={comment.trim() === '' ? "#ccc" : "#fff"} />
-              )}
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
+              <View style={styles.inputRow}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Schreibe einen Kommentar..."
+                  value={comment}
+                  onChangeText={setComment}
+                  multiline
+                />
+                <TouchableOpacity 
+                  style={[
+                    styles.sendButton, 
+                    (comment.trim() === '' || addingComment) && styles.sendButtonDisabled
+                  ]} 
+                  onPress={addComment}
+                  disabled={comment.trim() === '' || addingComment}
+                >
+                  {addingComment ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Ionicons name="send" size={20} color={comment.trim() === '' ? "#ccc" : "#fff"} />
+                  )}
+                </TouchableOpacity>
+              </View>
+            </KeyboardAvoidingView>
+        )}
         
         {isDeleting && (
           <View style={styles.deleteOverlay}>

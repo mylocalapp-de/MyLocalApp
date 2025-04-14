@@ -23,6 +23,7 @@ import CreateBroadcastGroupScreen from '../screens/CreateBroadcastGroupScreen';
 import CreateEventScreen from '../screens/CreateEventScreen';
 import EditEventScreen from '../screens/EditEventScreen';
 import OrganizationSetupScreen from '../screens/OrganizationSetupScreen';
+import CreatePoiScreen from '../screens/CreatePoiScreen';
 
 const Tab = createBottomTabNavigator();
 const ChatStack = createStackNavigator();
@@ -187,6 +188,11 @@ const AppNavigator = () => {
             name="OrganizationSetup" 
             component={OrganizationSetupScreen}
         />
+        <RootStack.Screen name="EventDetail" component={EventDetailScreen} options={{ headerShown: false }} />
+        <RootStack.Screen name="CreateEvent" component={CreateEventScreen} options={{ headerShown: false, presentation: 'modal' }} />
+        <RootStack.Screen name="EditEvent" component={EditEventScreen} options={{ headerShown: false, presentation: 'modal' }} />
+        <RootStack.Screen name="CreateBroadcastGroup" component={CreateBroadcastGroupScreen} options={{ headerShown: false, presentation: 'modal' }} />
+        <RootStack.Screen name="CreatePoi" component={CreatePoiScreen} options={{ headerShown: false, presentation: 'modal' }} />
       </RootStack.Navigator>
     </NavigationContainer>
   );

@@ -73,12 +73,15 @@ export const AuthProvider = ({ children }) => {
 
         // Update user state IF the user object itself has changed identity
         // This prevents unnecessary updates for events like TOKEN_REFRESHED where user ID is the same
-        if (userIdChanged) {
-            console.log('AuthContext: Updating user context state object due to ID change.');
-            setUser(newSupabaseUser);
-        } else {
-            console.log('AuthContext: Skipping user context state object update (ID unchanged).');
-        }
+        // if (userIdChanged) {
+        //     console.log('AuthContext: Updating user context state object due to ID change.');
+        //     setUser(newSupabaseUser);
+        // } else {
+        //     console.log('AuthContext: Skipping user context state object update (ID unchanged).');
+        // }
+        // <<< REVISED: Always set user state based on the session from the listener >>>
+        console.log(`AuthContext: Setting user state object based on listener session: ${newSupabaseUser ? newSupabaseUser.id : 'null'}`);
+        setUser(newSupabaseUser);
 
         // Handle different event types
         switch (_event) {
@@ -166,8 +169,12 @@ export const AuthProvider = ({ children }) => {
   
    // Update overall loading state
   useEffect(() => {
-    setLoading(loadingAuth || loadingProfile);
-  }, [loadingAuth, loadingProfile]);
+    // Loading is true if EITHER auth state is being checked OR 
+    // if auth check is done AND there is a user AND profile/orgs are still loading.
+    const isLoading = loadingAuth || (!loadingAuth && !!user && loadingProfile);
+    // console.log(`AuthContext Loading State: loadingAuth=${loadingAuth}, userExists=${!!user}, loadingProfile=${loadingProfile} => CombinedLoading=${isLoading}`);
+    setLoading(isLoading);
+  }, [loadingAuth, loadingProfile, user]); // Add user dependency
 
   // --- Profile & Organization Loading ---
   const loadUserProfileAndOrgs = async (userId) => {
@@ -884,6 +891,48 @@ export const AuthProvider = ({ children }) => {
        }
   };
 
+  // --- NEW: Update Organization Name ---
+  const updateOrganizationName = async (organizationId, newName) => {
+    if (!user) return { success: false, error: { message: 'Nicht angemeldet.' } };
+    if (!organizationId) return { success: false, error: { message: 'Organisations-ID benötigt.' } };
+    if (!newName || newName.trim() === '') return { success: false, error: { message: 'Organisationsname darf nicht leer sein.' } };
+
+    setLoading(true);
+    try {
+        console.log(`AuthContext: Attempting to update name for org ${organizationId} to "${newName.trim()}" by admin ${user.id}`);
+        // RLS policy "Allow admin to manage their organization" handles authorization
+        const { data, error } = await supabase
+            .from('organizations')
+            .update({ name: newName.trim(), updated_at: new Date() })
+            .eq('id', organizationId)
+            .select('id, name') // Select the updated data
+            .single(); // Expect a single row back
+
+        if (error) {
+            console.error("AuthContext: Error updating organization name:", error);
+            const message = error.message.includes('duplicate key value violates unique constraint')
+                ? 'Eine Organisation mit diesem Namen existiert bereits.'
+                : error.message.includes('permission denied')
+                ? 'Berechtigung verweigert. Nur Admins können den Namen ändern.'
+                : error.message || 'Fehler beim Aktualisieren des Namens.';
+            return { success: false, error: { message } };
+        }
+
+        console.log(`AuthContext: Successfully updated org name to "${data.name}"`);
+        // Refetch user's org list in case the name needs updating there too
+        await loadUserProfileAndOrgs(user.id);
+        
+        // Return the updated organization data
+        return { success: true, data };
+
+    } catch (error) {
+        console.error("AuthContext: Unexpected error updating org name:", error);
+        return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+    } finally {
+        setLoading(false);
+    }
+  };
+
   // --- Reset Onboarding (for testing/dev) ---
   const resetOnboarding = async () => {
     try {
@@ -908,6 +957,79 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       console.error('AuthContext: Error resetting onboarding:', error);
       return { success: false, error };
+    }
+  };
+
+  // --- Member Management Functions ---
+  const removeOrganizationMember = async (organizationId, memberUserId) => {
+    if (!user) return { success: false, error: { message: 'Nicht angemeldet.' } };
+    if (!organizationId || !memberUserId) return { success: false, error: { message: 'Organisations- und Mitglieds-ID benötigt.' } };
+    if (memberUserId === user.id) return { success: false, error: { message: 'Du kannst dich nicht selbst entfernen.'}}; // Prevent self-removal
+
+    setLoading(true);
+    try {
+        console.log(`AuthContext: Attempting to remove member ${memberUserId} from org ${organizationId} by admin ${user.id}`);
+        // RLS policy "prevent_last_admin_leave_or_remove_others" handles authorization
+        const { error } = await supabase
+            .from('organization_members')
+            .delete()
+            .eq('organization_id', organizationId)
+            .eq('user_id', memberUserId);
+
+        if (error) {
+            console.error("AuthContext: Error removing member:", error);
+            // Provide a more specific message if possible, otherwise generic
+            const message = error.message.includes('permission denied')
+              ? 'Berechtigung verweigert. Nur Admins können Mitglieder entfernen.'
+              : error.message || 'Fehler beim Entfernen des Mitglieds.';
+            return { success: false, error: { message } };
+        }
+
+        console.log(`AuthContext: Successfully removed member ${memberUserId} from org ${organizationId}`);
+        // ProfileScreen will need to refetch members after this succeeds
+        return { success: true };
+
+    } catch (error) {
+        console.error("AuthContext: Unexpected error removing member:", error);
+        return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+    } finally {
+        setLoading(false);
+    }
+  };
+
+  const transferOrganizationAdmin = async (organizationId, newAdminUserId) => {
+    if (!user) return { success: false, error: { message: 'Nicht angemeldet.' } };
+    if (!organizationId || !newAdminUserId) return { success: false, error: { message: 'Organisations- und neue Admin-ID benötigt.' } };
+
+    setLoading(true);
+    try {
+      console.log(`AuthContext: Attempting to transfer admin role in org ${organizationId} to user ${newAdminUserId} by current admin ${user.id}`);
+      const { data, error } = await supabase.rpc('set_organization_admin', {
+        p_organization_id: organizationId,
+        p_new_admin_user_id: newAdminUserId
+      });
+
+      if (error) {
+        console.error("AuthContext: Error calling set_organization_admin RPC:", error);
+        return { success: false, error: { message: error.message || 'Fehler bei der Admin-Übertragung.' } };
+      }
+
+      if (data === false) { // RPC returns false on internal error
+        console.warn("AuthContext: set_organization_admin RPC returned false.");
+        return { success: false, error: { message: 'Admin-Übertragung fehlgeschlagen (RPC).' } };
+      }
+
+      console.log(`AuthContext: Successfully transferred admin role in org ${organizationId} to user ${newAdminUserId}`);
+      // Refresh user profile & orgs because the current user's role might have changed
+      await loadUserProfileAndOrgs(user.id);
+      // ProfileScreen will also need to refetch members to update roles visually
+      return { success: true };
+
+    } catch (error) {
+        console.error("AuthContext: Unexpected error transferring admin role:", error);
+        return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+    } finally {
+        setLoading(false);
     }
   };
 
@@ -937,7 +1059,10 @@ export const AuthProvider = ({ children }) => {
     joinOrganizationByInviteCode,
     leaveOrganization,
     fetchOrganizationMembers,
-    updateOrganizationDetails
+    updateOrganizationDetails,
+    updateOrganizationName,
+    removeOrganizationMember,
+    transferOrganizationAdmin
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

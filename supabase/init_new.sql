@@ -570,7 +570,7 @@ BEGIN
     WHERE organization_id = p_organization_id AND user_id = p_new_admin_user_id;
 
     -- Optional: Update the organizations table admin_id (if still used)
-    -- UPDATE public.organizations SET admin_id = p_new_admin_user_id WHERE id = p_organization_id;
+    UPDATE public.organizations SET admin_id = p_new_admin_user_id WHERE id = p_organization_id;
 
   EXCEPTION
     WHEN others THEN
@@ -953,9 +953,14 @@ CREATE TABLE public.map_pois (
   latitude NUMERIC NOT NULL,
   longitude NUMERIC NOT NULL,
   category TEXT NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  organization_id UUID REFERENCES public.organizations(id) ON DELETE SET NULL,
+  author_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL
 );
 COMMENT ON TABLE public.map_pois IS 'Stores Points of Interest (POIs) for the map.';
+
+COMMENT ON COLUMN public.map_pois.organization_id IS 'Link to the organization this POI belongs to (if any).';
+COMMENT ON COLUMN public.map_pois.author_id IS 'The user who created this POI.';
 
 -- ====================================================================
 -- == RLS and Permissions for Map Data ==
@@ -972,8 +977,47 @@ CREATE POLICY "Allow anyone to read map config" ON public.map_config FOR SELECT 
 ALTER TABLE public.map_pois ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow anyone to read POIs" ON public.map_pois;
 DROP POLICY IF EXISTS "Allow authenticated users to manage POIs" ON public.map_pois; -- Example: Restrict modification
-CREATE POLICY "Allow anyone to read POIs" ON public.map_pois FOR SELECT USING (true);
--- Add INSERT/UPDATE/DELETE policies as needed
+DROP POLICY IF EXISTS "Allow org members to manage their POIs" ON public.map_pois; -- New name
+
+-- SELECT Policy: Allow reading public POIs OR POIs of the user's org(s)
+DROP POLICY IF EXISTS "Allow select public or member org POIs" ON public.map_pois;
+DROP POLICY IF EXISTS "Allow anyone to select any POI" ON public.map_pois;
+CREATE POLICY "Allow anyone to select any POI" ON public.map_pois
+  FOR SELECT TO authenticated, anon -- Allow both anon and authenticated to select
+  USING (true); -- Everyone can see all POIs
+COMMENT ON POLICY "Allow anyone to select any POI" ON public.map_pois IS 'Allows anyone (anonymous or authenticated) to view all POIs, regardless of organization.';
+
+-- INSERT Policy: Allow org members to insert POIs for their org
+DROP POLICY IF EXISTS "Allow org members to insert POIs" ON public.map_pois;
+CREATE POLICY "Allow org members to insert POIs" ON public.map_pois
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    organization_id IS NOT NULL -- Must be an org POI
+    AND author_id = auth.uid() -- Creator must be the current user
+    AND public.is_org_member(auth.uid(), organization_id) -- User must be a member of the target org
+  );
+
+-- UPDATE Policy: Allow org members to update POIs of their org
+DROP POLICY IF EXISTS "Allow org members to update their POIs" ON public.map_pois;
+CREATE POLICY "Allow org members to update their POIs" ON public.map_pois
+  FOR UPDATE TO authenticated
+  USING (
+    organization_id IS NOT NULL AND public.is_org_member(auth.uid(), organization_id)
+  )
+  WITH CHECK (
+    organization_id IS NOT NULL AND public.is_org_member(auth.uid(), organization_id)
+    -- Add check: author_id = auth.uid() -- Optional: Only allow author to update?
+  );
+
+-- DELETE Policy: Allow org members to delete POIs of their org
+DROP POLICY IF EXISTS "Allow org members to delete their POIs" ON public.map_pois;
+CREATE POLICY "Allow org members to delete their POIs" ON public.map_pois
+  FOR DELETE TO authenticated
+  USING (
+    organization_id IS NOT NULL AND public.is_org_member(auth.uid(), organization_id)
+    -- Add check: author_id = auth.uid() -- Optional: Only allow author to delete?
+  );
+
 
 -- Grant Permissions for Map Tables
 GRANT SELECT ON public.map_config TO anon, authenticated;
@@ -1185,6 +1229,75 @@ CREATE POLICY "Allow anonymous delete based on token" ON public.anonymous_push_s
 
 -- Grant Permissions to anonymous role
 GRANT SELECT, INSERT, DELETE ON public.anonymous_push_subscriptions TO anon;
+
+-- ====================================================================
+-- == Additions for Organization Vouchers ==
+-- ====================================================================
+
+-- Organization Vouchers Table
+CREATE TABLE public.organization_vouchers (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  code TEXT NOT NULL UNIQUE,
+  is_used BOOLEAN DEFAULT false NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+  used_at TIMESTAMP WITH TIME ZONE NULL,
+  expires_at TIMESTAMP WITH TIME ZONE NULL,
+  user_id UUID NULL REFERENCES public.profiles(id) ON DELETE SET NULL -- Who used it
+);
+COMMENT ON TABLE public.organization_vouchers IS 'Stores single-use voucher codes for creating organizations.';
+COMMENT ON COLUMN public.organization_vouchers.code IS 'The unique voucher code.';
+COMMENT ON COLUMN public.organization_vouchers.is_used IS 'Whether the voucher has been redeemed.';
+COMMENT ON COLUMN public.organization_vouchers.used_at IS 'Timestamp when the voucher was redeemed.';
+COMMENT ON COLUMN public.organization_vouchers.expires_at IS 'Optional expiration date for the voucher.';
+COMMENT ON COLUMN public.organization_vouchers.user_id IS 'The ID of the user who redeemed the voucher.';
+
+-- Index for faster code lookup
+CREATE INDEX idx_organization_vouchers_code ON public.organization_vouchers(code);
+
+-- RLS for Organization Vouchers
+ALTER TABLE public.organization_vouchers ENABLE ROW LEVEL SECURITY;
+
+-- Drop existing policies if they exist (for idempotency)
+DROP POLICY IF EXISTS "Allow authenticated users to query vouchers" ON public.organization_vouchers;
+DROP POLICY IF EXISTS "Allow service_role full access" ON public.organization_vouchers; -- Example admin policy
+
+-- Allow authenticated users to SELECT vouchers (needed for validation)
+CREATE POLICY "Allow authenticated users to query vouchers" ON public.organization_vouchers
+  FOR SELECT TO authenticated
+  USING (true); -- Allow selecting any row, validation logic will happen in function/client
+
+-- Allow service_role (backend/admin) to manage vouchers
+-- Adjust based on your actual admin/management strategy
+CREATE POLICY "Allow service_role full access" ON public.organization_vouchers
+  FOR ALL -- Or SELECT, INSERT, UPDATE, DELETE specifically
+  USING (true) -- Typically managed via service_role key, bypassing RLS if needed
+  WITH CHECK (true);
+
+-- Grant necessary permissions (Ensure GRANT is after ENABLE RLS and CREATE POLICY)
+GRANT SELECT ON public.organization_vouchers TO authenticated;
+
+-- Drop policy if exists (for idempotency)
+DROP POLICY IF EXISTS "Allow authenticated users to use a voucher" ON public.organization_vouchers;
+
+-- UPDATE Policy for authenticated users to use a voucher
+CREATE POLICY "Allow authenticated users to use a voucher" ON public.organization_vouchers
+  FOR UPDATE TO authenticated
+  USING (
+    -- The row must be unused and not expired for the UPDATE to be allowed
+    is_used = false
+    AND (expires_at IS NULL OR expires_at > now())
+  )
+  WITH CHECK (
+    -- The update must set is_used to true and assign the current user's ID
+    is_used = true
+    AND user_id = auth.uid()
+    -- Implicitly prevents changing the 'code' or other fields not listed in GRANT
+  );
+
+-- Grant UPDATE permission on specific columns needed for redemption
+GRANT UPDATE (is_used, used_at, user_id) ON public.organization_vouchers TO authenticated;
+
+-- INSERT/UPDATE/DELETE should likely be restricted to admin/service roles
 
 -- ====================================================================
 -- == Final Commit ==

@@ -19,6 +19,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
+import { useNetwork } from '../context/NetworkContext';
+import { loadOfflineData } from '../utils/storageUtils';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import 'react-native-get-random-values';
@@ -43,14 +45,13 @@ Notifications.setNotificationHandler({
 });
 
 const ChatDetailScreen = ({ route, navigation }) => {
-  const { chatGroup, onReturn } = route.params;
-  // Log the received chatGroup object immediately
-  console.log('ChatDetailScreen: Received chatGroup param:', JSON.stringify(chatGroup, null, 2));
-
+  const { chatGroup: initialChatGroup, onReturn } = route.params;
   const { user, displayName, userOrganizations } = useAuth();
   const { activeOrganizationId } = useOrganization();
+  const { isOfflineMode, isConnected } = useNetwork();
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
+  const [chatGroup, setChatGroup] = useState(initialChatGroup);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeEmojiPickerMessageId, setActiveEmojiPickerMessageId] = useState(null);
@@ -380,6 +381,11 @@ const ChatDetailScreen = ({ route, navigation }) => {
 
   // Function to pick an image
   const pickImage = async () => {
+    if (isOfflineMode) {
+      Alert.alert("Offline", "Bilder können offline nicht ausgewählt werden.");
+      return;
+    }
+    
     // Check if user is authenticated
     if (!user) {
       showAuthPrompt();
@@ -408,6 +414,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
 
   // Function to upload image and return URL
   const uploadImage = async (asset) => {
+    if (isOfflineMode) return null; // Cannot upload offline
     if (!asset || !asset.base64) return null; // Check if asset and base64 data exist
 
     setIsUploading(true);
@@ -457,6 +464,10 @@ const ChatDetailScreen = ({ route, navigation }) => {
 
   // Fetch messages for the current chat group
   const fetchMessages = async () => {
+    if (isOfflineMode) {
+      setLoading(false); // Ensure loading stops if we somehow enter here while offline
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
@@ -587,6 +598,11 @@ const ChatDetailScreen = ({ route, navigation }) => {
   };
 
   const sendMessage = async () => {
+    if (isOfflineMode) {
+      Alert.alert("Offline", "Nachrichten können offline nicht gesendet werden.");
+      return;
+    }
+    
     // Check if user is authenticated
     if (!user) {
       showAuthPrompt();
@@ -704,6 +720,11 @@ const ChatDetailScreen = ({ route, navigation }) => {
   };
 
   const addReaction = async (messageId, emoji) => {
+    if (isOfflineMode) {
+      Alert.alert("Offline", "Reaktionen sind offline nicht verfügbar.");
+      return;
+    }
+    
     // Check if user is authenticated
     if (!user) {
       showAuthPrompt();
@@ -750,6 +771,11 @@ const ChatDetailScreen = ({ route, navigation }) => {
   };
   
   const addComment = async (messageId, commentText) => {
+    if (isOfflineMode) {
+      Alert.alert("Offline", "Kommentare sind offline nicht verfügbar.");
+      return;
+    }
+    
     // Check if user is authenticated
     if (!user) {
       showAuthPrompt();
@@ -954,7 +980,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
           <TouchableOpacity 
             style={styles.notificationButton} 
             onPress={toggleSubscription}
-            disabled={checkingSubscription || togglingSubscription} // No longer need !expoPushToken condition since we check above
+            disabled={checkingSubscription || togglingSubscription || isOfflineMode}
           >
             {checkingSubscription || togglingSubscription ? (
               <ActivityIndicator size="small" color="#4285F4" />
@@ -962,7 +988,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
               <Ionicons 
                 name={isSubscribed ? "notifications" : "notifications-outline"} 
                 size={24} 
-                color={isSubscribed ? "#4285F4" : "#666"} // Simplified color logic
+                color={(isOfflineMode || checkingSubscription || togglingSubscription) ? "#ccc" : (isSubscribed ? "#4285F4" : "#666")}
               />
             )}
           </TouchableOpacity>
@@ -977,24 +1003,26 @@ const ChatDetailScreen = ({ route, navigation }) => {
         {renderHeader()}
         <View style={styles.centerContent}>
           <ActivityIndicator size="large" color="#4285F4" />
-          <Text style={styles.loadingText}>Nachrichten werden geladen...</Text>
+          <Text style={styles.loadingText}>
+            {isOfflineMode ? 'Gruppeninfo laden...' : 'Nachrichten werden geladen...'}
+          </Text>
         </View>
       </SafeAreaView>
     );
   }
 
-  if (error) {
+  if (error || !chatGroup) {
     return (
       <SafeAreaView style={styles.container}>
         {renderHeader()}
         <View style={styles.centerContent}>
           <Ionicons name="alert-circle-outline" size={40} color="#ff3b30" />
-          <Text style={styles.errorText}>{error}</Text>
+          <Text style={styles.errorText}>{error || 'Chat-Gruppe konnte nicht geladen werden.'}</Text>
           <TouchableOpacity 
             style={styles.retryButton}
-            onPress={fetchMessages}
+            onPress={() => navigation.goBack()}
           >
-            <Text style={styles.retryButtonText}>Erneut versuchen</Text>
+            <Text style={styles.retryButtonText}>Zurück</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -1012,15 +1040,21 @@ const ChatDetailScreen = ({ route, navigation }) => {
         keyExtractor={item => item.id.toString()}
         style={styles.messagesList}
         contentContainerStyle={styles.messagesContent}
-        onRefresh={fetchMessages}
-        refreshing={loading}
+        onRefresh={isOfflineMode ? undefined : fetchMessages}
+        refreshing={!isOfflineMode && loading}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>
-              {isBot() ? 'Frag den Dorfbot etwas über dein Dorf!' :
-               isOpenChat() ? 'Sei der Erste, der eine Nachricht schreibt!' :
-               'Keine Ankündigungen vorhanden.'}
-            </Text>
+            {isOfflineMode ? (
+              <Text style={styles.emptyText}>
+                Nachrichten sind im Offline-Modus nicht verfügbar.
+              </Text>
+            ) : (
+              <Text style={styles.emptyText}>
+                {isBot() ? 'Frag den Dorfbot etwas über dein Dorf!' :
+                 isOpenChat() ? 'Sei der Erste, der eine Nachricht schreibt!' :
+                 'Keine Ankündigungen vorhanden.'}
+              </Text>
+            )}
           </View>
         }
       />
@@ -1040,12 +1074,65 @@ const ChatDetailScreen = ({ route, navigation }) => {
         )}
         
         {(() => {
-            // Logging before render check
-            const showInputCondition = (isOpenChat() && !isBroadcast()) || commentingOnMessageId !== null || isBot() || 
-                                    (isBroadcast() && isOrgMember && !commentingOnMessageId && activeOrganizationId === chatGroup.organization_id);
-            console.log(`ChatDetailScreen Render Input Check: isBroadcast=${isBroadcast()}, isOrgMember=${isOrgMember}, activeOrgId=${activeOrganizationId}, chatGroupOrgId=${chatGroup?.organization_id}, commentingOnMessageId=${commentingOnMessageId}, showInput=${showInputCondition}`);
+            const showInputCondition = !isOfflineMode && (
+                (isOpenChat() && !isBroadcast()) || 
+                commentingOnMessageId !== null || 
+                isBot() || 
+                (isBroadcast() && isOrgMember && !commentingOnMessageId && activeOrganizationId === chatGroup?.organization_id)
+            );
             
-            return showInputCondition;
+            if (!showInputCondition) return null;
+            
+            return (
+                <View style={styles.inputRow}>
+                    <TextInput
+                      style={styles.input}
+                      placeholder={
+                        isBot() ? "Stelle eine Frage über dein Dorf..." : 
+                        commentingOnMessageId !== null ? "Schreibe einen Kommentar..." :
+                        (isBroadcast() && isOrgMember) ?
+                        "Neue Ankündigung schreiben..." : 
+                        "Nachricht schreiben..."
+                      }
+                      value={message}
+                      onChangeText={setMessage}
+                      multiline
+                    />
+                    
+                    {!commentingOnMessageId && (
+                      <TouchableOpacity 
+                        style={styles.imageButton}
+                        onPress={pickImage}
+                        disabled={isUploading || sendingMessage}
+                      >
+                        <Ionicons 
+                          name="image-outline" 
+                          size={24} 
+                          color={isUploading || sendingMessage ? "#ccc" : "#4285F4"} 
+                        />
+                      </TouchableOpacity>
+                    )}
+                    
+                    <TouchableOpacity 
+                      style={[
+                        styles.sendButton, 
+                        ((message.trim() === '' && !imageAsset) || sendingMessage || addingComment || isUploading) && styles.sendButtonDisabled
+                      ]} 
+                      onPress={sendMessage}
+                      disabled={(message.trim() === '' && !imageAsset) || sendingMessage || addingComment || isUploading}
+                    >
+                      {sendingMessage || addingComment || isUploading ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Ionicons 
+                          name="send" 
+                          size={20} 
+                          color={(message.trim() === '' && !imageAsset) ? "#ccc" : "#fff"} 
+                        />
+                      )}
+                    </TouchableOpacity>
+                </View>
+            );
          })() && (
           <View style={styles.inputRow}>
             <TextInput
@@ -1100,7 +1187,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
       </KeyboardAvoidingView>
       
       {/* Image preview */}
-      {imageAsset && (
+      {!isOfflineMode && imageAsset && (
         <View style={styles.imagePreviewContainer}>
           <Image 
             source={{ uri: imageAsset.uri }} 

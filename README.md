@@ -17,6 +17,7 @@ A mobile application designed to strengthen community spirit in rural villages b
   - Both local (anonymous) and logged-in users can edit their display name and preferences.
   - User account management with Supabase integration
   - Preference-based content personalization
+- **Offline Mode:** Save essential data (articles, filters) for viewing when internet connectivity is unavailable. Manage offline data and status via the Profile screen.
 
 ## Authentication System
 
@@ -51,6 +52,7 @@ A mobile application designed to strengthen community spirit in rural villages b
 - Supabase for authentication and data storage
 - AsyncStorage for local data persistence
 - Various UI libraries
+- @react-native-community/netinfo for network detection
 
 ## Getting Started
 

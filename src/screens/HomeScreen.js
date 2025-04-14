@@ -4,12 +4,15 @@ import ScreenHeader from '../components/common/ScreenHeader';
 import { Ionicons } from '@expo/vector-icons';
 import { useOrganization } from '../context/OrganizationContext';
 import { useAuth } from '../context/AuthContext';
+import { useNetwork } from '../context/NetworkContext';
+import { loadOfflineData } from '../utils/storageUtils';
 import { supabase } from '../lib/supabase';
 
 const HomeScreen = ({ navigation }) => {
   // Use the refactored organization context for active status
   const { isOrganizationActive, activeOrganizationId } = useOrganization();
   const { user } = useAuth();
+  const { isOfflineMode, isConnected } = useNetwork();
   
   // State for articles and loading
   const [articles, setArticles] = useState([]);
@@ -21,31 +24,119 @@ const HomeScreen = ({ navigation }) => {
   const [isLoadingFilters, setIsLoadingFilters] = useState(true);
   const [error, setError] = useState(null);
   
-  // Fetch articles from Supabase
+  // Fetch articles from Supabase or Offline Storage
   useEffect(() => {
-    fetchFilters();
-    fetchArticles();
-  }, []);
+    if (isOfflineMode) {
+      loadDataFromStorage();
+    } else {
+      fetchFilters();
+      fetchArticles();
+    }
+  }, [isOfflineMode]);
 
   // Refresh articles when screen comes into focus
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       // Add a small delay to ensure component is mounted before fetching
-      setTimeout(() => {
-        console.log('HomeScreen focused - refreshing articles');
-        fetchArticles();
+      const focusTimeout = setTimeout(() => { // Assign timeout to variable for potential cleanup
+        console.log('HomeScreen focused - Preparing to refresh articles...');
+        try {
+          // Check if user context is available (important if RLS depends on it)
+          console.log('HomeScreen Focus Listener: Current user state before fetch:', user ? `ID: ${user.id}` : 'null'); 
+          
+          // --- Wrap fetchArticles in try...catch ---
+          fetchArticles(); 
+          // --- End wrap ---
+
+        } catch (error) {
+          // --- Added Error Logging ---
+          console.error("HomeScreen Focus Listener: Error executing fetchArticles:", error);
+          // Optionally set an error state here to inform the user
+          // setError("Fehler beim Aktualisieren der Artikel beim Fokussieren."); 
+        }
       }, 100);
+
+      // Clear the timeout if the screen loses focus before it executes
+      return () => clearTimeout(focusTimeout); 
     });
     
+    // Cleanup listener on unmount
     return unsubscribe;
-  }, [navigation]);
+  }, [navigation, user, isOfflineMode]); // Add isOfflineMode dependency
 
   // Apply filter when articles, selectedFilter, or pinned IDs change
   useEffect(() => {
     applyFilter(selectedFilter);
   }, [articles, selectedFilter, pinnedArticleIds, applyFilter]);
 
+  // Function to load data from AsyncStorage
+  const loadDataFromStorage = async () => {
+    console.log("[HomeScreen] Loading data from offline storage...");
+    setIsLoading(true);
+    setIsLoadingFilters(true);
+    setError(null);
+    let loadedArticles = [];
+    let loadedFilters = [{ name: 'Aktuell', is_highlighted: false }];
+
+    try {
+      // Load Articles
+      const offlineArticles = await loadOfflineData('articles');
+      if (offlineArticles) {
+        loadedArticles = formatArticles(offlineArticles); // Use existing formatting logic
+        setArticles(loadedArticles);
+        console.log(`[HomeScreen] Loaded ${loadedArticles.length} articles from storage.`);
+      } else {
+         setError('Keine Offline-Artikel gefunden. Bitte gehe online und speichere Daten.');
+         setArticles([]);
+      }
+
+      // Load Filters
+      const offlineFilters = await loadOfflineData('article_filters');
+      if (offlineFilters) {
+          // Ensure 'Aktuell' is present and at the beginning (same logic as fetchFilters)
+          let storedFilters = offlineFilters.map(f => ({ 
+              name: f.name, 
+              is_highlighted: f.is_highlighted || false 
+          }));
+          const aktuellExists = storedFilters.some(f => f.name === 'Aktuell');
+          if (aktuellExists) {
+              storedFilters = storedFilters.filter(f => f.name !== 'Aktuell');
+          }
+          storedFilters.unshift({ name: 'Aktuell', is_highlighted: false });
+          loadedFilters = storedFilters;
+          setAvailableFilters(loadedFilters);
+          console.log(`[HomeScreen] Loaded ${loadedFilters.length} filters from storage.`);
+          // Check if current filter exists in loaded filters
+          const currentFilterExists = loadedFilters.some(f => f.name === selectedFilter);
+          if (!currentFilterExists) {
+              setSelectedFilter('Aktuell');
+          }
+      } else {
+          setAvailableFilters(loadedFilters); // Set default if none stored
+          setSelectedFilter('Aktuell');
+          console.log('[HomeScreen] No offline filters found, using default.');
+      }
+
+      // Note: Pinned articles won't work correctly offline without storing pin status
+      // For simplicity, we'll just disable pinning logic in offline mode
+      setPinnedArticleIds(new Set());
+
+    } catch (err) {
+      console.error('[HomeScreen] Error loading data from storage:', err);
+      setError('Fehler beim Laden der Offline-Daten.');
+      setArticles([]);
+      setAvailableFilters([{ name: 'Aktuell', is_highlighted: false }]);
+      setSelectedFilter('Aktuell');
+    } finally {
+      setIsLoading(false);
+      setIsLoadingFilters(false);
+    }
+  };
+
   const fetchFilters = async () => {
+    // Added check: Don't fetch if offline
+    if (isOfflineMode) return;
+
     setIsLoadingFilters(true);
     try {
       const { data, error } = await supabase
@@ -90,6 +181,8 @@ const HomeScreen = ({ navigation }) => {
   };
 
   const fetchArticles = async () => {
+    if (isOfflineMode) return;
+
     try {
       setIsLoading(true);
       setError(null);
@@ -105,31 +198,7 @@ const HomeScreen = ({ navigation }) => {
         setError('Artikel konnten nicht geladen werden. Bitte versuche es später erneut.');
       } else {
         // Format the data to match what we expect from article_listings
-        const formattedArticles = data.map(article => {
-          // Format date
-          const publishDate = new Date(article.published_at);
-          const formattedDate = `${publishDate.getDate().toString().padStart(2, '0')}.${(publishDate.getMonth() + 1).toString().padStart(2, '0')}.${publishDate.getFullYear()}`;
-          
-          // Strip HTML tags and then truncate content
-          const plainTextContent = article.content.replace(/<[^>]*>/g, ''); // Remove HTML tags
-          const truncatedContent = plainTextContent.length > 100 
-            ? plainTextContent.substring(0, 100) + '...' 
-            : plainTextContent;
-            
-          return {
-            id: article.id,
-            title: article.title,
-            content: truncatedContent,
-            type: article.type,
-            published_at: article.published_at,
-            date: formattedDate,
-            author_id: article.author_id,
-            author_name: article.author_name, // Use the name from the view
-            is_organization_post: article.is_organization_post,
-            image_url: article.image_url, // Include the image URL
-            preview_image_url: article.preview_image_url // Include the preview image URL
-          };
-        });
+        const formattedArticles = formatArticles(data || []);
         
         setArticles(formattedArticles || []);
       }
@@ -143,8 +212,9 @@ const HomeScreen = ({ navigation }) => {
   
   // Fetch pinned article IDs for the selected filter
   const fetchPinnedArticles = async (filter) => {
-    if (!filter || filter === 'Aktuell') {
-      setPinnedArticleIds(new Set()); // No pins for 'Aktuell'
+    // Added check: Don't fetch if offline
+    if (isOfflineMode || !filter || filter === 'Aktuell') {
+      setPinnedArticleIds(new Set()); // No pins for 'Aktuell' or offline
       return;
     }
     try {
@@ -167,8 +237,11 @@ const HomeScreen = ({ navigation }) => {
   
   // Filter articles based on the selected filter
   const applyFilter = useCallback((filter) => {
-    if (!articles.length) return;
-    
+    if (!articles.length) {
+        setFilteredArticles([]); // Ensure it's empty if no articles
+        return;
+    }
+
     let sortedArticles = [];
     if (filter === 'Aktuell') {
       // Show all articles sorted by date (newest first)
@@ -182,7 +255,8 @@ const HomeScreen = ({ navigation }) => {
       const notPinned = [];
 
       relevantArticles.forEach(article => {
-        if (pinnedArticleIds.has(article.id)) {
+        // Disable pinning logic when offline
+        if (!isOfflineMode && pinnedArticleIds.has(article.id)) {
           pinned.push(article);
         } else {
           notPinned.push(article);
@@ -199,13 +273,15 @@ const HomeScreen = ({ navigation }) => {
       sortedArticles = [...pinned, ...notPinned];
     }
     setFilteredArticles(sortedArticles);
-  }, [articles, pinnedArticleIds]);
+  }, [articles, pinnedArticleIds, isOfflineMode]);
 
   // Handle filter change
   const handleFilterChange = (filter) => {
     setSelectedFilter(filter);
-    // Fetch pinned articles for the new filter (async, effect will re-apply filter)
-    fetchPinnedArticles(filter);
+    // Fetch pinned articles only if online
+    if (!isOfflineMode) {
+        fetchPinnedArticles(filter);
+    }
   };
   
   // Open article creation screen (for active organization context)
@@ -215,6 +291,31 @@ const HomeScreen = ({ navigation }) => {
         organizationId: activeOrganizationId // Pass the active org ID
       }); 
     }
+  };
+
+  // Helper function to format article data (extracted from fetchArticles)
+  const formatArticles = (rawData) => {
+    return rawData.map(article => {
+        const publishDate = new Date(article.published_at);
+        const formattedDate = `${publishDate.getDate().toString().padStart(2, '0')}.${(publishDate.getMonth() + 1).toString().padStart(2, '0')}.${publishDate.getFullYear()}`;
+        const plainTextContent = article.content.replace(/<[^>]*>/g, '');
+        const truncatedContent = plainTextContent.length > 100
+            ? plainTextContent.substring(0, 100) + '...'
+            : plainTextContent;
+        return {
+            id: article.id,
+            title: article.title,
+            content: truncatedContent,
+            type: article.type,
+            published_at: article.published_at,
+            date: formattedDate,
+            author_id: article.author_id,
+            author_name: article.author_name,
+            is_organization_post: article.is_organization_post,
+            image_url: article.image_url,
+            preview_image_url: article.preview_image_url
+        };
+    });
   };
 
   return (
@@ -265,8 +366,8 @@ const HomeScreen = ({ navigation }) => {
                     <Text style={styles.articleType}>{article.type}</Text>
                     <Text style={styles.articleDate}>{article.date}</Text>
                   </View>
-                  {/* Add Pin Icon if article is pinned and filter is not 'Aktuell' */}
-                  {selectedFilter !== 'Aktuell' && pinnedArticleIds.has(article.id) && (
+                  {/* Add Pin Icon if article is pinned and filter is not 'Aktuell' AND online */}
+                  {selectedFilter !== 'Aktuell' && !isOfflineMode && pinnedArticleIds.has(article.id) && (
                     <Ionicons name="pin" size={16} color="#666" style={styles.pinIcon} />
                   )}
                   <Text 
@@ -294,8 +395,8 @@ const HomeScreen = ({ navigation }) => {
         </ScrollView>
       )}
       
-      {/* Show Add button only if an organization context is active and user logged in */} 
-      {isOrganizationActive && user && (
+      {/* Show Add button only if an organization context is active, user logged in, AND online */}
+      {isOrganizationActive && user && !isOfflineMode && (
         <TouchableOpacity 
           style={styles.addButton}
           onPress={handleCreateArticle}

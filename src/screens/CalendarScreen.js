@@ -7,6 +7,8 @@ import { RRule, RRuleSet, rrulestr } from 'rrule';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
+import { useNetwork } from '../context/NetworkContext';
+import { loadOfflineData } from '../utils/storageUtils';
 
 // Get screen dimensions for responsive sizing
 const { width, height } = Dimensions.get('window');
@@ -56,37 +58,104 @@ const CalendarScreen = ({ navigation }) => {
   const [selectedDates, setSelectedDates] = useState({});
   const [dateRange, setDateRange] = useState({ startDate: '', endDate: '' });
   const [visibleEvents, setVisibleEvents] = useState([]);
-  const [events, setEvents] = useState([]);
   const [allEventsData, setAllEventsData] = useState([]);
   const [currentMonthString, setCurrentMonthString] = useState(new Date().toISOString().slice(0, 7));
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeFilter, setActiveFilter] = useState('Alle');
   
-  // Get user from AuthContext
   const { user } = useAuth();
-  // Use organization context for active status
   const { isOrganizationActive, activeOrganizationId } = useOrganization();
-  
-  // Fetch events and categories from Supabase
-  useEffect(() => {
-    fetchEventData();
-  }, []);
+  const { isOfflineMode, isConnected } = useNetwork();
 
-  // Refresh events when screen comes into focus
+  // Fetch or load data based on offline mode
+  useEffect(() => {
+    if (isOfflineMode) {
+      loadDataFromStorage();
+    } else {
+      fetchEventData();
+    }
+  }, [isOfflineMode]);
+
+  // Refresh events when screen comes into focus (if online)
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
-      // Add a small delay to ensure component is mounted before fetching
-      setTimeout(() => {
-        console.log('CalendarScreen focused - refreshing events');
-        fetchEventData();
+      if (isOfflineMode) return; // Don't refresh from network if offline
+      // Add a small delay
+      const focusTimeout = setTimeout(() => {
+        console.log('CalendarScreen focused - Preparing to refresh events...');
+        try {
+          console.log('CalendarScreen Focus Listener: Current user state before fetch:', user ? `ID: ${user.id}` : 'null');
+          fetchEventData();
+        } catch (error) {
+          console.error("CalendarScreen Focus Listener: Error executing fetchEventData:", error);
+        }
       }, 100);
+      return () => clearTimeout(focusTimeout);
     });
-    
     return unsubscribe;
-  }, [navigation]);
+  }, [navigation, user, isOfflineMode]);
+
+  // Function to load data from AsyncStorage
+  const loadDataFromStorage = async () => {
+    console.log("[CalendarScreen] Loading data from offline storage...");
+    setIsLoading(true);
+    setLoadingFilters(true);
+    setError(null);
+
+    try {
+      // Load Events
+      const offlineEvents = await loadOfflineData('events');
+      if (offlineEvents) {
+        setAllEventsData(offlineEvents);
+        console.log(`[CalendarScreen] Loaded ${offlineEvents.length} events from storage.`);
+      } else {
+        setError('Keine Offline-Events gefunden. Bitte gehe online und speichere Daten.');
+        setAllEventsData([]);
+      }
+
+      // Load Filters (Categories)
+      // Note: Filters might not be saved yet if saveDataForOffline hasn't been updated/run
+      // Let's assume they are saved under 'event_categories' key for consistency
+      const offlineFilters = await loadOfflineData('event_categories'); // Assuming this key is used
+      if (offlineFilters) {
+          const fetchedFilters = offlineFilters.map(cat => ({
+              name: cat.name,
+              is_highlighted: cat.is_highlighted || false
+          }));
+          setCalendarFilters([{ name: 'Alle', is_highlighted: false }, ...fetchedFilters]);
+          console.log(`[CalendarScreen] Loaded ${fetchedFilters.length} event filters from storage.`);
+      } else {
+          setCalendarFilters([{ name: 'Alle', is_highlighted: false }]); // Fallback
+          console.log('[CalendarScreen] No offline event filters found, using default.');
+      }
+
+      // Set initial date range (no change needed, useMemo handles display)
+      const today = new Date();
+      const currentDayOfWeek = today.getDay();
+      const diffToMonday = currentDayOfWeek === 0 ? -6 : 1 - currentDayOfWeek;
+      const monday = new Date(today);
+      monday.setDate(today.getDate() + diffToMonday);
+      const sunday = new Date(monday);
+      sunday.setDate(monday.getDate() + 6);
+      const mondayString = monday.toISOString().split('T')[0];
+      const sundayString = sunday.toISOString().split('T')[0];
+      setDateRange({ startDate: mondayString, endDate: sundayString });
+
+    } catch (err) {
+      console.error('[CalendarScreen] Error loading data from storage:', err);
+      setError('Fehler beim Laden der Offline-Daten.');
+      setAllEventsData([]);
+      setCalendarFilters([{ name: 'Alle', is_highlighted: false }]);
+    } finally {
+      setIsLoading(false);
+      setLoadingFilters(false);
+    }
+  };
 
   const fetchEventData = async () => {
+    if (isOfflineMode) return; // Prevent fetching if offline
+
     setIsLoading(true);
     setLoadingFilters(true);
     setError(null);
@@ -137,6 +206,9 @@ const CalendarScreen = ({ navigation }) => {
         const sundayString = sunday.toISOString().split('T')[0];
         setDateRange({ startDate: mondayString, endDate: sundayString });
         // Initial marking will be handled by the useMemo below
+
+        // Save categories for offline use (assuming key 'event_categories')
+        await loadOfflineData('event_categories', categoriesData || []);
       }
     } catch (err) {
       console.error('Unexpected error fetching events:', err);
@@ -451,6 +523,11 @@ const CalendarScreen = ({ navigation }) => {
 
   // Handle navigation to create event screen
   const handleCreateEvent = () => {
+    // Add check for offline mode
+    if (isOfflineMode) {
+        Alert.alert("Offline", "Eventerstellung ist offline nicht verfügbar.");
+        return;
+    }
     if (user && isOrganizationActive) {
       navigation.navigate('CreateEvent', {
           organizationId: activeOrganizationId // Pass the active org ID
@@ -627,8 +704,9 @@ const CalendarScreen = ({ navigation }) => {
         />
       </View>
       
-      {isOrganizationActive && user && (
-        <TouchableOpacity 
+      {/* Disable Add button when offline */}
+      {isOrganizationActive && user && !isOfflineMode && (
+        <TouchableOpacity
           style={styles.addButton}
           onPress={handleCreateEvent}
         >

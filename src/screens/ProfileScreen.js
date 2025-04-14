@@ -1,9 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Switch, ScrollView, Modal, TextInput, Alert, ActivityIndicator, Clipboard, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Switch, ScrollView, Modal, TextInput, Alert, ActivityIndicator, Clipboard, Platform, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
+import { useNetwork } from '../context/NetworkContext';
+
+const { height } = Dimensions.get('window');
+const androidPaddingTop = height * 0.05; // 3% of screen height for Android
 
 const ProfileScreen = () => {
   // DEBUG: Log component render and loading state
@@ -20,10 +25,20 @@ const ProfileScreen = () => {
     switchOrganizationContext,
     deleteOrganization,
     isLoading: isOrgContextLoading, // Renamed to avoid clash
+    removeOrganizationMember,
+    transferOrganizationAdmin
   } = useOrganization();
 
   // **** ADDED LOGGING: Inspect the function from context ****
-  console.log(`%%%% ProfileScreen: Inspected switchOrganizationContext from useOrganization: Type = ${typeof switchOrganizationContext}, Value =`, switchOrganizationContext);
+  // console.log(`%%%% ProfileScreen: Inspected switchOrganizationContext from useOrganization: Type = ${typeof switchOrganizationContext}, Value =`, switchOrganizationContext);
+
+  // Use network context
+  const {
+    isConnected,
+    lastOfflineSaveTimestamp,
+    isSavingData,
+    saveDataForOffline
+  } = useNetwork();
 
   // Use auth context with Supabase
   const { 
@@ -42,7 +57,8 @@ const ProfileScreen = () => {
     updateEmail,
     updatePassword,
     loadUserProfile, // Add this to use the reload function
-    loading: authLoading // Auth context loading state
+    loading: authLoading, // Auth context loading state
+    updateOrganizationName // <-- Add this function (comes from AuthContext)
   } = useAuth();
   
   // State for account creation modal
@@ -79,6 +95,13 @@ const ProfileScreen = () => {
   const [organizationMembers, setOrganizationMembers] = useState([]);
   const [isFetchingMembers, setIsFetchingMembers] = useState(false);
   const [orgMgmtError, setOrgMgmtError] = useState('');
+  const [memberManagementLoading, setMemberManagementLoading] = useState(false);
+  // State for Org Edit Modal
+  const [showOrgEditModal, setShowOrgEditModal] = useState(false);
+  const [editOrgName, setEditOrgName] = useState('');
+  const [isOrgEditLoading, setIsOrgEditLoading] = useState(false);
+  const [orgEditError, setOrgEditError] = useState('');
+
 
   // Derived state: Check if user has a full Supabase account
   const hasFullAccount = !!user?.id;
@@ -103,36 +126,38 @@ const ProfileScreen = () => {
     );
   };
   
-  // Fetch organization members when context becomes active
-  useEffect(() => {
-    const loadMembers = async () => {
-      if (isOrganizationActive && activeOrganizationId) {
-        setIsFetchingMembers(true);
-        setOrgMgmtError('');
-        const result = await fetchOrganizationMembers(activeOrganizationId);
-        if (result.success) {
-          setOrganizationMembers(result.data || []);
-        } else {
-          setOrgMgmtError(result.error?.message || 'Mitglieder konnten nicht geladen werden.');
-          setOrganizationMembers([]);
-        }
-        setIsFetchingMembers(false);
+  // Helper function to reload members
+  const reloadMembers = useCallback(async () => {
+    if (isOrganizationActive && activeOrganizationId) {
+      setIsFetchingMembers(true);
+      setOrgMgmtError('');
+      const result = await fetchOrganizationMembers(activeOrganizationId);
+      if (result.success) {
+        setOrganizationMembers(result.data || []);
+      } else {
+        setOrgMgmtError(result.error?.message || 'Mitglieder konnten nicht geladen werden.');
+        setOrganizationMembers([]);
       }
-    };
-    loadMembers();
+      setIsFetchingMembers(false);
+    }
   }, [isOrganizationActive, activeOrganizationId, fetchOrganizationMembers]);
 
-  // Log relevant context state changes (DEBUG)
+  // Fetch organization members when context becomes active (use the helper)
   useEffect(() => {
-    console.log('ProfileScreen - User state:', user ? `ID: ${user.id}, Email: ${user.email}` : 'No auth user');
-    console.log('ProfileScreen - Profile state:', profile);
-    console.log('ProfileScreen - Display Name:', displayName);
-    console.log('ProfileScreen - Preferences:', preferences);
-    console.log('ProfileScreen - Has Full Account:', hasFullAccount);
-    console.log('ProfileScreen - User Organizations:', userOrganizations);
-    console.log('ProfileScreen - Is Org Active:', isOrganizationActive);
-    console.log('ProfileScreen - Active Org Details:', activeOrganization);
-  }, [user, profile, displayName, preferences, hasFullAccount, userOrganizations, isOrganizationActive, activeOrganization]);
+    reloadMembers();
+  }, [reloadMembers]); // Depend on the memoized function
+
+  // Log relevant context state changes (DEBUG)
+  // useEffect(() => {
+  //   console.log('ProfileScreen - User state:', user ? `ID: ${user.id}, Email: ${user.email}` : 'No auth user');
+  //   console.log('ProfileScreen - Profile state:', profile);
+  //   console.log('ProfileScreen - Display Name:', displayName);
+  //   console.log('ProfileScreen - Preferences:', preferences);
+  //   console.log('ProfileScreen - Has Full Account:', hasFullAccount);
+  //   console.log('ProfileScreen - User Organizations:', userOrganizations);
+  //   console.log('ProfileScreen - Is Org Active:', isOrganizationActive);
+  //   console.log('ProfileScreen - Active Org Details:', activeOrganization);
+  // }, [user, profile, displayName, preferences, hasFullAccount, userOrganizations, isOrganizationActive, activeOrganization]);
 
   // Open profile edit modal with current values from context (for personal profile)
   const handleOpenProfileEdit = () => {
@@ -296,6 +321,52 @@ const ProfileScreen = () => {
     }
   };
   
+  // --- NEW: Open Org Edit Modal ---
+  const handleOpenOrgEdit = () => {
+    if (!isOrganizationActive || !activeOrganization) return;
+    setEditOrgName(activeOrganization.name || '');
+    setOrgEditError('');
+    setShowOrgEditModal(true);
+  };
+
+  // --- NEW: Save Org Name ---
+  const handleSaveOrgName = async () => {
+    if (!isOrganizationActive || !activeOrganizationId) return;
+    if (!editOrgName.trim()) {
+      setOrgEditError('Organisationsname darf nicht leer sein.');
+      return;
+    }
+    if (editOrgName.trim() === activeOrganization?.name) {
+      setShowOrgEditModal(false); // Nothing changed
+      return;
+    }
+
+    setIsOrgEditLoading(true);
+    setOrgEditError('');
+
+    try {
+      const result = await updateOrganizationName(activeOrganizationId, editOrgName.trim());
+      if (result.success) {
+        Alert.alert('Erfolg', 'Organisationsname aktualisiert.');
+        setShowOrgEditModal(false);
+        // Active organization name in OrganizationContext will update automatically 
+        // because updateOrganizationName calls loadUserProfileAndOrgs, which updates userOrganizations,
+        // and OrganizationContext has a useEffect listening to userOrganizations to update its state.
+        // A direct update here might cause race conditions.
+        // You *could* potentially update the `activeOrganization` state in *this* component
+        // immediately for faster UI feedback, but it's usually better to rely on the context flow.
+      } else {
+        console.error("Failed to update org name:", result.error);
+        setOrgEditError(result.error?.message || 'Fehler beim Speichern des Namens.');
+      }
+    } catch (error) {
+      console.error('Unexpected error saving org name:', error);
+      setOrgEditError('Ein unerwarteter Fehler ist aufgetreten.');
+    } finally {
+      setIsOrgEditLoading(false);
+    }
+  };
+
   // Handle email update
   const handleUpdateEmail = async () => {
     if (!newEmail.trim() || !newEmail.includes('@')) {
@@ -419,12 +490,12 @@ const ProfileScreen = () => {
   // Handle switch to organization context
   const handleSwitchToOrg = (orgId) => {
     // **** ADDED LOGGING ****
-    console.log(`%%%% ProfileScreen: handleSwitchToOrg CALLED with orgId: ${orgId} %%%%`);
+    // console.log(`%%%% ProfileScreen: handleSwitchToOrg CALLED with orgId: ${orgId} %%%%`);
 
     //setIsOrgContextLoading(true); // Temporarily disable loading state changes
     
     // **** MODIFIED: Call function without await/result handling ****
-    console.log(`ProfileScreen: Calling switchOrganizationContext (from OrganizationContext) for orgId: ${orgId} - WITHOUT AWAIT`);
+    // console.log(`ProfileScreen: Calling switchOrganizationContext (from OrganizationContext) for orgId: ${orgId} - WITHOUT AWAIT`);
     switchOrganizationContext(orgId).then(result => {
       if (!result.success) {
         if (result.error && result.error.includes('not found')) {
@@ -445,7 +516,7 @@ const ProfileScreen = () => {
       Alert.alert("Fehler", "Ein unerwarteter Fehler ist aufgetreten.");
     });
     
-    console.log(`ProfileScreen: Call to switchOrganizationContext initiated (without await).`);
+    // console.log(`ProfileScreen: Call to switchOrganizationContext initiated (without await).`);
 
     //setIsOrgContextLoading(false); // Temporarily disable
     // if (!result.success) { // Temporarily disable result check
@@ -466,7 +537,7 @@ const ProfileScreen = () => {
   };
 
   // Handle leaving an organization
-  const handleLeaveOrg = (orgId, orgName) => {
+  const handleLeaveOrg = async (orgId, orgName) => {
       if (!orgId || !orgName) return;
       Alert.alert(
           "Organisation verlassen",
@@ -483,6 +554,8 @@ const ProfileScreen = () => {
                       if (result.success) {
                           Alert.alert("Erfolg", `Du hast "${orgName}" verlassen.`);
                           // Context should update automatically via AuthProvider listener
+                          // *** ADDED: Explicitly switch back to personal context ***
+                          await switchOrganizationContext(null);
                       } else {
                           // Display a more user-friendly error
                           const errorMessage = result.error?.message === 'Database Error: Cannot leave as the last admin.' 
@@ -521,11 +594,81 @@ const ProfileScreen = () => {
     );
   };
   
+  // --- Member Management Handlers ---
+
+  const handleRemoveMember = (memberUserId, memberName) => {
+    if (!activeOrganizationId) return;
+    Alert.alert(
+      "Mitglied entfernen",
+      `Möchtest du "${memberName || 'dieses Mitglied'}" wirklich aus der Organisation entfernen?`,
+      [
+        { text: "Abbrechen", style: "cancel" },
+        {
+          text: "Entfernen",
+          style: "destructive",
+          onPress: async () => {
+            setMemberManagementLoading(true);
+            const result = await removeOrganizationMember(activeOrganizationId, memberUserId);
+            setMemberManagementLoading(false);
+            if (result.success) {
+              Alert.alert("Erfolg", `"${memberName || 'Mitglied'}" wurde entfernt.`);
+              reloadMembers(); // Refetch members list
+            } else {
+              Alert.alert("Fehler", result.error?.message || "Entfernen fehlgeschlagen.");
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleMakeAdmin = (newAdminUserId, memberName) => {
+    if (!activeOrganizationId) return;
+    Alert.alert(
+      "Admin ernennen",
+      `Möchtest du "${memberName || 'dieses Mitglied'}" zum neuen Administrator ernennen? Du wirst dadurch zum normalen Mitglied herabgestuft.`,
+      [
+        { text: "Abbrechen", style: "cancel" },
+        {
+          text: "Ernennen",
+          style: "default", // Or "destructive" if preferred
+          onPress: async () => {
+            setMemberManagementLoading(true);
+            const result = await transferOrganizationAdmin(activeOrganizationId, newAdminUserId);
+            setMemberManagementLoading(false);
+            if (result.success) {
+              Alert.alert("Erfolg", `"${memberName || 'Mitglied'}" ist jetzt der neue Administrator.`);
+              // The OrganizationContext and AuthContext should update the user's role automatically.
+              // Reload members needed to update the visual roles in the list.
+              reloadMembers(); 
+            } else {
+              Alert.alert("Fehler", result.error?.message || "Admin-Übertragung fehlgeschlagen.");
+            }
+          },
+        },
+      ]
+    );
+  };
+  
+  // --- NEW: Handler for Reload Button ---
+  const handleReloadOrgContext = () => {
+    if (activeOrganizationId) {
+      // Simply call switchOrganizationContext again with the same ID
+      // It will refetch data and update the state, triggering a re-render.
+      // The isLoading state from useOrganization will show activity.
+      switchOrganizationContext(activeOrganizationId);
+    }
+  };
+
   // --- Render Functions --- 
 
   const renderHeader = () => {
-    const headerTitle = isOrganizationActive ? `Organisation: ${activeOrganization?.name || '... '}` : 'Dein Profil';
-    const avatarInitial = isOrganizationActive ? (activeOrganization?.name?.charAt(0) || 'O') : (displayName?.charAt(0) || '?');
+    // Ensure activeOrganization exists before accessing properties
+    const currentOrgName = isOrganizationActive && activeOrganization ? activeOrganization.name : null;
+    const currentUserRole = isOrganizationActive && activeOrganization ? activeOrganization.currentUserRole : null;
+    const headerTitle = isOrganizationActive ? `Organisation: ${currentOrgName || '... '}` : 'Dein Profil';
+    const avatarInitial = isOrganizationActive ? (currentOrgName?.charAt(0) || 'O') : (displayName?.charAt(0) || '?');
+    const isAdmin = isOrganizationActive && currentUserRole === 'admin'; // Use derived role
     
     return (
       <View style={styles.profileHeader}>
@@ -541,41 +684,89 @@ const ProfileScreen = () => {
             <Text style={styles.accountStatus}>Lokaler Account (nicht synchronisiert)</Text>
           )}
           {/* Maybe show user role within org? */} 
-          {isOrganizationActive && (
-             <Text style={styles.roleText}>Deine Rolle: {activeOrganization?.currentUserRole === 'admin' ? 'Administrator' : 'Mitglied'}</Text>
+          {isOrganizationActive && currentUserRole && ( // Check currentUserRole exists
+             <Text style={styles.roleText}>Deine Rolle: {currentUserRole === 'admin' ? 'Administrator' : 'Mitglied'}</Text>
           )}
         </View>
-        {/* Personal Profile Edit Button - shown for local AND logged-in users when NOT in org context */}
-        {!isOrganizationActive && (
-            <TouchableOpacity 
-                style={styles.editProfileButton}
-                onPress={handleOpenProfileEdit}
-            >
-                <Ionicons name="pencil" size={18} color="#4285F4" />
-            </TouchableOpacity>
-        )}
-        {/* TODO: Org Edit Button - Add later */}
+        <View style={styles.headerActions}>
+          {/* Personal Profile Edit Button - shown for local AND logged-in users when NOT in org context */}
+          {!isOrganizationActive && (
+            <>
+              <TouchableOpacity 
+                  style={styles.headerIconButton}
+                  onPress={handleOpenProfileEdit}
+              >
+                  <Ionicons name="pencil" size={20} color="#4285F4" />
+              </TouchableOpacity>
+              {/* Personal Context Reload Button */}
+              <TouchableOpacity
+                  style={styles.headerIconButton} 
+                  onPress={() => loadUserProfile(user?.id)} // Reload personal profile/orgs
+                  disabled={authLoading} // Disable while auth context is loading
+              >
+                  <Ionicons name="refresh-outline" size={22} color="#4285F4" />{/* Blue color for personal */}
+              </TouchableOpacity>
+            </>
+          )}
+          {/* Org Actions Wrapper (Edit + Reload) - Show only when org active */}
+          {isOrganizationActive && (
+            <>
+              {/* Org Edit Button - Show only for admin when org active */} 
+              {isAdmin === true && (
+                  <TouchableOpacity
+                      style={styles.headerIconButton} // Use consistent styling
+                      onPress={handleOpenOrgEdit}
+                  >
+                      <Ionicons name="pencil" size={20} color="#34A853" />
+                  </TouchableOpacity>
+              )}
+              {/* Org Reload Button - Show for admin and members when org active */} 
+              <TouchableOpacity
+                  style={styles.headerIconButton} // Use consistent styling
+                  onPress={handleReloadOrgContext}
+                  disabled={isOrgContextLoading} // Disable while loading
+              >
+                  <Ionicons name="refresh-outline" size={22} color="#17a2b8" />
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
       </View>
     );
   };
 
   const renderNoAccountSection = () => (
-    <View style={styles.card}>
-       <Text style={styles.cardTitle}>Account erstellen</Text>
-       <Text style={styles.cardText}>Sichere deine Daten und nutze alle Funktionen, indem du einen kostenlosen Account erstellst.</Text>
-       <TouchableOpacity 
-        style={styles.primaryButton} 
-        onPress={handleOpenCreateAccountModal}
-      >
-         <Ionicons name="person-add-outline" size={20} color="#fff" style={styles.buttonIcon} />
-         <Text style={styles.primaryButtonText}>Permanenten Account erstellen</Text>
-      </TouchableOpacity>
+    <View style={[styles.card, styles.highlightedOrgCard]}>
+       <Text style={[styles.cardTitle, styles.highlightedOrgTitle]}>Account erstellen</Text>
+       <Text style={[styles.cardText, styles.highlightedOrgPromptText]}>
+           Sichere deine Daten, sei <Text style={styles.boldText}>interaktiv dabei</Text> und nutze <Text style={styles.boldText}>alle Funktionen</Text>!
+       </Text>
+       <TouchableOpacity onPress={handleOpenCreateAccountModal} style={{ marginTop: 10 }}>
+         <LinearGradient
+           colors={['#7b4397', '#dc2430']}
+           start={{ x: 0, y: 0.5 }}
+           end={{ x: 1, y: 0.5 }}
+           style={styles.gradientButton}
+         >
+           <Ionicons name="person-add-outline" size={20} color="#fff" style={styles.buttonIcon} />
+           <Text style={styles.primaryButtonText}>Permanenten Account erstellen</Text>
+         </LinearGradient>
+       </TouchableOpacity>
     </View>
   );
   
   const renderOrgManagementSection = () => {
-    if (!isOrganizationActive || !activeOrganization) return null;
-    
+    // Strengthen the guard: Ensure activeOrganization is fully loaded
+    if (!isOrganizationActive || !activeOrganization || !activeOrganization.currentUserRole) {
+        console.log("ProfileScreen: renderOrgManagementSection - Bailing out due to missing activeOrganization data.");
+        // Optionally render a placeholder or loading indicator here
+        return (
+             <View style={styles.card}>
+                 <ActivityIndicator color="#4285F4" />
+             </View>
+         ); 
+    }
+
     const copyInviteCode = () => {
       if (activeOrganization.invite_code) {
         Clipboard.setString(activeOrganization.invite_code);
@@ -583,12 +774,15 @@ const ProfileScreen = () => {
       }
     };
 
-    const isAdmin = activeOrganization?.currentUserRole === 'admin';
+    // activeOrganization is guaranteed to exist here now
+    const isAdmin = activeOrganization.currentUserRole === 'admin';
+    const currentUserId = user?.id;
 
     return (
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Organisationsdetails</Text>
-        {activeOrganization.invite_code && (
+        {/* Check activeOrganization AND invite_code */}
+        {activeOrganization && activeOrganization.invite_code && (
             <View style={styles.inviteCodeContainer}>
                 <Text style={styles.inviteLabel}>Einladungscode:</Text>
                 <Text style={styles.inviteCodeText}>{activeOrganization.invite_code}</Text>
@@ -604,18 +798,41 @@ const ProfileScreen = () => {
         ) : orgMgmtError ? (
             <Text style={styles.errorText}>{orgMgmtError}</Text>
         ) : organizationMembers.length > 0 ? (
-            <View style={styles.memberListContainer}> 
+            <View style={styles.memberListContainer}>
               {organizationMembers.map(item => (
                   <View key={item.user_id} style={styles.memberItem}>
-                      <Text style={styles.memberName}>{item.profiles?.display_name || 'Unbekannter Benutzer'}</Text>
-                      <Text style={styles.memberRole}>{item.role === 'admin' ? 'Admin' : 'Mitglied'}</Text>
-                      {/* TODO: Add remove/role change buttons for admins */} 
+                      <View style={styles.memberInfo}>
+                        <Text style={styles.memberName}>{item.profiles?.display_name || 'Unbekannter Benutzer'}{item.user_id === currentUserId ? ' (Du)' : ''}</Text>
+                        <Text style={styles.memberRole}>{item.role === 'admin' ? 'Admin' : 'Mitglied'}</Text>
+                      </View>
+                      {/* Admin actions - Show only if current user is admin AND the item is NOT the current user */}
+                      {isAdmin && item.user_id !== currentUserId && (
+                        <View style={styles.memberActions}>
+                          <TouchableOpacity 
+                            style={[styles.memberActionButton, styles.removeButton]} 
+                            onPress={() => handleRemoveMember(item.user_id, item.profiles?.display_name)}
+                            disabled={memberManagementLoading}
+                          >
+                            <Text style={styles.memberActionButtonTextRemove}>Entfernen</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity 
+                            style={[styles.memberActionButton, styles.makeAdminButton]} 
+                            onPress={() => handleMakeAdmin(item.user_id, item.profiles?.display_name)}
+                            disabled={memberManagementLoading}
+                          >
+                            <Text style={styles.memberActionButtonTextAdmin}>Admin ernennen</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
                   </View>
               ))}
             </View>
         ) : (
              <Text style={styles.noMembersText}>Keine Mitglieder gefunden.</Text>
         )}
+        
+        {/* Show loading indicator during member management actions */} 
+        {memberManagementLoading && <ActivityIndicator size="small" color="#666" style={{ marginVertical: 5 }}/>}
         
         {/* --- Action Buttons for Active Org --- */} 
         <TouchableOpacity 
@@ -625,9 +842,7 @@ const ProfileScreen = () => {
         >
             {isOrgContextLoading ? <ActivityIndicator size="small" color="#4285F4" /> : <Text style={styles.switchButtonText}>Zu persönlichem Account wechseln</Text>}
         </TouchableOpacity>
-        
-        {/* TODO: Add Edit Organization Button */} 
-        
+
         {isAdmin ? (
           <TouchableOpacity 
               style={[styles.button, styles.leaveButton]} 
@@ -652,8 +867,98 @@ const ProfileScreen = () => {
   const renderPersonalProfileSection = () => {
       if (isOrganizationActive) return null; // Don't show personal stuff when org active
       
+      // Determine if the user has any organizations
+      const hasNoOrganizations = !userOrganizations || userOrganizations.length === 0;
+
+      // Format last save timestamp
+      const lastSaveDate = lastOfflineSaveTimestamp
+        ? new Date(lastOfflineSaveTimestamp).toLocaleString('de-DE', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          })
+        : 'nie';
+
       return (
           <>
+              {/* Organization Selection/Creation - Show ONLY for logged-in users */}
+              {hasFullAccount && (
+                <View style={[
+                    styles.card, 
+                    // Apply special styling if the user has no organizations
+                    hasNoOrganizations && styles.highlightedOrgCard 
+                ]}>
+                    <Text style={[
+                        styles.cardTitle,
+                        // White text for highlighted card
+                        hasNoOrganizations && styles.highlightedOrgTitle
+                    ]}>Organisationen</Text>
+                    
+                    {/* Show existing organizations OR the highlighted prompt */}
+                    {userOrganizations && userOrganizations.length > 0 ? (
+                        <View>
+                            <Text style={styles.cardText}>Du bist Mitglied in:</Text>
+                            {userOrganizations.map(org => (
+                                <View key={org.id} style={styles.orgSelectItem}>
+                                    <Text style={styles.orgSelectName}>{org.name}</Text>
+                                    <TouchableOpacity 
+                                        style={[styles.buttonSmall, styles.switchButtonSmall]} 
+                                        onPress={() => handleSwitchToOrg(org.id)}
+                                        disabled={isOrgContextLoading}
+                                    >
+                                        {isOrgContextLoading ? <ActivityIndicator size="small" color="#4285F4" /> : <Text style={styles.buttonSmallText}>Zu dieser Organisation wechseln</Text>}
+                                    </TouchableOpacity>
+                                </View>
+                            ))}
+                            <View style={styles.separator} />
+                        </View>
+                    ) : (
+                         <Text style={[
+                             styles.orgPromptText, 
+                             hasNoOrganizations && styles.highlightedOrgPromptText
+                         ]}>
+                             Werde <Text style={styles.boldText}>aktiv</Text> und <Text style={styles.boldText}>gestalte</Text> die App mit!
+                         </Text>
+                     )}
+                     {/* Second part of the text, only shown when no organizations exist */}
+                     {hasNoOrganizations && (
+                         <Text style={[styles.orgPromptText, styles.highlightedOrgPromptText]}>
+                             Veröffentliche <Text style={styles.boldText}>Artikel</Text>, gründe <Text style={styles.boldText}>Gruppen</Text> oder trage <Text style={styles.boldText}>Veranstaltungen</Text> ein – Entdecke die Möglichkeiten!
+                         </Text>
+                     )}
+                     
+                     <TouchableOpacity 
+                       style={[
+                           // Apply standard button style only if NOT highlighted
+                           !hasNoOrganizations && styles.primaryButton,
+                           { marginTop: 10 } // Apply margin always
+                       ]} 
+                       onPress={() => navigation.navigate('OrganizationSetup')}
+                     >
+                        {hasNoOrganizations ? (
+                          // Render gradient button when highlighted
+                          <LinearGradient
+                            colors={['#7b4397', '#dc2430']}
+                            start={{ x: 0, y: 0.5 }}
+                            end={{ x: 1, y: 0.5 }}
+                            style={styles.gradientButton}
+                          >
+                            <Ionicons name="business-outline" size={20} color="#fff" style={styles.buttonIcon} />
+                            <Text style={styles.primaryButtonText}>Organisation erstellen / beitreten</Text>
+                          </LinearGradient>
+                        ) : (
+                          // Render standard button content when not highlighted
+                          <>
+                            <Ionicons name="business-outline" size={20} color="#fff" style={styles.buttonIcon} />
+                            <Text style={styles.primaryButtonText}>Organisation erstellen / beitreten</Text>
+                          </>
+                        )}
+                     </TouchableOpacity>
+                </View>
+              )}
+
               {/* Personal Preferences - Show for both local and logged-in */}
               <View style={styles.card}>
                   <Text style={styles.cardTitle}>Deine Interessen</Text>
@@ -702,41 +1007,33 @@ const ProfileScreen = () => {
                    {/* Maybe add delete account later */} 
                 </View>
               )}
-              
-              {/* Organization Selection/Creation - Show ONLY for logged-in users */}
-              {hasFullAccount && (
-                <View style={styles.card}>
-                    <Text style={styles.cardTitle}>Organisationen</Text>
-                    {userOrganizations && userOrganizations.length > 0 ? (
-                        <View>
-                            <Text style={styles.cardText}>Du bist Mitglied in:</Text>
-                            {userOrganizations.map(org => (
-                                <View key={org.id} style={styles.orgSelectItem}>
-                                    <Text style={styles.orgSelectName}>{org.name}</Text>
-                                    <TouchableOpacity 
-                                        style={[styles.buttonSmall, styles.switchButtonSmall]} 
-                                        onPress={() => handleSwitchToOrg(org.id)}
-                                        disabled={isOrgContextLoading}
-                                    >
-                                        {isOrgContextLoading ? <ActivityIndicator size="small" color="#4285F4" /> : <Text style={styles.buttonSmallText}>Zu dieser Organisation wechseln</Text>}
-                                    </TouchableOpacity>
-                                </View>
-                            ))}
-                            <View style={styles.separator} />
-                        </View>
-                    ) : null}
-                    
-                    <Text style={styles.orgPromptText}>Du bist ein Verein, Gemeinde oder Unternehmen?</Text>
-                    <TouchableOpacity 
-                      style={styles.primaryButton} 
-                      onPress={() => navigation.navigate('OrganizationSetup')}
-                    >
-                       <Ionicons name="business-outline" size={20} color="#fff" style={styles.buttonIcon} />
-                       <Text style={styles.primaryButtonText}>Organisation erstellen / beitreten</Text>
-                    </TouchableOpacity>
-                </View>
-              )}
-              
+
+              {/* Offline Mode Management - Show for all users (local and logged-in) */}
+              <View style={styles.card}>
+                  <Text style={styles.cardTitle}>Offline Modus</Text>
+                  <TouchableOpacity
+                    style={[styles.button, styles.saveOfflineButton, (!isConnected || isSavingData) && styles.buttonDisabled]}
+                    onPress={saveDataForOffline}
+                    disabled={!isConnected || isSavingData}
+                  >
+                    {isSavingData ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Ionicons name="download-outline" size={20} color="#fff" style={styles.buttonIcon} />
+                    )}
+                    <Text style={styles.saveOfflineButtonText}>
+                        {isSavingData ? 'Speichern...' : 'Daten für Offline-Modus speichern'}
+                    </Text>
+                  </TouchableOpacity>
+                  <Text style={styles.lastSaveText}>
+                      Zuletzt gespeichert: {lastSaveDate}
+                  </Text>
+                  {!isConnected && (
+                      <Text style={styles.offlineWarningText}>
+                          Keine Internetverbindung zum Speichern vorhanden.
+                      </Text>
+                  )}
+              </View>
           </>
       );
   };
@@ -1008,6 +1305,54 @@ const ProfileScreen = () => {
     </Modal>
   );
 
+  // --- NEW: Render Org Edit Modal ---
+  const renderOrgEditModal = () => (
+    <Modal
+      visible={showOrgEditModal}
+      animationType="slide"
+      transparent={true}
+      onRequestClose={() => setShowOrgEditModal(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <Text style={styles.modalTitle}>Organisation bearbeiten</Text>
+
+          <Text style={styles.inputLabel}>Organisationsname</Text>
+          <TextInput
+            style={styles.input}
+            value={editOrgName}
+            onChangeText={setEditOrgName}
+            placeholder="Neuer Name der Organisation"
+            autoCapitalize="words"
+          />
+
+          {orgEditError ? <Text style={styles.errorTextModal}>{orgEditError}</Text> : null}
+
+          <View style={styles.modalActions}>
+            <TouchableOpacity
+              style={[styles.modalButton, styles.cancelButton]}
+              onPress={() => setShowOrgEditModal(false)}
+              disabled={isOrgEditLoading}
+            >
+              <Text style={styles.modalButtonTextCancel}>Abbrechen</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modalButton, styles.saveButton, isOrgEditLoading && styles.buttonDisabled]}
+              onPress={handleSaveOrgName}
+              disabled={isOrgEditLoading}
+            >
+              {isOrgEditLoading ?
+                 <ActivityIndicator color="#fff" size="small" /> :
+                 <Text style={styles.modalButtonText}>Speichern</Text>
+              }
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 30 }}>
       {renderHeader()}
@@ -1043,6 +1388,7 @@ const ProfileScreen = () => {
       {renderCreateAccountModal()}
       {renderProfileEditModal()}
       {renderAccountSettingsModal()}
+      {renderOrgEditModal()}
     </ScrollView>
   );
 };
@@ -1062,8 +1408,9 @@ const styles = StyleSheet.create({
   profileHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 20,
-    paddingTop: Platform.OS === 'ios' ? 50 : 20, // Adjust for safe area
+    paddingHorizontal: 20, // Keep horizontal padding
+    paddingBottom: 20, // Keep bottom padding
+    paddingTop: Platform.OS === 'android' ? androidPaddingTop : 70, // Apply conditional top padding
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
@@ -1329,13 +1676,19 @@ const styles = StyleSheet.create({
   memberItem: {
       flexDirection: 'row',
       justifyContent: 'space-between',
-      paddingVertical: 8,
+      alignItems: 'center',
+      paddingVertical: 10,
       borderBottomWidth: 1,
       borderBottomColor: '#f5f5f5',
+  },
+  memberInfo: {
+    flex: 1,
+    marginRight: 10,
   },
   memberName: {
       fontSize: 14,
       color: '#555',
+      fontWeight: '500',
   },
   memberRole: {
       fontSize: 13,
@@ -1434,8 +1787,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
+  modalButtonTextCancel: {
+    color: '#333', // Darker text for better contrast on gray background
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
    buttonDisabled: {
     opacity: 0.7,
+    backgroundColor: '#ccc', // More prominent disabled style
   },
   categoriesContainerModal: {
     flexDirection: 'row',
@@ -1499,6 +1858,105 @@ const styles = StyleSheet.create({
   },
   marginTop: {
       marginTop: 10,
+  },
+  memberActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  memberActionButton: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 4,
+    marginLeft: 8,
+  },
+  removeButton: {
+      backgroundColor: '#fdeded',
+  },
+  makeAdminButton: {
+      backgroundColor: '#e7f0fe',
+  },
+  memberActionButtonText: {
+      fontSize: 12,
+      fontWeight: '600',
+  },
+  memberActionButtonTextRemove: {
+      color: '#dc3545',
+      fontSize: 12,
+      fontWeight: '600',
+  },
+  memberActionButtonTextAdmin: {
+      color: '#4285F4',
+      fontSize: 12,
+      fontWeight: '600',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerIconButton: {
+    padding: 8, 
+    marginLeft: 8, // Spacing between icons
+  },
+  reloadButton: {
+    backgroundColor: '#e2f7fa', // Light cyan background
+  },
+  // Styles for the highlighted organization card when no orgs exist
+  highlightedOrgCard: {
+      backgroundColor: '#007BFF', // Bright blue background
+      shadowColor: '#007BFF', // Shadow color matching background for glow effect
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.6,
+      shadowRadius: 12,
+      elevation: 10,
+  },
+  highlightedOrgTitle: {
+      color: '#fff', // White text
+      textAlign: 'center', // Center title
+  },
+  highlightedOrgPromptText: {
+      color: '#fff', // White text
+      fontSize: 16, // Slightly larger font
+      lineHeight: 24, // Improved line spacing
+  },
+  highlightedOrgButton: {
+      // No longer needed for background
+  },
+  // Style for gradient buttons
+  gradientButton: {
+      flexDirection: 'row',
+      paddingVertical: 12,
+      paddingHorizontal: 20,
+      borderRadius: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+      // Background color is handled by LinearGradient itself
+  },
+  // Style for bold text within other text components
+  boldText: {
+      fontWeight: 'bold',
+  },
+  saveOfflineButton: {
+      backgroundColor: '#17a2b8', // Teal color for save button
+      marginBottom: 10,
+  },
+  saveOfflineButtonText: {
+      color: '#fff',
+      fontSize: 15,
+      fontWeight: '600',
+      marginLeft: 10,
+  },
+  lastSaveText: {
+      fontSize: 13,
+      color: '#666',
+      textAlign: 'center',
+      marginTop: 5,
+  },
+  offlineWarningText: {
+      fontSize: 13,
+      color: '#ffc107', // Warning color
+      textAlign: 'center',
+      marginTop: 8,
+      fontWeight: '500',
   },
 });
 

@@ -1,61 +1,131 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, StyleSheet, TouchableOpacity, Text, Platform, ActivityIndicator, Alert } from 'react-native';
 import ScreenHeader from '../components/common/ScreenHeader';
 import { Ionicons } from '@expo/vector-icons';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker, Callout, PROVIDER_GOOGLE } from 'react-native-maps';
 import { supabase } from '../lib/supabase'; // Adjust path if necessary
+import { useOrganization } from '../context/OrganizationContext'; // Import Organization context
+import { useAuth } from '../context/AuthContext'; // Import Auth context
 
-const MapScreen = () => {
+const MapScreen = ({ navigation }) => {
+  const { isOrganizationActive, activeOrganizationId } = useOrganization(); // Get org state
+  const { user } = useAuth(); // Get user state
+
   const [activeFilter, setActiveFilter] = useState('Alle');
   const [mapConfig, setMapConfig] = useState(null);
   const [pois, setPois] = useState([]);
   const [loadingConfig, setLoadingConfig] = useState(true);
   const [loadingPois, setLoadingPois] = useState(true);
   const [error, setError] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Fetch Map Configuration and POIs on mount
-  useEffect(() => {
-    const fetchData = async () => {
-      setLoadingConfig(true);
-      setLoadingPois(true);
-      setError(null);
+  const fetchData = useCallback(async () => {
+    setLoadingConfig(true);
+    setLoadingPois(true);
+    setError(null);
 
-      try {
-        // Fetch Map Config (expects only one row with id=1)
-        const { data: configData, error: configError } = await supabase
-          .from('map_config')
-          .select('*')
-          .eq('id', 1)
-          .maybeSingle(); // Use maybeSingle() as we expect 0 or 1 row
+    try {
+      // Fetch Map Config (remains the same)
+      const { data: configData, error: configError } = await supabase
+        .from('map_config')
+        .select('*')
+        .eq('id', 1)
+        .maybeSingle();
 
-        if (configError) throw configError;
-        if (!configData) throw new Error("Map configuration not found.");
-        setMapConfig(configData);
+      if (configError) throw configError;
+      if (!configData) throw new Error("Map configuration not found.");
+      setMapConfig(configData);
 
-        // Fetch POIs
-        const { data: poisData, error: poisError } = await supabase
-          .from('map_pois')
-          .select('*'); // Select all POIs
+      // Fetch POIs based on organization context -- REMOVED CONDITIONAL LOGIC
+      let query = supabase.from('map_pois').select('*');
 
-        if (poisError) throw poisError;
-        setPois(poisData || []); // Ensure pois is an array even if null response
-
-      } catch (err) {
-        console.error("Error fetching map data:", err);
-        setError(err.message || "Failed to load map data.");
-        Alert.alert("Fehler", "Karteninformationen konnten nicht geladen werden.");
-      } finally {
-        setLoadingConfig(false);
-        setLoadingPois(false);
+      /* // REMOVED Client-side filtering - RLS policy now handles visibility
+      if (isOrganizationActive && activeOrganizationId && user) {
+          // Fetch public POIs OR POIs belonging to the active organization
+          query = query.or(`organization_id.is.null,organization_id.eq.${activeOrganizationId}`);
+      } else {
+          // Fetch only public POIs if no org context or user not logged in
+          query = query.is('organization_id', null);
       }
-    };
+      */
 
+      const { data: poisData, error: poisError } = await query;
+
+      if (poisError) throw poisError;
+      setPois(poisData || []);
+
+    } catch (err) {
+      console.error("Error fetching map data:", err);
+      setError(err.message || "Failed to load map data.");
+      // Alert.alert("Fehler", "Karteninformationen konnten nicht geladen werden."); // Avoid alert loops on focus
+    } finally {
+      setLoadingConfig(false);
+      setLoadingPois(false);
+    }
+  }, [isOrganizationActive, activeOrganizationId, user]); // Depend on org state and user
+
+  // Fetch data initially and when org context changes
+  useEffect(() => {
     fetchData();
-  }, []); // Empty dependency array means run once on mount
+  }, [fetchData]);
+
+  // Re-fetch data when screen comes into focus
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      // Add a small delay to ensure component is mounted before fetching
+      setTimeout(() => {
+        console.log('MapScreen focused - refreshing data');
+        fetchData(); // Refetch POIs when screen is focused
+      }, 100);
+    });
+    return unsubscribe;
+  }, [navigation, fetchData]);
 
   // Function to handle filter changes from ScreenHeader/FilterButtons
   const handleFilterChange = (filter) => {
     setActiveFilter(filter);
+  };
+
+  // Function to handle POI deletion
+  const handleDeletePoi = async (poiId, poiTitle) => {
+      if (!user || !isOrganizationActive) return; // Should not happen if button is shown correctly
+      if (isDeleting) return; // Prevent double taps
+
+      Alert.alert(
+          'Ort löschen',
+          `Möchtest du den Ort "${poiTitle}" wirklich löschen?`,
+          [
+              { text: 'Abbrechen', style: 'cancel' },
+              {
+                  text: 'Löschen', style: 'destructive', onPress: async () => {
+                      setIsDeleting(true);
+                      try {
+                          const { error: deleteError } = await supabase
+                              .from('map_pois')
+                              .delete()
+                              .eq('id', poiId)
+                              // RLS ensures only authorized members can delete
+                              .eq('organization_id', activeOrganizationId);
+
+                          if (deleteError) {
+                              throw deleteError;
+                          }
+
+                          Alert.alert('Erfolg', 'Ort erfolgreich gelöscht.');
+                          // Refresh POIs on the map
+                          await fetchData();
+
+                      } catch (err) {
+                          console.error("Error deleting POI:", err);
+                          Alert.alert('Fehler', 'Ort konnte nicht gelöscht werden.');
+                      } finally {
+                          setIsDeleting(false);
+                      }
+                  }
+              }
+          ]
+      );
   };
 
   // Filter POIs based on the active filter
@@ -69,7 +139,7 @@ const MapScreen = () => {
     longitude: Number(mapConfig.initial_longitude),
     latitudeDelta: Number(mapConfig.initial_latitude_delta),
     longitudeDelta: Number(mapConfig.initial_longitude_delta),
-  } : null; // Provide null or a default if config isn't loaded yet
+  } : null;
 
   // Show loading indicator while data is fetching
   if (loadingConfig || loadingPois || !initialRegion) {
@@ -86,57 +156,86 @@ const MapScreen = () => {
     return (
       <View style={styles.centered}>
         <Text style={styles.errorText}>Fehler: {error}</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={fetchData}>
+             <Text style={styles.retryButtonText}>Erneut versuchen</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
-  // Transform map_filters (string[]) into the structure needed by FilterButtons
-  // Since map doesn't need highlighting, set is_highlighted to false
+  // Format filters for ScreenHeader
   const formattedMapFilters = (mapConfig?.map_filters || ['Alle']).map(filterName => ({
       name: filterName,
-      is_highlighted: false 
+      is_highlighted: false
   }));
 
   return (
     <View style={styles.container}>
       <ScreenHeader
-        filters={formattedMapFilters} // Pass the formatted filters
-        onFilterChange={handleFilterChange} // Pass handler down
-        initialFilter={activeFilter}      // Pass current filter state
+        filters={formattedMapFilters}
+        onFilterChange={handleFilterChange}
+        initialFilter={activeFilter}
       />
 
       <View style={styles.mapContainer}>
         <MapView
           provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
           style={styles.map}
-          initialRegion={initialRegion} // Use derived initialRegion
+          initialRegion={initialRegion}
         >
-          {/* Markers for POIs - now uses filteredPois */}
-          {filteredPois.map(poi => (
-            <Marker
-              key={poi.id}
-              coordinate={{
-                latitude: Number(poi.latitude), // Ensure coordinates are numbers
-                longitude: Number(poi.longitude)
-              }}
-              title={poi.title}
-              description={poi.description}
-            />
-          ))}
+          {filteredPois.map(poi => {
+            // Check if the current user can delete this POI
+            const canDelete = user && poi.organization_id === activeOrganizationId;
+            return (
+              <Marker
+                key={poi.id}
+                coordinate={{
+                  latitude: Number(poi.latitude),
+                  longitude: Number(poi.longitude)
+                }}
+                title={poi.title}
+                description={poi.description}
+                pinColor={poi.organization_id ? 'blue' : 'red'} // Example: Blue for org, Red for public
+              >
+                <Callout tooltip onPress={() => {
+                  // Prevent default Callout behavior if delete button exists
+                  if (canDelete) return;
+                  // Otherwise, maybe navigate to a detail view in the future?
+                }}>
+                  <View style={styles.calloutContainer}>
+                    <Text style={styles.calloutTitle}>{poi.title}</Text>
+                    {poi.description && <Text style={styles.calloutDescription}>{poi.description}</Text>}
+                    {canDelete && (
+                       <TouchableOpacity
+                          style={styles.deleteButton}
+                          onPress={() => handleDeletePoi(poi.id, poi.title)}
+                          disabled={isDeleting}
+                       >
+                         <Ionicons name="trash-outline" size={18} color="#ff3b30" />
+                         <Text style={styles.deleteButtonText}>Löschen</Text>
+                       </TouchableOpacity>
+                    )}
+                  </View>
+                </Callout>
+              </Marker>
+            );
+          })}
         </MapView>
 
-        <View style={styles.mapControls}>
-          <TouchableOpacity style={styles.controlButton}>
-            <Ionicons name="locate" size={24} color="#4285F4" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.controlButton}>
-            <Ionicons name="add" size={24} color="#4285F4" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.controlButton}>
-            <Ionicons name="remove" size={24} color="#4285F4" />
-          </TouchableOpacity>
-        </View>
+        {/* Map controls removed for simplicity, can be added back if needed */}
+        {/* <View style={styles.mapControls}> ... </View> */}
+
       </View>
+
+      {/* Show Add button only if an organization context is active and user logged in */}
+      {isOrganizationActive && user && (
+        <TouchableOpacity
+          style={styles.addButton}
+          onPress={() => navigation.navigate('CreatePoi')}
+        >
+          <Ionicons name="add" size={24} color="#fff" />
+        </TouchableOpacity>
+      )}
     </View>
   );
 };
@@ -161,6 +260,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: 'red',
     textAlign: 'center',
+    marginBottom: 20,
+  },
+  retryButton: {
+    backgroundColor: '#4285F4',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 5,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
   },
   mapContainer: {
     flex: 1,
@@ -169,30 +279,57 @@ const styles = StyleSheet.create({
   map: {
     ...StyleSheet.absoluteFillObject,
   },
-  mapControls: {
+  // Removed mapControls styles
+  addButton: { // Style copied from ChatScreen
     position: 'absolute',
-    right: 16,
-    bottom: 100,
-    backgroundColor: 'white',
-    borderRadius: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  controlButton: {
-    width: 40,
-    height: 40,
+    right: 20,
+    bottom: Platform.OS === 'ios' ? 100 : 30,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#4285F4',
     justifyContent: 'center',
     alignItems: 'center',
-    // Removed borderBottom to apply to last button correctly if needed
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
   },
-  // Add border only between buttons if needed
-  controlButtonSeparator: {
-     borderBottomWidth: 1,
-     borderBottomColor: '#f0f0f0',
-  }
+  calloutContainer: {
+    backgroundColor: 'white',
+    padding: 10,
+    borderRadius: 6,
+    width: 200, // Adjust width as needed
+    borderColor: '#ccc',
+    borderWidth: 0.5,
+  },
+  calloutTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginBottom: 5,
+    color: '#333',
+  },
+  calloutDescription: {
+    fontSize: 12,
+    color: '#555',
+    marginBottom: 8,
+  },
+  deleteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ffe5e5', // Light red background
+    paddingVertical: 5,
+    borderRadius: 4,
+    marginTop: 5,
+  },
+  deleteButtonText: {
+    color: '#ff3b30',
+    fontSize: 12,
+    marginLeft: 5,
+    fontWeight: '500',
+  },
 });
 
 export default MapScreen; 

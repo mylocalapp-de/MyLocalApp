@@ -4,14 +4,16 @@ import ScreenHeader from '../components/common/ScreenHeader';
 import { Ionicons } from '@expo/vector-icons';
 import { useOrganization } from '../context/OrganizationContext';
 import { useAuth } from '../context/AuthContext';
+import { useNetwork } from '../context/NetworkContext';
+import { loadOfflineData } from '../utils/storageUtils';
 import { supabase } from '../lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const ChatScreen = ({ navigation, route }) => {
-  // Use organization context to determine if add button should be shown
   const { isOrganizationActive, activeOrganizationId } = useOrganization();
   const { user, displayName } = useAuth();
-  
+  const { isOfflineMode, isConnected } = useNetwork();
+
   // State for chat groups and loading
   const [chatGroups, setChatGroups] = useState([]);
   const [filteredGroups, setFilteredGroups] = useState([]);
@@ -87,43 +89,52 @@ const ChatScreen = ({ navigation, route }) => {
     fetchFilters();
   }, []);
 
-  // Also refresh when the screen is focused
+  // Also refresh when the screen is focused (Load local data)
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
-      const loadLocalData = async () => {
-        try {
-          // Load stored last messages
-          const storedLastMessages = await AsyncStorage.getItem('chatLastMessages');
-          if (storedLastMessages) {
-            const parsedLastMessages = JSON.parse(storedLastMessages);
-            setLocalLastMessages(parsedLastMessages);
-            
-            // Update chat groups with local last messages
-            setChatGroups(prevGroups => 
-              prevGroups.map(group => {
-                const localMsg = parsedLastMessages[group.id];
-                if (localMsg && (!group.lastTimestamp || localMsg.timestamp > group.lastTimestamp)) {
-                  return {
-                    ...group,
-                    lastMessage: localMsg.text,
-                    time: localMsg.time,
-                    lastTimestamp: localMsg.timestamp
-                  };
-                }
-                return group;
-              })
-            );
-          }
-        } catch (err) {
-          console.error('Error loading local message data:', err);
-        }
-      };
-      
-      loadLocalData();
+      console.log('ChatScreen focused - Preparing to load local data...');
+      try {
+        loadLocalData(); 
+      } catch (error) {
+        console.error("ChatScreen Focus Listener: Error executing loadLocalData:", error);
+      }
     });
     
     return unsubscribe;
   }, [navigation]);
+
+  const loadLocalData = async () => {
+    try {
+      // Load stored last messages
+      const storedLastMessages = await AsyncStorage.getItem('chatLastMessages');
+      if (storedLastMessages) {
+        const parsedLastMessages = JSON.parse(storedLastMessages);
+        setLocalLastMessages(parsedLastMessages);
+        
+        // Update chat groups with local last messages
+        try {
+          setChatGroups(prevGroups => 
+            prevGroups.map(group => {
+              const localMsg = parsedLastMessages[group.id];
+              if (localMsg && (!group.lastTimestamp || localMsg.timestamp > group.lastTimestamp)) {
+                return {
+                  ...group,
+                  lastMessage: localMsg.text,
+                  time: localMsg.time,
+                  lastTimestamp: localMsg.timestamp
+                };
+              }
+              return group;
+            })
+          );
+        } catch (stateUpdateError) {
+            console.error("ChatScreen loadLocalData: Error updating chatGroups state:", stateUpdateError);
+        }
+      }
+    } catch (err) {
+      console.error('Error loading local message data:', err);
+    }
+  };
 
   // Update local unread count for a specific chat
   const updateLocalUnreadCount = async (chatId) => {
@@ -392,7 +403,12 @@ const ChatScreen = ({ navigation, route }) => {
         onRefresh={fetchChatGroups}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>Keine Chats gefunden</Text>
+            {/* Show specific message if offline and error occurred */}
+            {isOfflineMode && error ? (
+                <Text style={styles.emptyText}>{error}</Text>
+            ) : (
+                <Text style={styles.emptyText}>Keine Chats gefunden</Text>
+            )}
           </View>
         }
       />
@@ -415,9 +431,9 @@ const ChatScreen = ({ navigation, route }) => {
       {/* Other chat groups */}
       {renderChatList()}
       
-      {/* Show Add button only if an organization context is active and user logged in */} 
-      {isOrganizationActive && user && (
-        <TouchableOpacity 
+      {/* Show Add button only if org active, user logged in, AND ONLINE */}
+      {isOrganizationActive && user && !isOfflineMode && (
+        <TouchableOpacity
           style={styles.addButton}
           onPress={() => navigation.navigate('CreateBroadcastGroup', {
               organizationId: activeOrganizationId // Pass the active org ID
