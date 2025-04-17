@@ -169,4 +169,38 @@ App.js              - Main application entry point
 Just use 
 npx expo prebuild
  npx expo run:android --variant release   
- npx expo run:ios
+  npx expo run:ios
+ 
+## Code Review Findings
+
+Below is a summary of observations and recommendations based on a code review of the React Native codebase:
+
+### Project Structure
+- The `src` folder is well-organized into `components`, `context`, `navigation`, `screens`, and `utils`, but many screens are large and could be further broken down into smaller, reusable components.
+- The repository includes generated build artifacts (`dist/`, `android/`, `ios/`) and backup files (`app.json.bak`, `package.json.sha`) that bloat the repository. Consider adding these to `.gitignore` and removing them from version control.
+
+### Tech Stack & Tooling
+- The code is written in JavaScript, though `tsconfig.json` and `typescript` are present. Migrating to TypeScript would improve type safety and maintainability.
+- There is no ESLint or Prettier configuration. Adding linting and formatting tools will enforce consistent code style and catch errors early.
+- No CI/CD setup is provided. Integrating automated builds, tests, and linting (e.g., via GitHub Actions) would improve code quality and deployment reliability.
+
+### State Management & Data Fetching
+- Context providers (`AuthContext`, `NetworkContext`, `OrganizationContext`) contain complex logic and multiple state flags. Consider extracting custom hooks or adopting a data-fetching library like React Query to simplify and centralize loading/error states.
+- Repetitive Supabase queries and error handling could be abstracted into a service layer to reduce duplication.
+
+### Code Quality & Maintenance
+- Screens and providers include extensive `console.log` statements. Remove or gate logs behind a debug flag for production builds.
+- There is no automated testing in place. Adding unit tests for utility functions, context logic, and key components is highly recommended.
+- Forms and navigation props lack PropTypes or TypeScript interfaces for validation. This can lead to runtime errors if parameters or props change.
+
+### Performance & Offline Mode
+- The offline data strategy uses `AsyncStorage` for large datasets, which can be slow. Consider using a more robust local database (e.g., SQLite or Realm) for offline caching.
+- The `saveDataForOffline` function performs multiple large network requests in parallel; ensure the UI provides adequate progress feedback and handles cancellation gracefully.
+
+### Documentation & Environment
+- There is no example or template `.env.example` file for environment variables. Adding one will clarify required keys and formats.
+- The README could document coding conventions, branching strategy, and commit message guidelines to onboard new contributors more smoothly.
+
+---
+
+These findings are intended to guide improvements in code quality, maintainability, and developer experience. Please review and prioritize changes according to project goals and release timelines.
