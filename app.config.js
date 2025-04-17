@@ -32,7 +32,8 @@ module.exports = {
       googleMaps: {
         apiKey: "AIzaSyBahIjWqhGvO9_fn_e1pz4RZUQkeMprdT4"
       }
-    }
+    },
+    googleServicesFile: "./google-services.json"
   },
   web: {
     favicon: "./assets/favicon.png"
