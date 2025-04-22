@@ -3407,6 +3407,7 @@ CREATE TABLE public.profiles (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     preferences text[] DEFAULT '{}'::text[],
     avatar_url text, -- Add this line
+    about_me text, -- Add this line
     is_temporary boolean DEFAULT false
 );
 
@@ -3424,6 +3425,12 @@ COMMENT ON TABLE public.profiles IS 'Stores public profile information for authe
 --
 
 COMMENT ON COLUMN public.profiles.is_temporary IS 'Indicates if the account was created via the initial onboarding without a user-set password.';
+
+--
+-- Name: COLUMN profiles.about_me; Type: COMMENT; Schema: public; Owner: supabase_admin
+--
+
+COMMENT ON COLUMN public.profiles.about_me IS 'A short description about the user.';
 
 
 --

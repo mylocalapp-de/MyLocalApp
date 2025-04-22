@@ -237,6 +237,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
           .select(`
             id,
             name,
+            logo_url,
             organization_members!inner ( role )
           `)
           .eq('organization_members.user_id', userId)
@@ -289,6 +290,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         const formattedOrgs = orgData.map(org => ({
             id: org.id, // Assume id and name are non-nullable based on DB schema
             name: org.name,
+            logo_url: org.logo_url,
             role: org.organization_members?.[0]?.role ?? 'member' // Safely access nested role
         }));
         console.log(`AuthContext: [${callTimestamp}] User organizations loaded successfully for ID ${userId}:`, formattedOrgs);
