@@ -41,8 +41,10 @@ const ScreenHeader = ({
           <Text 
             style={[
               styles.titleText,
-              !title && styles.appNameStyle,
-              fontsLoaded && !title && { fontFamily: 'Lobster_400Regular' },
+              // Apply Lobster font if loaded, regardless of title source
+              fontsLoaded && { fontFamily: 'Lobster_400Regular' },
+              // Apply specific appName style only if title is not provided
+              !title && styles.appNameStyle, 
               showBackButton && styles.titleWithBackButton
             ]}
           >

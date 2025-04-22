@@ -1074,11 +1074,17 @@ const ChatDetailScreen = ({ route, navigation }) => {
         )}
         
         {(() => {
+            // Revised condition: Show input if not offline AND (
+            //   it's an open chat OR 
+            //   commenting OR 
+            //   it's the bot OR 
+            //   it's a broadcast group AND the user is a member of the org owning this group
+            // )
             const showInputCondition = !isOfflineMode && (
-                (isOpenChat() && !isBroadcast()) || 
+                (isOpenChat()) || // Removed !isBroadcast() check, isOpenChat implies it's not broadcast
                 commentingOnMessageId !== null || 
                 isBot() || 
-                (isBroadcast() && isOrgMember && !commentingOnMessageId && activeOrganizationId === chatGroup?.organization_id)
+                (isBroadcast() && isOrgMember) // Removed the check for activeOrganizationId === chatGroup?.organization_id
             );
             
             if (!showInputCondition) return null;

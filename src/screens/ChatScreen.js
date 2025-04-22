@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, Platform, ActivityIndicator } from 'react-native';
 import ScreenHeader from '../components/common/ScreenHeader';
 import { Ionicons } from '@expo/vector-icons';
 import { useOrganization } from '../context/OrganizationContext';
 import { useAuth } from '../context/AuthContext';
 import { useNetwork } from '../context/NetworkContext';
-import { loadOfflineData } from '../utils/storageUtils';
 import { supabase } from '../lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -16,7 +15,9 @@ const ChatScreen = ({ navigation, route }) => {
 
   // State for chat groups and loading
   const [chatGroups, setChatGroups] = useState([]);
-  const [filteredGroups, setFilteredGroups] = useState([]);
+  const [dmConversations, setDmConversations] = useState([]);
+  const [combinedList, setCombinedList] = useState([]);
+  const [filteredList, setFilteredList] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeFilter, setActiveFilter] = useState('Alle');
@@ -24,6 +25,8 @@ const ChatScreen = ({ navigation, route }) => {
   const [localLastMessages, setLocalLastMessages] = useState({});
   const [chatFilters, setChatFilters] = useState(['Alle']);
   const [isLoadingFilters, setIsLoadingFilters] = useState(true);
+  const [isLoadingDms, setIsLoadingDms] = useState(true);
+  const [dmError, setDmError] = useState(null);
 
   // Listen for navigation events to update unread counts
   useEffect(() => {
@@ -34,262 +37,420 @@ const ChatScreen = ({ navigation, route }) => {
 
   // Load local unread counts from AsyncStorage
   useEffect(() => {
-    const loadLocalUnreadCounts = async () => {
+    const loadLocalData = async () => {
       try {
         const storedCounts = await AsyncStorage.getItem('localUnreadCounts');
         if (storedCounts) {
           setLocalUnreadCounts(JSON.parse(storedCounts));
         }
-        
-        // Also load stored last messages
         const storedLastMessages = await AsyncStorage.getItem('chatLastMessages');
         if (storedLastMessages) {
           setLocalLastMessages(JSON.parse(storedLastMessages));
         }
       } catch (err) {
-        console.error('Error loading local data:', err);
+        console.error('[ChatScreen] Error loading local data:', err);
       }
     };
-    
-    loadLocalUnreadCounts();
+    loadLocalData();
   }, []);
   
   // Fetch chat filters (tags) from Supabase
   useEffect(() => {
     const fetchFilters = async () => {
+      setIsLoadingFilters(true);
       try {
-        setIsLoadingFilters(true);
-        const { data, error } = await supabase
+        const { data, error: filterError } = await supabase
           .from('chat_group_tags')
           .select('name, is_highlighted')
           .order('display_order', { ascending: true });
 
-        if (error) {
-          console.error('Error fetching chat filters:', error);
-          // Keep default 'Alle' filter on error
+        if (filterError) {
+          console.error('[ChatScreen] Error fetching chat filters:', filterError);
           setChatFilters([{ name: 'Alle', is_highlighted: false }]);
         } else if (data) {
-          // Map to structure { name: string, is_highlighted: boolean }
           const fetchedFilters = data.map(tag => ({
             name: tag.name,
             is_highlighted: tag.is_highlighted || false
           }));
-          setChatFilters([{ name: 'Alle', is_highlighted: false }, ...fetchedFilters]); // Prepend 'Alle' object
+          setChatFilters([{ name: 'Alle', is_highlighted: false }, ...fetchedFilters]);
         } else {
-          setChatFilters([{ name: 'Alle', is_highlighted: false }]); // Default if no data
+          setChatFilters([{ name: 'Alle', is_highlighted: false }]);
         }
       } catch (err) {
-        console.error('Unexpected error fetching filters:', err);
-        setChatFilters([{ name: 'Alle', is_highlighted: false }]); // Default on unexpected error
+        console.error('[ChatScreen] Unexpected error fetching filters:', err);
+        setChatFilters([{ name: 'Alle', is_highlighted: false }]);
       } finally {
         setIsLoadingFilters(false);
       }
     };
-
     fetchFilters();
   }, []);
 
-  // Also refresh when the screen is focused (Load local data)
-  useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', () => {
-      console.log('ChatScreen focused - Preparing to load local data...');
-      try {
-        loadLocalData(); 
-      } catch (error) {
-        console.error("ChatScreen Focus Listener: Error executing loadLocalData:", error);
-      }
-    });
-    
-    return unsubscribe;
-  }, [navigation]);
+  // Combined data fetching logic
+  const fetchData = useCallback(async () => {
+    if (isOfflineMode) {
+        setError("Chats und Nachrichten sind offline nicht verfügbar.");
+        setIsLoading(false);
+        setIsLoadingDms(false);
+        setChatGroups([]);
+        setDmConversations([]);
+        return;
+    }
+    if (!user) {
+        setError("Bitte melde dich an, um Chats und Nachrichten zu sehen.");
+        setIsLoading(false);
+        setIsLoadingDms(false);
+        setChatGroups([]);
+        setDmConversations([]);
+        return;
+    }
 
-  const loadLocalData = async () => {
+    setIsLoading(true);
+    setIsLoadingDms(true);
+    setError(null);
+    setDmError(null);
+
+    // Use Promise.all to fetch both concurrently
     try {
-      // Load stored last messages
-      const storedLastMessages = await AsyncStorage.getItem('chatLastMessages');
-      if (storedLastMessages) {
-        const parsedLastMessages = JSON.parse(storedLastMessages);
-        setLocalLastMessages(parsedLastMessages);
-        
-        // Update chat groups with local last messages
-        try {
-          setChatGroups(prevGroups => 
-            prevGroups.map(group => {
-              const localMsg = parsedLastMessages[group.id];
-              if (localMsg && (!group.lastTimestamp || localMsg.timestamp > group.lastTimestamp)) {
-                return {
-                  ...group,
-                  lastMessage: localMsg.text,
-                  time: localMsg.time,
-                  lastTimestamp: localMsg.timestamp
-                };
-              }
-              return group;
-            })
-          );
-        } catch (stateUpdateError) {
-            console.error("ChatScreen loadLocalData: Error updating chatGroups state:", stateUpdateError);
-        }
-      }
+        const [groupsResult, dmsResult] = await Promise.all([
+            fetchChatGroupsInternal(),
+            fetchDirectMessagesInternal()
+        ]);
+
+        // Combine and process results
+        const combined = processAndCombineData(groupsResult, dmsResult);
+        setCombinedList(combined);
+        filterCombinedList(activeFilter, combined); // Apply filter immediately
+
     } catch (err) {
-      console.error('Error loading local message data:', err);
+        console.error('[ChatScreen] Error during combined fetch:', err);
+        setError('Fehler beim Laden der Daten.');
+        setChatGroups([]); // Keep state consistent
+        setDmConversations([]);
+        setCombinedList([]);
+        setFilteredList([]);
+    } finally {
+        setIsLoading(false); // Combined loading state
+        setIsLoadingDms(false); // Also track DM loading specifically if needed
+    }
+  }, [user, isOfflineMode, isOrganizationActive, activeOrganizationId, activeFilter, localUnreadCounts, localLastMessages]); // Dependencies
+
+  // Fetch data on initial load and when context/user changes
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]); // Use the useCallback dependency
+
+  // Fetch on focus
+  useEffect(() => {
+      const unsubscribeFocus = navigation.addListener('focus', () => {
+          console.log('[ChatScreen] Focused, refetching data...');
+          if (!isOfflineMode && user) {
+              fetchData(); // Use the combined fetch function
+          } else {
+              // Handle offline/logged out state on focus if needed
+              // Maybe just update based on existing state?
+              filterCombinedList(activeFilter, combinedList);
+          }
+      });
+      return unsubscribeFocus;
+  }, [navigation, isOfflineMode, user, fetchData, activeFilter, combinedList]); // Add dependencies
+
+  // --- Internal Fetch Functions ---
+
+  const fetchChatGroupsInternal = async () => {
+    console.log("[ChatScreen] Fetching chat groups...");
+    try {
+      const { data, error: fetchError } = await supabase
+        .from('chat_group_listings')
+        .select('*')
+        .neq('type', 'bot'); // Exclude bots from database query
+
+      if (fetchError) {
+        console.error('[ChatScreen] Error fetching chat groups:', fetchError);
+        setError('Chat-Gruppen konnten nicht geladen werden.');
+        return []; // Return empty array on error
+      }
+      console.log(`[ChatScreen] Fetched ${data?.length || 0} chat groups.`);
+      setChatGroups(data || []); // Update specific state if needed
+      return data || [];
+    } catch (err) {
+      console.error('[ChatScreen] Unexpected error fetching chat groups:', err);
+      setError('Unerwarteter Fehler beim Laden der Chat-Gruppen.');
+      return [];
     }
   };
 
-  // Update local unread count for a specific chat
-  const updateLocalUnreadCount = async (chatId) => {
+  const fetchDirectMessagesInternal = async () => {
+    console.log("[ChatScreen] Fetching direct messages...");
+    if (!user) {
+        console.log("[ChatScreen] No user, skipping DM fetch.");
+        setDmError("Bitte anmelden.");
+        return [];
+    }
+    if (isOfflineMode) {
+        console.log("[ChatScreen] Offline mode, skipping DM fetch.");
+        setDmError("DMs offline nicht verfügbar.");
+        return [];
+    }
+
     try {
-      // Set unread count to 0 for the viewed chat
-      const updatedCounts = {
-        ...localUnreadCounts,
-        [chatId]: 0
-      };
-      
+        let query = supabase
+            .from('dm_conversation_list') // Use the view
+            .select('*');
+
+        if (isOrganizationActive && activeOrganizationId) {
+            console.log(`[ChatScreen] Fetching DMs in Org Context for Org ID: ${activeOrganizationId}`);
+            query = query.eq('is_org_conversation', true)
+                         .eq('organization_id', activeOrganizationId);
+        } else {
+            console.log("[ChatScreen] Fetching DMs in Personal Context");
+            // In Personal context, view returns all, filtering happens client-side in processAndCombineData
+        }
+
+        query = query.order('last_message_at', { ascending: false });
+        const { data, error: fetchError } = await query;
+
+        if (fetchError) {
+            console.error('[ChatScreen] Error fetching DM conversations view:', fetchError);
+            setDmError('Direktnachrichten konnten nicht geladen werden.');
+            return [];
+        }
+
+        console.log(`[ChatScreen] Fetched ${data?.length || 0} DM conversations.`);
+        setDmConversations(data || []); // Update specific state if needed
+        return data || [];
+
+    } catch (err) {
+        console.error('[ChatScreen] Unexpected error fetching conversations:', err);
+        setDmError('Ein unerwarteter Fehler ist aufgetreten.');
+        return [];
+    }
+  };
+
+  // --- Data Processing and Filtering ---
+
+  const processAndCombineData = (groups, dms) => {
+      console.log(`[ChatScreen] Processing ${groups.length} groups and ${dms.length} DMs for context: ${isOrganizationActive ? 'Organization' : 'Personal'}`);
+      let combined = [];
+
+      // --- Context-Specific Group Filtering ---
+      let filteredGroupsForContext = groups;
+      if (isOrganizationActive && activeOrganizationId) {
+          const initialGroupCount = groups.length;
+          filteredGroupsForContext = groups.filter(group => 
+              // Keep only broadcast groups belonging to the active organization
+              group.type === 'broadcast' && group.organization_id === activeOrganizationId
+          );
+          console.log(`[ChatScreen] Organization context group filter applied: ${initialGroupCount} -> ${filteredGroupsForContext.length}`);
+      } else {
+           // Personal context: Keep all non-bot groups fetched (open and broadcast)
+           // Future enhancement: Filter based on user membership if needed.
+           console.log(`[ChatScreen] Personal context, keeping all ${groups.length} fetched groups.`);
+      }
+      // --- End Context-Specific Group Filtering ---
+
+      // Process Filtered Chat Groups
+      const processedGroups = filteredGroupsForContext.map(group => { // Use filteredGroupsForContext
+          let uiType;
+          if (group.type === 'open_group') uiType = 'Offene Gruppen';
+          else if (group.type === 'broadcast') uiType = 'Ankündigungen';
+
+          const unreadCount = localUnreadCounts[group.id] !== undefined
+              ? localUnreadCounts[group.id]
+              : parseInt(group.unread_count) || 0;
+
+          const localMsg = localLastMessages[group.id];
+          let lastMessage = group.last_message || '';
+          let messageTime = group.last_message_time || '';
+          let lastTimestamp = group.last_message_timestamp ? new Date(group.last_message_timestamp).getTime() : 0;
+          let senderName = group.last_message_sender_name || null;
+
+          if (localMsg && (!lastTimestamp || localMsg.timestamp > lastTimestamp)) {
+              lastMessage = localMsg.text;
+              messageTime = localMsg.time;
+              lastTimestamp = localMsg.timestamp;
+              senderName = null;
+          }
+
+          return {
+              id: `group-${group.id}`, // Ensure unique keys
+              groupId: group.id, // Keep original ID if needed
+              name: group.name,
+              lastMessage: lastMessage,
+              lastMessageSender: senderName,
+              time: messageTime,
+              lastTimestamp: lastTimestamp,
+              unread: unreadCount,
+              avatar: null, // Handled in renderAvatar
+              type: 'group', // Distinguish type
+              uiType: uiType, // For potential filtering/display
+              isBot: false,
+              isPinned: group.is_pinned || false,
+              dbType: group.type,
+              organization_id: group.organization_id,
+              tags: group.tags || [],
+              isOrgConversation: false, // Explicitly false for groups
+              itemType: 'group', // Add explicit item type
+          };
+      });
+
+      // Process Direct Messages
+      // Use the original dms data here for filtering before mapping
+      let filteredDmsForContext = dms;
+      if (!isOrganizationActive) {
+         const initialDmCount = dms.length;
+         // Filter the raw dms data first based on initiator_id
+         filteredDmsForContext = dms.filter(dm => 
+            !dm.is_org_conversation || (dm.is_org_conversation && dm.initiator_id === user?.id)
+         );
+         console.log(`[ChatScreen] Personal context DM filter applied: ${initialDmCount} -> ${filteredDmsForContext.length}`);
+      }
+
+      // Now map the filtered DMs
+      const processedDms = filteredDmsForContext.map(dm => {
+           const isOrg = dm.is_org_conversation;
+           const targetName = dm.target_name || (isOrg ? 'Organisation' : 'Unbekannter Benutzer');
+           const lastTimestamp = dm.last_message_at ? new Date(dm.last_message_at).getTime() : 0;
+
+          return {
+              id: `dm-${dm.conversation_id}`, // Ensure unique keys
+              conversationId: dm.conversation_id,
+              name: targetName,
+              lastMessage: dm.last_message_text || (dm.last_message_image_url ? 'Bild gesendet' : 'Keine Nachrichten'),
+              lastMessageSenderId: dm.last_message_sender_id,
+              lastMessageSenderName: dm.last_message_sender_name, // Use if available
+              time: dm.last_message_time || '',
+              lastTimestamp: lastTimestamp,
+              unread: 0, // TODO: Implement unread count for DMs if needed
+              avatar: dm.logo_url, // Use logo if available (for orgs)
+              type: 'dm', // Distinguish type
+              uiType: isOrg ? 'Organisations-DM' : 'Direktnachricht',
+              isBot: false, // DMs are not bots
+              isPinned: false, // DMs are not pinnable currently
+              dbType: 'direct_message', // Custom type
+              organization_id: isOrg ? dm.organization_id : null,
+              tags: [], // DMs don't have tags
+              isOrgConversation: isOrg,
+              otherUserId: isOrg ? null : dm.other_user_id, // Need this for navigation
+              itemType: 'dm', // Add explicit item type
+          };
+      });
+
+      combined = [...processedGroups, ...processedDms];
+
+      // Sort combined list: Pinned items first, then by last message timestamp (descending)
+      combined.sort((a, b) => {
+          // Pinned items come first
+          if (a.isPinned && !b.isPinned) return -1;
+          if (!a.isPinned && b.isPinned) return 1;
+
+          // If both are pinned or both are unpinned, sort by timestamp
+          return (b.lastTimestamp || 0) - (a.lastTimestamp || 0);
+      });
+
+      console.log(`[ChatScreen] Combined list size after sorting: ${combined.length}`);
+      return combined;
+  };
+
+  // Update local unread count for a specific chat group
+  const updateLocalUnreadCount = async (groupId) => {
+    try {
+      const updatedCounts = { ...localUnreadCounts, [groupId]: 0 };
       setLocalUnreadCounts(updatedCounts);
       await AsyncStorage.setItem('localUnreadCounts', JSON.stringify(updatedCounts));
-      
-      // Update the chat groups to reflect this change
-      setChatGroups(prevGroups => 
-        prevGroups.map(group => 
-          group.id === chatId 
-            ? { ...group, unread: 0 } 
-            : group
+
+      // Update the combined list state directly
+      setCombinedList(prevList =>
+        prevList.map(item =>
+          item.itemType === 'group' && item.groupId === groupId
+            ? { ...item, unread: 0 }
+            : item
         )
       );
+      // Also update the filtered list if necessary
+      setFilteredList(prevList =>
+          prevList.map(item =>
+              item.itemType === 'group' && item.groupId === groupId
+                  ? { ...item, unread: 0 }
+                  : item
+          )
+      );
+
     } catch (err) {
-      console.error('Error updating local unread count:', err);
+      console.error('[ChatScreen] Error updating local unread count:', err);
     }
   };
 
   // Listen for filter selection from FilterButtons component
   useEffect(() => {
-    filterChatGroups(activeFilter);
-  }, [activeFilter, chatGroups]);
+    filterCombinedList(activeFilter, combinedList);
+  }, [activeFilter, combinedList]); // Depend on combinedList
 
-  // Filter chat groups based on selected filter
-  const filterChatGroups = (filter) => {
-    if (filter === 'Alle') {
-      setFilteredGroups(chatGroups);
-    } else if (filter === 'Offene Gruppen') {
-      setFilteredGroups(chatGroups.filter(group => group.dbType === 'open_group'));
-    } else if (filter === 'Ankündigungen') {
-      setFilteredGroups(chatGroups.filter(group => group.dbType === 'broadcast'));
-    } else {
-      // Filter by tag
-      setFilteredGroups(chatGroups.filter(group => 
-        group.tags && group.tags.includes(filter)
-      ));
-    }
-  };
-
-  // Fetch chat groups from Supabase
-  useEffect(() => {
-    fetchChatGroups();
-  }, []);
-
-  const fetchChatGroups = async () => {
-    try {
-      setIsLoading(true);
-      setError(null);
-      
-      // Fetch chat groups from the chat_group_listings view
-      const { data, error } = await supabase
-        .from('chat_group_listings')
-        .select('*')
-        .neq('type', 'bot'); // Exclude bots from database query, as Dorfbot is now handled separately
-      
-      if (error) {
-        console.error('Error fetching chat groups:', error);
-        // Don't immediately set error - continue with empty data
-        // Anonymous users should still see the UI even if there's a permissions error
-        setChatGroups([]);
-        setFilteredGroups([]);
-      } else if (data && data.length > 0) {
-        // Process the data to match the format expected by the component
-        const processedData = data.map(group => {
-          // Convert database types to UI types
-          let uiType;
-          if (group.type === 'open_group') {
-            uiType = 'Offene Gruppen';
-          } else if (group.type === 'broadcast') {
-            uiType = 'Ankündigungen'; // Renamed to match filter name
-          }
-          
-          // Get the local unread count if available, otherwise use the server count
-          const unreadCount = localUnreadCounts[group.id] !== undefined 
-            ? localUnreadCounts[group.id]
-            : parseInt(group.unread_count) || 0;
-          
-          // Check if we have a local last message that's more recent than the server one
-          const localMsg = localLastMessages[group.id];
-          let lastMessage = group.last_message || '';
-          let messageTime = group.last_message_time || '';
-          let lastTimestamp = group.last_message_timestamp || 0;
-          let senderName = group.last_message_sender_name || null; // Get sender name from view
-          
-          if (localMsg && (!lastTimestamp || localMsg.timestamp > lastTimestamp)) {
-            lastMessage = localMsg.text;
-            messageTime = localMsg.time;
-            lastTimestamp = localMsg.timestamp;
-            // We don't have sender info for locally stored messages, so clear it
-            senderName = null; 
-          }
-          
-          return {
-            id: group.id,
-            name: group.name,
-            lastMessage: lastMessage,
-            lastMessageSender: senderName, // Store sender name
-            time: messageTime,
-            lastTimestamp: lastTimestamp,
-            unread: unreadCount,
-            avatar: null,
-            type: uiType,
-            isBot: false,
-            isPinned: group.is_pinned || false, // Include is_pinned flag
-            dbType: group.type, // Keep original type for backend operations
-            organization_id: group.organization_id,
-            tags: group.tags || [] // Include tags for filtering
-          };
-        });
-        
-        setChatGroups(processedData);
-        setFilteredGroups(processedData); // Initially show all groups
+  // Filter combined list based on selected filter
+  const filterCombinedList = (filter, listToFilter) => {
+      console.log(`[ChatScreen] Filtering list by: ${filter}`);
+      if (filter === 'Alle') {
+          setFilteredList(listToFilter);
       } else {
-        // Empty data, but not an error
-        setChatGroups([]);
-        setFilteredGroups([]);
+          const filtered = listToFilter.filter(item => {
+              if (item.itemType === 'group') {
+                  // Group filtering logic
+                  if (filter === 'Offene Gruppen') return item.dbType === 'open_group';
+                  if (filter === 'Ankündigungen') return item.dbType === 'broadcast';
+                  return item.tags && item.tags.includes(filter);
+              } else if (item.itemType === 'dm') {
+                  // DM filtering logic (Currently DMs are always shown if filter is not 'Alle')
+                  // If specific DM filters are needed, add logic here.
+                  // For now, DMs pass through any filter except 'Alle'.
+                  // If filter is 'Offene Gruppen' or 'Ankündigungen', DMs should be excluded.
+                  return filter !== 'Offene Gruppen' && filter !== 'Ankündigungen';
+              }
+              return false; // Exclude unknown item types
+          });
+          setFilteredList(filtered);
       }
-    } catch (err) {
-      console.error('Unexpected error fetching chat groups:', err);
-      // Don't immediately set error - continue with empty data
-      setChatGroups([]);
-      setFilteredGroups([]);
-    } finally {
-      setIsLoading(false);
-    }
   };
+
+  // --- Rendering ---
 
   const renderAvatar = (item) => {
-    if (item.avatar) {
-      return <Image source={{ uri: item.avatar }} style={styles.avatar} />;
-    }
-    
-    return (
-      <View 
-        style={[styles.avatarPlaceholder, 
-          item.isBot ? styles.botAvatar : {}
-        ]}
-      >
-        <Text style={styles.avatarLetter}>
-          {item.isBot ? 'AI' : item.name.charAt(0)}
-        </Text>
-      </View>
-    );
+      // DM Avatars
+      if (item.itemType === 'dm') {
+          if (item.isOrgConversation) {
+              // Org DM Avatar
+              return (
+                  <View style={[styles.avatarPlaceholder, styles.orgDmAvatar]}>
+                      <Ionicons name="business-outline" size={24} color="#fff" />
+                  </View>
+              );
+          } else {
+              // User DM Avatar
+              return (
+                  <View style={[styles.avatarPlaceholder, styles.userDmAvatar]}>
+                      <Text style={styles.avatarLetter}>
+                          {item.name?.charAt(0).toUpperCase() || 'U'}
+                      </Text>
+                  </View>
+              );
+          }
+      }
+
+      // Group Avatars (Existing Logic)
+      if (item.avatar) { // Assuming groups might have avatars eventually
+          return <Image source={{ uri: item.avatar }} style={styles.avatar} />;
+      }
+      // Placeholder for Groups
+      return (
+          <View style={[styles.avatarPlaceholder, item.isBot ? styles.botAvatar : styles.groupAvatar]}>
+              <Text style={styles.avatarLetter}>
+                  {item.isBot ? 'AI' : item.name?.charAt(0).toUpperCase() || 'G'}
+              </Text>
+          </View>
+      );
   };
 
   const renderDorfbotItem = () => (
-    <TouchableOpacity 
+    <TouchableOpacity
       style={styles.chatItem}
       onPress={() => navigation.navigate('Dorfbot')}
     >
@@ -311,41 +472,69 @@ const ChatScreen = ({ navigation, route }) => {
   );
 
   const renderChatItem = ({ item }) => {
-    // Determine how to display the last message text
+    // Determine display message based on item type and sender
     let displayMessage = item.lastMessage;
-    if (item.lastMessage && item.lastMessageSender) {
-      // Check if the sender is the current user (requires displayName from useAuth)
-      if (user && item.lastMessageSender === displayName) { 
-        displayMessage = `Du: ${item.lastMessage}`;
-      } else {
-        displayMessage = `${item.lastMessageSender}: ${item.lastMessage}`;
-      }
-    } else if (item.lastMessage && item.dbType === 'broadcast') {
-      // For broadcasts, don't show sender name if missing (likely system message)
-      displayMessage = item.lastMessage;
+    if (item.itemType === 'group') {
+        // Group message display logic
+        if (item.lastMessage && item.lastMessageSender) {
+            if (user && item.lastMessageSender === displayName) {
+                displayMessage = `Du: ${item.lastMessage}`;
+            } else {
+                displayMessage = `${item.lastMessageSender}: ${item.lastMessage}`;
+            }
+        } else if (item.lastMessage && item.dbType === 'broadcast') {
+            displayMessage = item.lastMessage; // No sender prefix for broadcast
+        }
+    } else if (item.itemType === 'dm') {
+        // DM message display logic
+        const isMyLastMessage = item.lastMessageSenderId === user?.id;
+        if (isMyLastMessage) {
+            displayMessage = `Du: ${item.lastMessage}`;
+        } else if (item.isOrgConversation) {
+             displayMessage = `${item.name}: ${item.lastMessage}`;
+        } 
+        // User-to-user DMs received from others: show base message (no prefix needed)
+        // This case is implicitly handled if none of the above conditions are met.
     }
-    
-    return (
-      <TouchableOpacity 
-        style={styles.chatItem}
-        onPress={() => {
-          // If it's a bot type for some reason, navigate to Dorfbot screen
-          if (item.dbType === 'bot' || item.isBot) {
-            navigation.navigate('Dorfbot');
-          } else {
-            // Pass timestamp parameter to trigger unread count update when returning
-            navigation.navigate('ChatDetail', { 
-              chatGroup: item,
-              onReturn: () => updateLocalUnreadCount(item.id)
+
+    const handlePress = () => {
+        if (item.itemType === 'group') {
+             if (item.isBot || item.dbType === 'bot') { // Handle potential bot groups
+                 navigation.navigate('Dorfbot');
+             } else {
+                 navigation.navigate('ChatDetail', {
+                     chatGroup: { // Pass data compatible with ChatDetail
+                         id: item.groupId,
+                         name: item.name,
+                         dbType: item.dbType, // Ensure dbType is passed correctly
+                         organization_id: item.organization_id,
+                         isPinned: item.isPinned, // Pass isPinned status as well
+                     },
+                     onReturn: () => updateLocalUnreadCount(item.groupId)
+                 });
+             }
+        } else if (item.itemType === 'dm') {
+            navigation.navigate('DirectMessageDetail', {
+                conversationId: item.conversationId,
+                recipientId: item.isOrgConversation ? null : item.otherUserId,
+                organizationId: item.isOrgConversation ? item.organization_id : null,
+                recipientName: item.name,
+                isOrgConversation: item.isOrgConversation,
+                // Pass timestamp or similar if unread count update is needed for DMs
             });
-          }
-        }}
+        }
+    };
+
+    return (
+      <TouchableOpacity
+        style={styles.chatItem}
+        onPress={handlePress}
       >
         {renderAvatar(item)}
         <View style={styles.chatInfo}>
           <View style={styles.chatTopLine}>
             <View style={styles.chatNameContainer}>
-              {item.isPinned && (
+              {item.isPinned && item.itemType === 'group' && ( // Only show pin for groups
                 <Ionicons name="pin" size={16} color="#666" style={styles.pinIcon} />
               )}
               <Text style={styles.chatName}>{item.name}</Text>
@@ -354,13 +543,20 @@ const ChatScreen = ({ navigation, route }) => {
           </View>
           <View style={styles.chatBottomLine}>
             <Text style={styles.chatMessage} numberOfLines={1}>
-              {displayMessage}
+              {displayMessage || 'Keine Nachrichten'}
             </Text>
-            {item.unread > 0 && (
+            {/* Conditionally render unread badge only for groups for now */}
+            {item.itemType === 'group' && item.unread > 0 && (
               <View style={styles.unreadBadge}>
                 <Text style={styles.unreadText}>{item.unread}</Text>
               </View>
             )}
+             {/* TODO: Add unread badge logic for DMs if implemented */}
+             {item.itemType === 'dm' && item.unread > 0 && (
+               <View style={[styles.unreadBadge, styles.dmUnreadBadge]}>
+                 <Text style={styles.unreadText}>{item.unread}</Text>
+               </View>
+             )}
           </View>
         </View>
       </TouchableOpacity>
@@ -368,122 +564,111 @@ const ChatScreen = ({ navigation, route }) => {
   };
 
   const renderChatList = () => {
-    if (isLoading || isLoadingFilters) {
-      return (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#4285F4" />
-          <Text style={styles.loadingText}>
-            {isLoading ? 'Chats werden geladen...' : 'Filter werden geladen...'}
-          </Text>
-        </View>
-      );
+    // Combine loading states
+    const showLoading = isLoading || isLoadingFilters || isLoadingDms;
+    // Combine error states (prioritize general error)
+    const displayError = error || dmError;
+
+    if (showLoading && combinedList.length === 0) { // Show loading only if list is empty
+        return (
+            <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#4285F4" />
+                <Text style={styles.loadingText}>Lade Chats & Nachrichten...</Text>
+            </View>
+        );
     }
-    
-    if (error) {
-      return (
-        <View style={styles.errorContainer}>
-          <Ionicons name="alert-circle-outline" size={40} color="#ff3b30" />
-          <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={fetchChatGroups}>
-            <Text style={styles.retryButtonText}>Erneut versuchen</Text>
-          </TouchableOpacity>
-        </View>
-      );
+
+    if (displayError && combinedList.length === 0) { // Show error only if list is empty
+        return (
+            <View style={styles.errorContainer}>
+                <Ionicons name="alert-circle-outline" size={40} color="#ff3b30" />
+                <Text style={styles.errorText}>{displayError}</Text>
+                <TouchableOpacity style={styles.retryButton} onPress={fetchData}>
+                    <Text style={styles.retryButtonText}>Erneut versuchen</Text>
+                </TouchableOpacity>
+            </View>
+        );
     }
-    
+
+    // Handle logged out state
+     if (!user && !showLoading) {
+        return (
+             <View style={styles.centerMessageContainer}>
+                <Ionicons name="lock-closed-outline" size={40} color="#888" />
+                <Text style={styles.centerMessageText}>Bitte melde dich an, um deine Chats und Nachrichten zu sehen.</Text>
+                <TouchableOpacity style={styles.buttonLink} onPress={() => navigation.navigate('Profile')}>
+                    <Text style={styles.buttonLinkText}>Zum Profil</Text>
+                </TouchableOpacity>
+            </View>
+        );
+    }
+
+     // Handle offline state
+    if (isOfflineMode && !showLoading) {
+         return (
+            <View style={styles.centerMessageContainer}>
+                <Ionicons name="cloud-offline-outline" size={40} color="#888" />
+                <Text style={styles.centerMessageText}>Chats und Direktnachrichten sind offline nicht verfügbar.</Text>
+            </View>
+        );
+    }
+
     return (
       <FlatList
-        data={filteredGroups}
+        data={filteredList}
         renderItem={renderChatItem}
         keyExtractor={item => item.id.toString()}
         style={styles.chatList}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
-        refreshing={isLoading}
-        onRefresh={fetchChatGroups}
+        refreshing={showLoading}
+        onRefresh={fetchData}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            {/* Show specific message if offline and error occurred */}
-            {isOfflineMode && error ? (
-                <Text style={styles.emptyText}>{error}</Text>
-            ) : (
-                <Text style={styles.emptyText}>Keine Chats gefunden</Text>
-            )}
+             {/* Show specific message if filtered list is empty */}
+             {displayError ? (
+                 <Text style={styles.emptyText}>{displayError}</Text> // Show error if filtering resulted in empty but error exists
+             ) : (
+                <Text style={styles.emptyText}>
+                  {activeFilter === 'Alle' ? 'Keine Chats oder Nachrichten gefunden.' : `Keine Einträge für Filter "${activeFilter}" gefunden.`}
+                </Text>
+             )}
           </View>
         }
       />
     );
   };
 
+  // Determine FAB action based on context
+  const handleAddButtonPress = () => {
+      if (isOrganizationActive) {
+          // Navigate to Create Broadcast Group screen
+          navigation.navigate('ManageBroadcastGroups'); // Use the renamed screen
+      } else {
+          // Navigate to New Direct Message screen
+          navigation.navigate('NewDirectMessage');
+      }
+  };
+
   return (
     <View style={styles.container}>
-      <ScreenHeader 
+      <ScreenHeader
         filters={chatFilters}
         onFilterChange={setActiveFilter}
+        title={isOrganizationActive ? `Chats (${activeOrganization?.name || 'Org'})` : "Meine Chats"}
       />
-      
+
       {/* Dorfbot always at the top */}
       {renderDorfbotItem()}
-      
-      {/* Direct Messages Entry - Conditional */}
-      {isOrganizationActive ? (
-        // Show Org DM entry when Org Context is active
-        <TouchableOpacity
-          style={styles.chatItem}
-          onPress={() => navigation.navigate('DirectMessages')}
-        >
-          <View style={[styles.avatarPlaceholder, styles.orgDmAvatar]}> 
-            <Ionicons name="mail-outline" size={24} color="#fff" />
-          </View>
-          <View style={styles.chatInfo}>
-            <View style={styles.chatTopLine}>
-              {/* Use activeOrganization from context if available */}
-              <Text style={styles.chatName}>Nachrichten an {activeOrganization?.name || 'Organisation'}</Text>
-              <Text style={styles.chatTime}></Text> 
-            </View>
-            <View style={styles.chatBottomLine}>
-              <Text style={styles.chatMessage} numberOfLines={1}>
-                Direktnachrichten an diese Organisation sehen.
-              </Text>
-            </View>
-          </View>
-        </TouchableOpacity>
-      ) : (
-        // Show User DM entry when Personal Context is active
-        <TouchableOpacity
-          style={styles.chatItem}
-          onPress={() => navigation.navigate('DirectMessages')}
-        >
-          <View style={[styles.avatarPlaceholder, styles.dmAvatar]}>
-            <Text style={styles.avatarLetter}>DM</Text>
-          </View>
-          <View style={styles.chatInfo}>
-            <View style={styles.chatTopLine}>
-              <Text style={styles.chatName}>Direktnachrichten schreiben</Text>
-              <Text style={styles.chatTime}></Text> 
-            </View>
-            <View style={styles.chatBottomLine}>
-              <Text style={styles.chatMessage} numberOfLines={1}>
-                Hier kannst du Direktnachrichten schreiben.
-              </Text>
-            </View>
-          </View>
-        </TouchableOpacity>
-      )}
 
-      {/* Divider */}
-      <View style={styles.divider} />
-      
-      {/* Other chat groups */}
+      {/* Other chat groups and DMs */}
       {renderChatList()}
-      
-      {/* Show Add button only if org active, user logged in, AND ONLINE */}
-      {isOrganizationActive && user && !isOfflineMode && (
+
+      {/* Show Add button based on context and user status */}
+      {user && !isOfflineMode && (
         <TouchableOpacity
           style={styles.addButton}
-          onPress={() => navigation.navigate('CreateBroadcastGroup', {
-              organizationId: activeOrganizationId // Pass the active org ID
-          })}
+          onPress={handleAddButtonPress}
         >
           <Ionicons name="add" size={24} color="#fff" />
         </TouchableOpacity>
@@ -502,7 +687,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8f8f8',
   },
   listContent: {
-    paddingBottom: Platform.OS === 'ios' ? 30 : 20,
+    paddingBottom: Platform.OS === 'ios' ? 90 : 80,
   },
   chatItem: {
     flexDirection: 'row',
@@ -511,12 +696,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
     alignItems: 'center',
-  },
-  divider: {
-    height: 8,
-    backgroundColor: '#f0f0f0',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
   },
   avatar: {
     width: 50,
@@ -528,16 +707,21 @@ const styles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: '#4285F4',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
   },
+  groupAvatar: {
+    backgroundColor: '#4285F4',
+  },
   botAvatar: {
     backgroundColor: '#34A853',
   },
-  dmAvatar: {
-    backgroundColor: '#EA4335', // Example: Use a different color for DMs
+  userDmAvatar: {
+    backgroundColor: '#EA4335',
+  },
+  orgDmAvatar: {
+    backgroundColor: '#fbbc05',
   },
   avatarLetter: {
     color: '#fff',
@@ -569,10 +753,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     color: '#333',
+    flexShrink: 1,
+    marginRight: 5,
   },
   chatTime: {
     fontSize: 12,
     color: '#888',
+    whiteSpace: 'nowrap',
   },
   chatMessage: {
     fontSize: 14,
@@ -582,11 +769,15 @@ const styles = StyleSheet.create({
   },
   unreadBadge: {
     backgroundColor: '#4285F4',
-    width: 20,
+    minWidth: 20,
     height: 20,
     borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 5,
+  },
+   dmUnreadBadge: {
+    backgroundColor: '#EA4335',
   },
   unreadText: {
     color: '#fff',
@@ -596,7 +787,7 @@ const styles = StyleSheet.create({
   addButton: {
     position: 'absolute',
     right: 20,
-    bottom: Platform.OS === 'ios' ? 100 : 30,
+    bottom: Platform.OS === 'ios' ? 30 : 20,
     width: 50,
     height: 50,
     borderRadius: 25,
@@ -613,6 +804,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingVertical: 50,
   },
   loadingText: {
     marginTop: 10,
@@ -623,6 +815,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+    paddingVertical: 50,
   },
   errorText: {
     marginTop: 10,
@@ -644,6 +837,7 @@ const styles = StyleSheet.create({
     padding: 40,
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: 50,
   },
   emptyText: {
     color: '#888',
@@ -653,8 +847,30 @@ const styles = StyleSheet.create({
   pinIcon: {
     marginRight: 5,
   },
-  orgDmAvatar: {
-    backgroundColor: '#EA4335', // Example: Use a different color for Org DMs
+  centerMessageContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 30,
+  },
+  centerMessageText: {
+      marginTop: 15,
+      color: '#666',
+      textAlign: 'center',
+      fontSize: 16,
+      lineHeight: 22,
+      marginBottom: 20,
+  },
+  buttonLink: {
+      backgroundColor: '#4285F4',
+      paddingVertical: 10,
+      paddingHorizontal: 25,
+      borderRadius: 5,
+  },
+  buttonLinkText: {
+      color: '#fff',
+      fontWeight: 'bold',
+      fontSize: 15,
   },
 });
 

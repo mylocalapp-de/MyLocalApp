@@ -3402,11 +3402,12 @@ ALTER TABLE public.article_comments OWNER TO supabase_admin;
 
 CREATE TABLE public.profiles (
     id uuid NOT NULL,
+    updated_at timestamp with time zone,
     display_name text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
     preferences text[] DEFAULT '{}'::text[],
-    updated_at timestamp with time zone DEFAULT now(),
-    created_at timestamp with time zone DEFAULT now(),
-    is_temporary boolean DEFAULT false NOT NULL -- Add this line
+    avatar_url text, -- Add this line
+    is_temporary boolean DEFAULT false
 );
 
 

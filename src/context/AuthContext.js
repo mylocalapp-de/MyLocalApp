@@ -3,6 +3,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import 'react-native-url-polyfill/auto';
 import { supabase } from '../lib/supabase';
 import { v4 as uuidv4 } from 'uuid';
+import { Buffer } from 'buffer';
+import * as FileSystem from 'expo-file-system';
 
 // Create auth context
 const AuthContext = createContext();
@@ -21,7 +23,7 @@ const generateRandomPassword = (length = 12) => {
 export const AuthProvider = ({ children, expoPushToken }) => {
   const [session, setSession] = useState(null);
   const [user, setUser] = useState(null); // Supabase Auth user object
-  const [profile, setProfile] = useState(null); // Public profile data (includes is_temporary)
+  const [profile, setProfile] = useState(null); // Public profile data (includes is_temporary, avatar_url)
   const [preferences, setPreferences] = useState([]); // Local/Profile preferences
   const [displayName, setDisplayName] = useState(''); // Local/Profile display name
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
@@ -29,6 +31,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
   const [loading, setLoading] = useState(true);
   const [loadingProfile, setLoadingProfile] = useState(true); // Separate loading for profile/orgs
   const [loadingAuth, setLoadingAuth] = useState(true); // Separate loading for auth state
+  const [loadingProfilePicture, setLoadingProfilePicture] = useState(false);
 
   // --- Push Token Registration Logic ---
   const registerOrUpdatePushToken = useCallback(async (token, userId) => {
@@ -225,8 +228,8 @@ export const AuthProvider = ({ children, expoPushToken }) => {
       const [profileResult, orgsResult] = await Promise.all([
         supabase
           .from('profiles')
-          // Fetch is_temporary along with other profile data
-          .select(`display_name, preferences, updated_at, is_temporary`)
+          // Fetch avatar_url along with other profile data
+          .select(`display_name, preferences, updated_at, is_temporary, avatar_url`)
           .eq('id', userId)
           .maybeSingle(),
         supabase
@@ -249,7 +252,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
       } else if (profileResult.data) {
         console.log(`AuthContext: [${callTimestamp}] Profile loaded for ID ${userId}:`, profileResult.data);
         const loadedProfile = profileResult.data;
-        // Set the entire profile object, including is_temporary
+        // Set the entire profile object, including avatar_url
         setProfile(loadedProfile);
         // Use optional chaining and defaults when setting derived state/storage
         const displayNameToSet = loadedProfile.display_name ?? '';
@@ -718,39 +721,153 @@ export const AuthProvider = ({ children, expoPushToken }) => {
       if (!user) {
          return { success: false, error: { message: 'Nicht angemeldet.' } };
       }
-      if (profile?.is_temporary) {
-        return { success: false, error: { message: 'Passwort kann für temporäre Konten nicht geändert werden. Bitte zuerst Account vervollständigen.' } };
-      }
+      // No is_temporary check here anymore
+
       // Basic validation
       if (!newPassword || newPassword.length < 6) {
           return { success: false, error: { message: 'Neues Passwort muss mind. 6 Zeichen lang sein.' } };
       }
 
-      let result = null;
+      let passwordUpdateResult = null;
+      let profileUpdateError = null; // To track profile update specifically
+
       try {
           console.log('AuthContext: Attempting password update via Supabase Auth...');
-          // Use updateUser to set the new password
-          const { data, error } = await supabase.auth.updateUser({
+          // 1. Update Auth User Password
+          const { data: authUpdateData, error: authUpdateError } = await supabase.auth.updateUser({
               password: newPassword
           });
 
-          if (error) {
-              console.error("AuthContext: Supabase updateUser (password) error:", error);
-              // Supabase error might include "New password should be different from the old password."
-              result = { success: false, error: { message: error.message || 'Passwort konnte nicht geändert werden.' } };
+          if (authUpdateError) {
+              console.error("AuthContext: Supabase updateUser (password) error:", authUpdateError);
+              return { success: false, error: { message: authUpdateError.message || 'Passwort konnte nicht geändert werden.' } };
+          }
+
+          console.log("AuthContext: Auth password updated successfully.", authUpdateData);
+          passwordUpdateResult = { success: true }; // Mark auth password update as success
+
+          // 2. Update Profile to set is_temporary = false *IF* it was temporary
+          // Check the profile state from the context
+          if (profile?.is_temporary) {
+              console.log(`AuthContext: Account was temporary. Updating profile ${user.id} to set is_temporary=false.`);
+              const { error: updateError } = await supabase
+                  .from('profiles')
+                  .update({ is_temporary: false, updated_at: new Date() })
+                  .eq('id', user.id);
+
+              if (updateError) {
+                  console.error('AuthContext: Error updating profile (setting is_temporary=false): ', updateError);
+                  profileUpdateError = updateError; // Store the error
+              } else {
+                  console.log('AuthContext: Profile updated successfully (is_temporary=false).');
+                  // Trigger profile reload to get the new state reflected in the context/UI
+                  loadUserProfileAndOrgs(user.id);
+              }
           } else {
-             console.log("AuthContext: Password updated successfully in try block.", data);
-             result = { success: true };
+             console.log("AuthContext: Account was already permanent, skipping profile flag update.");
           }
 
       } catch (error) {
-          console.error("AuthContext: Unexpected error updating password:", error);
-          result = { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
-      } finally {
-          console.log("AuthContext: updatePassword finally block reached. Returning:", result); // Log before returning
+          console.error("AuthContext: Unexpected error during password update process:", error);
+          return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
       }
-      return result; // Return the captured result
+
+      // Determine final result based on password update success and profile update error
+      if (passwordUpdateResult?.success) {
+          if (profileUpdateError) {
+             // Password updated, but profile flag failed
+             return {
+                  success: true, // Main action (password set) succeeded
+                  warning: `Passwort gesetzt, aber Profil konnte nicht als permanent markiert werden: ${profileUpdateError.message}.`,
+                  error: profileUpdateError // Pass along the specific profile error
+              };
+          } else {
+             // Everything succeeded
+             return { success: true };
+          }
+      } else {
+         // Password update itself failed (should have been caught earlier, but safety)
+         return { success: false, error: { message: 'Passwort-Update fehlgeschlagen.'} };
+      }
    };
+
+  // --- NEW: Profile Picture Update ---
+  const updateProfilePicture = async (imageUri) => {
+    if (!user) return { success: false, error: { message: 'Nicht angemeldet.' } };
+    if (!imageUri) return { success: false, error: { message: 'Kein Bild ausgewählt.' } };
+
+    setLoadingProfilePicture(true);
+    try {
+      console.log(`AuthContext: Starting profile picture upload for user ${user.id}. Image URI: ${imageUri}`);
+
+      // Determine file extension from URI
+      const fileExt = imageUri.split('.').pop();
+      const fileName = `${user.id}.${fileExt}`;
+      const filePath = `public/${fileName}`; // Store in a public folder within the bucket
+      const fileType = `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`;
+
+      // Read file as base64
+      const base64 = await FileSystem.readAsStringAsync(imageUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      // Upload to Supabase Storage
+      console.log(`AuthContext: Uploading to storage. Path: ${filePath}, Type: ${fileType}`);
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('profile_images') // Use the article_images bucket as requested
+        .upload(filePath, Buffer.from(base64, 'base64'), {
+          contentType: fileType,
+          cacheControl: '3600', // Cache for 1 hour
+          upsert: true, // Overwrite existing file for the user
+        });
+
+      if (uploadError) {
+        console.error('AuthContext: Supabase storage upload error:', uploadError);
+        return { success: false, error: { message: uploadError.message || 'Fehler beim Hochladen des Bildes.' } };
+      }
+
+      console.log('AuthContext: Storage upload successful:', uploadData);
+
+      // Get the public URL for the uploaded file
+      // Construct the URL manually as getPublicUrl might be deprecated or behave unexpectedly
+      const storageBaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL; // Ensure this is set in your environment
+      if (!storageBaseUrl) {
+          console.error('AuthContext: EXPO_PUBLIC_SUPABASE_URL is not defined!');
+          return { success: false, error: { message: 'Server-Konfigurationsfehler.' } };
+      }
+      // Use the key from uploadData.data if available, otherwise use constructed filePath
+      const imageUrlPath = uploadData?.path ?? filePath;
+      const publicUrl = `${storageBaseUrl}/storage/v1/object/public/profile_images/${imageUrlPath}?t=${new Date().getTime()}`; // Update bucket name in URL
+
+      console.log('AuthContext: Generated public URL:', publicUrl);
+
+      // Update the avatar_url in the profiles table
+      console.log(`AuthContext: Updating profile table with avatar_url for user ${user.id}`);
+      const { error: dbError } = await supabase
+        .from('profiles')
+        .update({ avatar_url: publicUrl, updated_at: new Date() })
+        .eq('id', user.id);
+
+      if (dbError) {
+        console.error('AuthContext: Error updating profile avatar_url:', dbError);
+        // Attempt to delete the uploaded image if DB update fails?
+        // await supabase.storage.from('avatars').remove([filePath]);
+        return { success: false, error: { message: dbError.message || 'Fehler beim Speichern des Bild-Links.' } };
+      }
+
+      console.log('AuthContext: Profile avatar_url updated successfully.');
+
+      // Update local profile state immediately
+      setProfile(prev => prev ? ({ ...prev, avatar_url: publicUrl }) : null);
+
+      return { success: true, data: { avatarUrl: publicUrl } };
+    } catch (error) {
+      console.error('AuthContext: Unexpected error in updateProfilePicture:', error);
+      return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+    } finally {
+      setLoadingProfilePicture(false);
+    }
+  };
 
   // --- Organization Actions (kept in AuthContext as they relate to the logged-in user joining/leaving/creating) ---
   const createOrganization = async (name) => {
@@ -921,7 +1038,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
   const value = {
     session,
     user,
-    profile, // Includes is_temporary flag
+    profile, // Includes avatar_url now
     loading,
     preferences,
     displayName,
@@ -938,7 +1055,9 @@ export const AuthProvider = ({ children, expoPushToken }) => {
     updateDisplayName,
     updatePreferences,
     updateEmail, // Add temporary check inside
-    updatePassword, // Add temporary check inside
+    updatePassword, // ADD THIS LINE
+    updateProfilePicture, // ADDED
+    loadingProfilePicture, // ADDED
     loadUserProfile: loadUserProfileAndOrgs, // Keep combined loading function
     // Organization Functions (These DO belong in AuthContext)
     createOrganization, 

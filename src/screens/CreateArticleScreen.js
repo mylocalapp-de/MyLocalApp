@@ -426,8 +426,8 @@ const CreateArticleScreen = ({ navigation, route }) => {
             textAlignVertical="top"
           />
 
-          {/* Image Upload - only shown for org articles */}
-          {activeOrganizationId && (
+          {/* Image Upload - REMOVED: only shown for org articles */}
+          {/* {activeOrganizationId && ( */} 
             <>
               <Text style={styles.inputLabel}>Bild (Optional)</Text>
               {imageAsset && (
@@ -446,7 +446,7 @@ const CreateArticleScreen = ({ navigation, route }) => {
                </TouchableOpacity>
               {isUploading && <ActivityIndicator size="small" color="#4285F4" style={{ marginTop: 10}} />}
             </>
-          )}
+          {/* )} */}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
