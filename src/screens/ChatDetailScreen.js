@@ -848,7 +848,12 @@ const ChatDetailScreen = ({ route, navigation }) => {
         <Text style={styles.commentsHeader}>Kommentare ({item.comments.length}):</Text>
         {item.comments.map(comment => (
           <View key={comment.id} style={styles.commentBubble}>
-            <Text style={styles.commentSender}>{comment.sender}</Text>
+            <TouchableOpacity
+              disabled={isOfflineMode || !comment.user_id} // Disable if offline or no user ID
+              onPress={() => comment.user_id && navigation.navigate('UserProfileView', { userId: comment.user_id })}
+            >
+                <Text style={styles.commentSender}>{comment.sender}</Text>
+            </TouchableOpacity>
             <Text style={styles.commentText}>{comment.text}</Text>
             <Text style={styles.commentTime}>{comment.time}</Text>
           </View>
@@ -922,7 +927,20 @@ const ChatDetailScreen = ({ route, navigation }) => {
           ]}
         >
           {/* Display sender name only if it's not me and not a system message */}
-          {!isMe && item.sender !== 'System' && <Text style={styles.messageSender}>{item.sender}</Text>}
+          {!isMe && item.sender !== 'System' && (
+            isOpenChat() && item.user_id ? (
+              // Make name clickable in Open Chats if user_id exists
+              <TouchableOpacity
+                disabled={isOfflineMode || !item.user_id}
+                onPress={() => item.user_id && navigation.navigate('UserProfileView', { userId: item.user_id })}
+              >
+                <Text style={styles.messageSender}>{item.sender}</Text>
+              </TouchableOpacity>
+            ) : (
+              // Otherwise, just display the name (e.g., in Broadcasts)
+              <Text style={styles.messageSender}>{item.sender}</Text>
+            )
+          )}
           
           {/* Display text if present */}
           {item.text && <Text style={styles.messageText}>{item.text}</Text>}

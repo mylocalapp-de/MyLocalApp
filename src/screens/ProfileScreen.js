@@ -71,6 +71,7 @@ const ProfileScreen = () => {
     deleteCurrentUserAccount,
     updateProfilePicture, // Get the new function
     loadingProfilePicture, // Get the loading state
+    updateProfile, // Add this line
   } = useAuth();
   
   // State for account creation modal
@@ -117,6 +118,7 @@ const ProfileScreen = () => {
   const [editOrgName, setEditOrgName] = useState('');
   const [isOrgEditLoading, setIsOrgEditLoading] = useState(false);
   const [orgEditError, setOrgEditError] = useState('');
+  const [editAboutMe, setEditAboutMe] = useState(''); // <<< ADD THIS LINE
 
 
   // Derived state: Check if user has a full Supabase account
@@ -186,6 +188,7 @@ const ProfileScreen = () => {
   const handleOpenProfileEdit = () => {
     setEditDisplayName(displayName || ''); // Use context displayName
     setEditPreferences(preferences || []); // Use context preferences
+    setEditAboutMe(profile?.about_me || ''); // <<< ADD THIS LINE: Use context profile.about_me
     setEditFormError('');
     setShowProfileEditModal(true);
   };
@@ -267,7 +270,7 @@ const ProfileScreen = () => {
   const handleSaveProfile = async () => {
     if (isOrganizationActive) return; // Prevent saving personal profile while org active
     
-    console.log('Saving personal profile changes...');
+    console.log('Saving personal profile changes (including about_me)...'); // Updated log
     
     if (!editDisplayName.trim()) {
       setEditFormError('Bitte gib einen Benutzernamen ein.');
@@ -282,67 +285,68 @@ const ProfileScreen = () => {
     setIsEditLoading(true);
     setEditFormError('');
     
-    let nameUpdateSuccess = true;
-    let prefUpdateSuccess = true;
-    let nameWarning = null;
-    let prefWarning = null;
+    // Combine updates into a single object for clarity
+    const updates = {};
+    let needsUpdate = false;
+
+    if (editDisplayName !== displayName) {
+        updates.display_name = editDisplayName.trim();
+        needsUpdate = true;
+    }
+
+    const preferencesChanged = JSON.stringify(editPreferences.sort()) !== JSON.stringify((preferences || []).sort());
+    if (preferencesChanged) {
+        updates.preferences = editPreferences;
+        needsUpdate = true;
+    }
+
+    // <<< START ADDED SECTION >>>
+    // Check if about_me changed
+    if (editAboutMe !== (profile?.about_me || '')) {
+        // Allow empty string, treat null/undefined as empty for comparison
+        updates.about_me = editAboutMe.trim(); 
+        needsUpdate = true;
+    }
+    // <<< END ADDED SECTION >>>
+
+    if (!needsUpdate) {
+        console.log("No profile changes detected.");
+        setShowProfileEditModal(false);
+        setIsEditLoading(false);
+        return; // Nothing to save
+    }
 
     try {
-      // Update display name if changed
-      if (editDisplayName !== displayName) {
-          const nameResult = await updateDisplayName(editDisplayName);
-          if (!nameResult.success) {
-              console.error('Failed to update display name:', nameResult.error);
-              setEditFormError(nameResult.error?.message || 'Fehler beim Speichern des Namens.');
-              nameWarning = nameResult.warning;
-              nameUpdateSuccess = false;
-          } else {
-              nameWarning = nameResult.warning;
-          }
-      }
+        // Call updateUserProfile from AuthContext (assuming it handles partial updates)
+        console.log("Calling updateUserProfile with updates:", updates);
+        const result = await updateProfile(updates); // Use updateProfile from AuthContext
 
-      // Update preferences if changed
-      const preferencesChanged = JSON.stringify(editPreferences.sort()) !== JSON.stringify((preferences || []).sort());
-      if (preferencesChanged) {
-          const prefResult = await updatePreferences(editPreferences);
-          if (!prefResult.success) {
-              console.error('Failed to update preferences:', prefResult.error);
-              setEditFormError(prev => 
-                  prev ? `${prev} ${prefResult.error?.message || 'Fehler beim Speichern der Präferenzen.'}` 
-                  : (prefResult.error?.message || 'Fehler beim Speichern der Präferenzen.')
-              );
-              prefWarning = prefResult.warning;
-              prefUpdateSuccess = false;
-          } else {
-              prefWarning = prefResult.warning;
-          }
-      }
-      
-      setIsEditLoading(false);
-
-      if (nameUpdateSuccess && prefUpdateSuccess) {
-          if (nameWarning || prefWarning) {
-              Alert.alert(
-                  'Teilweise erfolgreich',
-                  'Deine Änderungen wurden lokal gespeichert, aber es gab Probleme bei der Server-Synchronisierung.'
-              );
-          } else {
-              Alert.alert('Erfolgreich', 'Profil aktualisiert.');
-          }
-          setShowProfileEditModal(false);
-      } else {
-          if (nameWarning || prefWarning) {
-              Alert.alert(
-                  'Hinweis',
-                  'Änderungen lokal übernommen, aber Datenbank-Update fehlgeschlagen.'
-              ); 
-          }
-      }
+        if (result.success) {
+            if (result.warning) {
+                 Alert.alert(
+                    'Teilweise erfolgreich',
+                    'Deine Änderungen wurden lokal gespeichert, aber es gab Probleme bei der Server-Synchronisierung.'
+                 );
+            } else {
+                 Alert.alert('Erfolgreich', 'Profil aktualisiert.');
+            }
+            setShowProfileEditModal(false);
+        } else {
+            console.error('Failed to update profile:', result.error);
+            setEditFormError(result.error?.message || 'Fehler beim Speichern des Profils.');
+            if (result.warning) {
+                 Alert.alert(
+                    'Hinweis',
+                    'Änderungen lokal übernommen, aber Datenbank-Update fehlgeschlagen.'
+                 );
+            }
+        }
 
     } catch (error) {
-      console.error('Unexpected error during profile update:', error);
-      setEditFormError('Ein unerwarteter Fehler ist aufgetreten.');
-      setIsEditLoading(false);
+        console.error('Unexpected error during profile update:', error);
+        setEditFormError('Ein unerwarteter Fehler ist aufgetreten.');
+    } finally {
+        setIsEditLoading(false);
     }
   };
   
@@ -1163,6 +1167,22 @@ const ProfileScreen = () => {
                   </TouchableOpacity>
               </View>
               
+              {/* About Me Section - Show for both local and logged-in, but edit only personal */} 
+              <View style={styles.card}>
+                  <Text style={styles.cardTitle}>Über Mich</Text>
+                  <Text style={styles.aboutMeText}>
+                      {profile?.about_me || 'Keine Beschreibung hinterlegt.'}
+                  </Text>
+                  {/* Edit button can also trigger opening the main profile edit modal */}
+                  <TouchableOpacity 
+                    style={styles.editButtonInline} 
+                    onPress={handleOpenProfileEdit}
+                  >
+                    <Text style={styles.editButtonText}>Profil bearbeiten</Text>
+                    <Ionicons name="chevron-forward" size={16} color="#4285F4" />
+                  </TouchableOpacity>
+              </View>
+
               {/* Account Settings (Email/Password) - Show ONLY for logged-in users */}
               {hasFullAccount && (
                 <View style={styles.card}>
@@ -1356,6 +1376,18 @@ const ProfileScreen = () => {
               </TouchableOpacity>
             ))}
           </View>
+          
+          {/* <<< START ADDED SECTION >>> */}
+          <Text style={styles.inputLabel}>Über Mich (optional)</Text>
+          <TextInput
+            style={[styles.input, styles.textArea]} // Add textArea style
+            value={editAboutMe}
+            onChangeText={setEditAboutMe}
+            placeholder="Erzähl etwas über dich..."
+            multiline={true}
+            numberOfLines={4} // Suggest initial height
+          />
+          {/* <<< END ADDED SECTION >>> */}
           
           {editFormError ? <Text style={styles.errorTextModal}>{editFormError}</Text> : null}
           
@@ -2396,6 +2428,17 @@ const styles = StyleSheet.create({
       textAlign: 'center',
       marginVertical: 10,
       fontStyle: 'italic',
+  },
+  textArea: {
+    height: 100, // Give it some initial height
+    textAlignVertical: 'top', // Start text at the top for multiline
+  },
+  aboutMeText: {
+    fontSize: 14,
+    color: '#555',
+    lineHeight: 20,
+    marginBottom: 15,
+    fontStyle: 'italic', // Optional: Style it differently
   },
 });
 

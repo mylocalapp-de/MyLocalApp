@@ -351,14 +351,20 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
 
   const renderItem = ({ item }) => {
     const isMe = user && item.user_id === user.id;
+    const canNavigateToProfile = !isMe && !isOrgConversation && item.user_id;
 
     return (
       <View style={styles.messageContainer}>
         {/* Display sender name ABOVE bubble only if NOT sent by current user */}
         {!isMe && (
-            <Text style={[styles.messageSenderName, styles.otherMessageSenderName]}>
-                {item.sender} {/* Sender name determined by context */}
-            </Text>
+            <TouchableOpacity 
+                disabled={isOfflineMode || !canNavigateToProfile} // Disable if offline or cannot navigate
+                onPress={() => canNavigateToProfile && navigation.navigate('UserProfileView', { userId: item.user_id })}
+            >
+                <Text style={[styles.messageSenderName, styles.otherMessageSenderName]}>
+                    {item.sender} {/* Sender name determined by context */}
+                </Text>
+            </TouchableOpacity>
         )}
 
         <View
@@ -390,7 +396,9 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
     );
   };
 
-  const renderHeader = () => (
+  const renderHeader = () => {
+    const canNavigateFromHeader = !isOrgConversation && recipientId;
+    return (
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color="#4285F4" />
@@ -401,16 +409,29 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
                 <Ionicons name="business-outline" size={18} color="#fff" />
             </View>
          ) : (
-            <View style={[styles.avatarPlaceholder, styles.userAvatar]}>
+            // Make avatar touchable for user profile navigation
+            <TouchableOpacity 
+                disabled={isOfflineMode || !canNavigateFromHeader}
+                onPress={() => canNavigateFromHeader && navigation.navigate('UserProfileView', { userId: recipientId })}
+                style={[styles.avatarPlaceholder, styles.userAvatar]} // Wrap in TouchableOpacity
+            >
                 <Text style={styles.avatarLetter}>
                     {recipientName?.charAt(0).toUpperCase() || 'U'}
                 </Text>
-            </View>
+            </TouchableOpacity>
          )}
-        <Text style={styles.headerName}>{recipientName || (isOrgConversation ? 'Organisation' : 'Nachricht')}</Text>
+        {/* Make name touchable for user profile navigation */}
+         <TouchableOpacity 
+             disabled={isOfflineMode || !canNavigateFromHeader}
+             onPress={() => canNavigateFromHeader && navigation.navigate('UserProfileView', { userId: recipientId })}
+             style={{ flex: 1 }} // Make touchable area expand
+         >
+            <Text style={styles.headerName}>{recipientName || (isOrgConversation ? 'Organisation' : 'Nachricht')}</Text>
+         </TouchableOpacity>
          {/* Optional: Add online status indicator? Not applicable for orgs */}
       </View>
     );
+  };
 
 
   if (loading) {
@@ -744,7 +765,26 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontStyle: 'italic',
     alignSelf: 'flex-start',
-  }
+  },
+  avatarPlaceholder: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  userAvatar: {
+    backgroundColor: '#4285F4',
+  },
+  orgAvatar: {
+    backgroundColor: '#34A853', // Example green for orgs
+  },
+  avatarLetter: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
 });
 
 export default DirectMessageDetailScreen; 

@@ -229,7 +229,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         supabase
           .from('profiles')
           // Fetch avatar_url along with other profile data
-          .select(`display_name, preferences, updated_at, is_temporary, avatar_url`)
+          .select(`display_name, preferences, updated_at, is_temporary, avatar_url, about_me`)
           .eq('id', userId)
           .maybeSingle(),
         supabase
@@ -660,16 +660,69 @@ export const AuthProvider = ({ children, expoPushToken }) => {
            error: { message: 'Fehler beim Speichern der Präferenzen in der Datenbank.' }
            };
          }
-       // Update profile state in context
-       setProfile(prev => prev ? ({ ...prev, preferences: newPreferences }) : null);
+         // Update profile state in context
+         setProfile(prev => prev ? ({ ...prev, preferences: newPreferences }) : null);
          console.log('AuthContext: Profile preferences updated successfully in DB.');
          return { success: true, data: newPreferences };
        } catch (e) {
           console.error('AuthContext: Unexpected error updating preferences in DB:', e);
-        setPreferences(originalPreferences); // Revert state on unexpected error
+          setPreferences(originalPreferences); // Revert state on unexpected error
           return { success: false, error: { message: 'Unerwarteter Fehler beim DB-Update.' } };
-     }
+       }
   };
+
+   // Generic Profile Update (Handles display_name, preferences, about_me)
+   const updateProfile = async (updates) => {
+        if (!user) {
+            console.warn('AuthContext: updateProfile called without active user.');
+            return { success: false, error: { message: 'Kein Benutzer angemeldet.' } };
+        }
+        if (Object.keys(updates).length === 0) {
+            console.log('AuthContext: updateProfile called with no updates.');
+            return { success: true }; // No changes needed
+        }
+
+        // Optimistic UI updates (update local state first)
+        const originalProfile = { ...profile }; // Shallow copy for revert
+        const updatedProfile = { ...profile, ...updates };
+        setProfile(updatedProfile);
+        if ('display_name' in updates) setDisplayName(updates.display_name);
+        if ('preferences' in updates) setPreferences(updates.preferences);
+        // No separate state for about_me, it's directly in profile
+
+        try {
+            console.log(`AuthContext: Updating profile in DB for user ${user.id}:`, updates);
+            const { error } = await supabase
+                .from('profiles')
+                .update({ ...updates, updated_at: new Date() }) // Spread the updates object
+                .eq('id', user.id);
+
+            if (error) {
+                console.error('AuthContext: Error updating profile in DB:', error);
+                // Revert local state on DB error
+                setProfile(originalProfile);
+                if ('display_name' in updates) setDisplayName(originalProfile.display_name || '');
+                if ('preferences' in updates) setPreferences(originalProfile.preferences || []);
+
+                return {
+                    success: false,
+                    error: { message: 'Fehler beim Speichern des Profils in der Datenbank.' },
+                };
+            }
+
+            console.log('AuthContext: Profile updated successfully in DB.');
+            // No need to update state again, already done optimistically
+            return { success: true, data: updatedProfile };
+        } catch (e) {
+            console.error('AuthContext: Unexpected error updating profile in DB:', e);
+            // Revert local state on unexpected error
+            setProfile(originalProfile);
+            if ('display_name' in updates) setDisplayName(originalProfile.display_name || '');
+            if ('preferences' in updates) setPreferences(originalProfile.preferences || []);
+
+            return { success: false, error: { message: 'Unerwarteter Fehler beim DB-Update.' } };
+        }
+    };
 
    // Update user email (Only applicable if account IS NOT temporary)
    const updateEmail = async (newEmail, password) => {
@@ -1040,7 +1093,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
   const value = {
     session,
     user,
-    profile, // Includes avatar_url now
+    profile, // Includes avatar_url and about_me now
     loading,
     preferences,
     displayName,
@@ -1056,6 +1109,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
     // Profile Updates
     updateDisplayName,
     updatePreferences,
+    updateProfile,
     updateEmail, // Add temporary check inside
     updatePassword, // ADD THIS LINE
     updateProfilePicture, // ADDED
