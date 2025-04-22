@@ -32,7 +32,9 @@ const ProfileScreen = () => {
     updateOrganizationDetails, // Assuming this will be used later
     updateOrganizationName,
     removeOrganizationMember,
-    transferOrganizationAdmin
+    transferOrganizationAdmin,
+    updateOrganizationLogo, // <-- ADDED
+    loadingOrgLogo, // <-- ADDED
   } = useOrganization();
 
   // **** ADDED LOGGING: Inspect the function from context ****
@@ -781,8 +783,11 @@ const ProfileScreen = () => {
   const renderHeader = () => {
     // Ensure activeOrganization exists before accessing properties
     const currentOrgName = isOrganizationActive && activeOrganization ? activeOrganization.name : null;
+    const currentOrgLogoUrl = isOrganizationActive && activeOrganization ? activeOrganization.logo_url : null; // <-- ADDED
     const currentUserRole = isOrganizationActive && activeOrganization ? activeOrganization.currentUserRole : null;
-    const headerTitle = isOrganizationActive ? `Organisation: ${currentOrgName || '... '}` : 'Dein Profil';
+    const headerTitle = isOrganizationActive 
+      ? `Organisation: ${currentOrgName || '... '}` 
+      : (displayName || 'Dein Profil'); // Use displayName or fallback
     const avatarInitial = isOrganizationActive ? (currentOrgName?.charAt(0) || 'O') : (displayName?.charAt(0) || '?');
     const isAdmin = isOrganizationActive && currentUserRole === 'admin'; // Use derived role
     const userAvatarUrl = !isOrganizationActive ? profile?.avatar_url : null; // Get avatar URL only in personal context
@@ -791,25 +796,55 @@ const ProfileScreen = () => {
       <View style={styles.profileHeader}>
         {/* Display Image or Initials Avatar */}
         <TouchableOpacity
-           onPress={!isOrganizationActive ? handleSelectProfilePicture : null} // Allow changing only in personal context
-           disabled={uploadingImage || loadingProfilePicture} // Disable while uploading
+           onPress={isOrganizationActive ? (isAdmin ? handleSelectOrgLogo : null) : handleSelectProfilePicture} // Allow org logo change for admins
+           disabled={uploadingImage || loadingProfilePicture || loadingOrgLogo || (isOrganizationActive && !isAdmin)} // Disable based on context and role
            style={styles.avatarContainer} // Added container for better layout
         >
-          {userAvatarUrl && !isOrganizationActive ? (<Image source={{ uri: userAvatarUrl }} style={styles.avatarImage} />) : (
-            <View style={[styles.avatar, isOrganizationActive && styles.orgAvatar]}>
-              <Text style={styles.avatarLetter}>{avatarInitial}</Text>
-            </View>
+          {/* Personal Avatar Logic */}
+          {userAvatarUrl && !isOrganizationActive ? (
+              <Image source={{ uri: userAvatarUrl }} style={styles.avatarImage} />
+          ) : 
+          /* Organization Logo/Avatar Logic */
+          isOrganizationActive ? (
+              currentOrgLogoUrl ? (
+                 <Image source={{ uri: currentOrgLogoUrl }} style={styles.avatarImage} />
+              ) : (
+                 <View style={[styles.avatar, styles.orgAvatar]}>
+                   <Text style={styles.avatarLetter}>{avatarInitial}</Text>
+                 </View>
+              )
+          ) : (
+              /* Fallback Personal Avatar (Initials) */
+              <View style={[styles.avatar]}>
+                 <Text style={styles.avatarLetter}>{avatarInitial}</Text>
+              </View>
           )}
-          {/* Edit Icon Overlay for Personal Avatar */}
+          
+          {/* Edit Icon Overlay */}
+          {/* Personal Context Edit Icon */}
           {!isOrganizationActive && !uploadingImage && !loadingProfilePicture && (
               <View style={styles.avatarEditIcon}>
                  <Ionicons name="camera-outline" size={18} color="#fff" />
               </View>
           )}
+          {/* Organization Context Edit Icon (for Admins) */}
+          {isOrganizationActive && isAdmin && !loadingOrgLogo && (
+             <View style={styles.avatarEditIcon}>
+                <Ionicons name="camera-outline" size={18} color="#fff" />
+             </View>
+          )}
+          
           {/* Loading Indicator */}
+          {/* Personal Context Loading */}
           {(uploadingImage || loadingProfilePicture) && !isOrganizationActive && (
               <View style={styles.avatarLoadingOverlay}>
                   <ActivityIndicator size="small" color="#fff" />
+              </View>
+          )}
+          {/* Organization Context Loading */}
+          {loadingOrgLogo && isOrganizationActive && (
+              <View style={styles.avatarLoadingOverlay}>
+                 <ActivityIndicator size="small" color="#fff" />
               </View>
           )}
         </TouchableOpacity>
@@ -1617,6 +1652,64 @@ const ProfileScreen = () => {
     } finally {
       setUploadingImage(false);
     }
+  };
+
+  // --- NEW: Handler to select and upload organization logo ---
+  const handleSelectOrgLogo = async () => {
+    if (!user || !isOrganizationActive || !activeOrganizationId) {
+      Alert.alert('Fehler', 'Keine aktive Organisation oder Benutzer.');
+      return;
+    }
+    // Redundant check, already handled by disabling button, but good practice
+    if (activeOrganization?.currentUserRole !== 'admin') {
+       Alert.alert('Berechtigung fehlt', 'Nur Administratoren können das Logo ändern.');
+       return;
+    }
+    if (loadingOrgLogo) return; // Prevent multiple uploads
+
+    // Request permission
+    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (permissionResult.granted === false) {
+      Alert.alert('Berechtigung benötigt', 'Zugriff auf die Fotobibliothek wird benötigt.');
+      return;
+    }
+
+    // Launch image picker
+    const pickerResult = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1], // Square aspect ratio
+      quality: 0.7, // Compress image slightly
+    });
+
+    if (pickerResult.canceled) {
+      return; // User cancelled picker
+    }
+
+    // Start upload process
+    try {
+      // Use the first asset if available
+      if (pickerResult.assets && pickerResult.assets.length > 0) {
+        const imageUri = pickerResult.assets[0].uri;
+        // Use updateOrganizationLogo from OrganizationContext
+        const result = await updateOrganizationLogo(activeOrganizationId, imageUri);
+
+        if (result.success) {
+          Alert.alert('Erfolg', 'Organisationslogo erfolgreich aktualisiert.');
+          // Active org state in context is updated, UI should refresh
+        } else {
+          console.error("Error uploading organization logo:", result.error);
+          Alert.alert('Fehler', result.error?.message || 'Logo konnte nicht hochgeladen werden.');
+        }
+      } else {
+          console.warn("ImagePicker did not return any assets for org logo.");
+          Alert.alert('Fehler', 'Kein Bild ausgewählt oder ein Fehler ist aufgetreten.');
+      }
+    } catch (error) {
+      console.error("Unexpected error selecting/uploading org logo:", error);
+      Alert.alert('Fehler', 'Ein unerwarteter Fehler ist aufgetreten.');
+    } 
+    // Loading state is handled within updateOrganizationLogo and OrganizationContext
   };
 
   return (

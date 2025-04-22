@@ -2,6 +2,8 @@ import React, { createContext, useState, useContext, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase'; // Assuming supabase client is setup here
 import { useAuth } from './AuthContext'; // To potentially access user info
+import { Buffer } from 'buffer'; // Import Buffer for base64 handling
+import * as FileSystem from 'expo-file-system'; // Import FileSystem for reading image
 
 // Create context
 const OrganizationContext = createContext();
@@ -14,6 +16,7 @@ export const OrganizationProvider = ({ children }) => {
   const [activeOrganizationId, setActiveOrganizationId] = useState(null);
   const [activeOrganization, setActiveOrganization] = useState(null); // Store full org details
   const [isLoading, setIsLoading] = useState(true);
+  const [loadingOrgLogo, setLoadingOrgLogo] = useState(false); // <-- ADDED: Loading state for logo upload
   const {
       user,
       userOrganizations,
@@ -274,6 +277,101 @@ export const OrganizationProvider = ({ children }) => {
     }
   };
 
+  // --- NEW: Function to update Organization Logo ---
+  const updateOrganizationLogo = async (organizationId, imageUri) => {
+    if (!user) return { success: false, error: { message: 'Nicht angemeldet.' } };
+    if (!organizationId) return { success: false, error: { message: 'Organisations-ID fehlt.' } };
+    if (!imageUri) return { success: false, error: { message: 'Kein Bild ausgewählt.' } };
+
+    setLoadingOrgLogo(true);
+    const timestamp = Date.now();
+    console.log(`[${timestamp}] OrgContext: Starting logo upload for org ${organizationId}. Image URI: ${imageUri}`);
+
+    try {
+      // Check if user is an admin of this organization
+      const orgMembership = userOrganizations.find(org => org.id === organizationId);
+      if (orgMembership?.role !== 'admin') {
+          return { success: false, error: { message: 'Nur Admins können das Logo ändern.'}};
+      }
+
+      // Determine file extension and path
+      const fileExt = imageUri.split('.').pop() || 'png'; // Default to png if extension missing
+      const fileName = `${organizationId}.${fileExt}`; // Simple filename: ORG_ID.EXT
+      const filePath = `public/${fileName}`; // Store in public folder within profile_images bucket
+      const fileType = `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`;
+
+      // Read file as base64
+      console.log(`[${timestamp}] OrgContext: Reading image file as base64...`);
+      const base64 = await FileSystem.readAsStringAsync(imageUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      console.log(`[${timestamp}] OrgContext: Image read. Uploading to storage... Path: ${filePath}, Type: ${fileType}`);
+
+      // Upload to Supabase Storage (use profile_images bucket)
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('profile_images') // Use the profile_images bucket as requested
+        .upload(filePath, Buffer.from(base64, 'base64'), {
+          contentType: fileType,
+          cacheControl: '3600', // Cache for 1 hour
+          upsert: true, // Overwrite if a file with the same *exact* path exists (timestamp helps avoid this unless rapid uploads)
+        });
+
+      if (uploadError) {
+        console.error(`[${timestamp}] OrgContext: Supabase storage upload error for org ${organizationId}:`, uploadError);
+        return { success: false, error: { message: uploadError.message || 'Fehler beim Hochladen des Logos.' } };
+      }
+
+      console.log(`[${timestamp}] OrgContext: Storage upload successful for org ${organizationId}:`, uploadData);
+
+      // Construct the public URL manually
+      const storageBaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+      if (!storageBaseUrl) {
+          console.error(`[${timestamp}] OrgContext: EXPO_PUBLIC_SUPABASE_URL is not defined!`);
+          return { success: false, error: { message: 'Server-Konfigurationsfehler.' } };
+      }
+      const imageUrlPath = uploadData?.path ?? filePath;
+      // Add timestamp query param to help bypass cache after update
+      const publicUrl = `${storageBaseUrl}/storage/v1/object/public/profile_images/${imageUrlPath}?t=${new Date().getTime()}`;
+
+      console.log(`[${timestamp}] OrgContext: Generated public URL for org ${organizationId}:`, publicUrl);
+
+      // Update the logo_url in the organizations table
+      console.log(`[${timestamp}] OrgContext: Updating organizations table with logo_url for org ${organizationId}`);
+      const { error: dbError } = await supabase
+        .from('organizations')
+        .update({ logo_url: publicUrl, updated_at: new Date() })
+        .eq('id', organizationId);
+
+      if (dbError) {
+        console.error(`[${timestamp}] OrgContext: Error updating organizations table logo_url for org ${organizationId}:`, dbError);
+        // Attempt to delete the uploaded image if DB update fails? Consider implications.
+        // await supabase.storage.from('profile_images').remove([filePath]);
+        return { success: false, error: { message: dbError.message || 'Fehler beim Speichern des Logo-Links.' } };
+      }
+
+      console.log(`[${timestamp}] OrgContext: Organization logo_url updated successfully for org ${organizationId}.`);
+
+      // Update local activeOrganization state immediately if this is the active org
+      if (activeOrganizationId === organizationId) {
+         setActiveOrganization(prev => prev ? ({ ...prev, logo_url: publicUrl }) : null);
+         console.log(`[${timestamp}] OrgContext: Updated activeOrganization state with new logo_url.`);
+      }
+
+      // Refresh user profile/orgs list to ensure other parts of the app get the update
+      await loadUserProfile();
+      console.log(`[${timestamp}] OrgContext: Refreshed user profile/orgs after logo update.`);
+
+      return { success: true, data: { logoUrl: publicUrl } };
+
+    } catch (error) {
+      console.error(`[${timestamp}] OrgContext: Unexpected error in updateOrganizationLogo for org ${organizationId}:`, error);
+      return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+    } finally {
+      setLoadingOrgLogo(false);
+      console.log(`[${timestamp}] OrgContext: Finished updateOrganizationLogo for org ${organizationId}. loadingOrgLogo set to false.`);
+    }
+  };
+
   // --- Organization Management Functions (Moved from AuthContext) ---
   const fetchOrganizationMembers = async (organizationId) => {
       if (!organizationId) return { success: false, error: { message: 'Organisations-ID benötigt.' } };
@@ -473,6 +571,9 @@ export const OrganizationProvider = ({ children }) => {
             updateOrganizationName,
             removeOrganizationMember,
             transferOrganizationAdmin,
+            // Add logo update function and loading state
+            updateOrganizationLogo,
+            loadingOrgLogo,
         }}
     >
       {children}

@@ -383,8 +383,8 @@ const HomeScreen = ({ navigation }) => {
         </ScrollView>
       )}
       
-      {/* Show Add button when 'Schwarzes Brett' filter is selected */}
-      {selectedFilter === 'Schwarzes Brett' && (
+      {/* Show Add button based on context and filter */}
+      {(isOrganizationActive || selectedFilter === 'Schwarzes Brett') && (
         <TouchableOpacity 
           style={styles.addButton}
           onPress={handleCreateArticle}
