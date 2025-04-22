@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Image, Switch, ScrollView, Mo
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
+import * as ImagePicker from 'expo-image-picker'; // Import ImagePicker
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useNetwork } from '../context/NetworkContext';
@@ -48,7 +49,7 @@ const ProfileScreen = () => {
   // Use auth context with Supabase - Remove the functions that were moved
   const { 
     user, 
-    profile,
+    profile, // Now includes avatar_url
     preferences,
     displayName,
     userOrganizations,
@@ -56,16 +57,18 @@ const ProfileScreen = () => {
     leaveOrganization, // Keep: User leaves, part of Auth context
     signOut, 
     upgradeToFullAccount, 
-    // updateDisplayName, // Keep: Relates to user profile
-    // updatePreferences, // Keep: Relates to user profile
-    // updateEmail, // Keep: Relates to user auth
-    // updatePassword, // Keep: Relates to user auth
+    updateDisplayName, // Keep: Relates to user profile
+    updatePreferences, // Keep: Relates to user profile
+    updateEmail, // Keep: Relates to user auth
+    updatePassword, // Keep: Relates to user auth
     loadUserProfile, 
     loading: authLoading,
     // updateOrganizationName, // REMOVE
     createOrganization, // Keep: User creates, part of Auth context
     joinOrganizationByInviteCode, // Keep: User joins, part of Auth context
-    deleteCurrentUserAccount 
+    deleteCurrentUserAccount,
+    updateProfilePicture, // Get the new function
+    loadingProfilePicture, // Get the loading state
   } = useAuth();
   
   // State for account creation modal
@@ -97,6 +100,10 @@ const ProfileScreen = () => {
   
   // Ensure loading state is properly initialized
   const [isAccountSettingsLoading, setIsAccountSettingsLoading] = useState(false);
+  // --- NEW: State to track if the modal is opened for making the account permanent ---
+  const [isMakingPermanent, setIsMakingPermanent] = useState(false);
+  // State for image picker status
+  const [uploadingImage, setUploadingImage] = useState(false);
   
   // State for Organization Management
   const [organizationMembers, setOrganizationMembers] = useState([]);
@@ -112,7 +119,9 @@ const ProfileScreen = () => {
 
   // Derived state: Check if user has a full Supabase account
   const hasFullAccount = !!user?.id;
-  
+  // --- NEW: Derived state to check if the full account is temporary ---
+  const isTemporaryAccount = hasFullAccount && profile?.is_temporary === true;
+
   // Combine loading states
   const overallLoading = authLoading || isOrgContextLoading;
 
@@ -186,7 +195,9 @@ const ProfileScreen = () => {
       Alert.alert('Fehler', 'Account-Einstellungen sind nur für eingeloggte Benutzer verfügbar.');
       return;
     }
-    
+    // Reset the "make permanent" flag if opened normally
+    setIsMakingPermanent(false);
+
     setNewEmail(user.email || '');
     setEmailCurrentPassword(''); // Clear password field
     setNewPassword('');
@@ -439,10 +450,43 @@ const ProfileScreen = () => {
     setAccountSettingsError('');
 
     try {
+      // Call the existing updatePassword function from AuthContext
       const result = await updatePassword(newPassword);
+
       if (result.success) {
+        // --- MODIFIED: Check if we also need to update email for temporary accounts ---
+        const needsEmailUpdate = isMakingPermanent && user?.email?.includes('@temp.mylocalapp.de') && newEmail.trim() && newEmail.trim() !== user.email;
+
+        if (needsEmailUpdate) {
+            // If making permanent and a new valid email was entered for a temp email address, update it too.
+            if (!newEmail.trim() || !newEmail.includes('@')) {
+               setAccountSettingsError('Bitte gib eine gültige neue E-Mail-Adresse ein, um den Account permanent zu machen.');
+               // Password update was likely successful, but we stop here. User needs to retry with valid email.
+               // Ideally, validation happens *before* calling updatePassword in this flow.
+               setIsAccountSettingsLoading(false);
+               return; // Stop processing here
+            }
+            // Update email (no current password needed as we just set a new one)
+            const emailResult = await updateEmail(newEmail.trim());
+            if (!emailResult.success) {
+               console.error('Failed to update email during permanent setup:', emailResult.error);
+               // Show error, but acknowledge password was set
+               Alert.alert(
+                   'Passwort gesetzt, E-Mail fehlgeschlagen',
+                   `Dein Passwort wurde festgelegt, aber die E-Mail konnte nicht geändert werden: ${emailResult.error?.message || 'Fehler'}. Bitte versuche die E-Mail später erneut zu ändern.`
+               );
+               // Proceed to close modal etc., but flag was not fully cleared
+            } else {
+               Alert.alert('Erfolgreich', 'Dein Passwort wurde festgelegt und die E-Mail aktualisiert. Dein Account ist jetzt permanent.');
+            }
+        } else {
+             Alert.alert('Erfolgreich', isMakingPermanent ? 'Dein Passwort wurde festgelegt. Dein Account ist jetzt permanent.' : 'Dein Passwort wurde aktualisiert.');
+        }
+
+        // On full success (or partial success where only password worked), close modal and reset flag
         setShowAccountSettingsModal(false);
-        Alert.alert('Erfolgreich', 'Dein Passwort wurde aktualisiert.');
+        setIsMakingPermanent(false); // Reset flag
+        // AuthContext's updatePassword/updateEmail should handle refetching profile and setting is_temporary=false
       } else {
         console.error('Failed to update password:', result.error);
         setAccountSettingsError(result.error?.message || 'Passwort konnte nicht geändert werden.');
@@ -741,12 +785,36 @@ const ProfileScreen = () => {
     const headerTitle = isOrganizationActive ? `Organisation: ${currentOrgName || '... '}` : 'Dein Profil';
     const avatarInitial = isOrganizationActive ? (currentOrgName?.charAt(0) || 'O') : (displayName?.charAt(0) || '?');
     const isAdmin = isOrganizationActive && currentUserRole === 'admin'; // Use derived role
+    const userAvatarUrl = !isOrganizationActive ? profile?.avatar_url : null; // Get avatar URL only in personal context
     
     return (
       <View style={styles.profileHeader}>
-         <View style={[styles.avatar, isOrganizationActive && styles.orgAvatar]}>
-            <Text style={styles.avatarLetter}>{avatarInitial}</Text>
-        </View>
+        {/* Display Image or Initials Avatar */}
+        <TouchableOpacity
+           onPress={!isOrganizationActive ? handleSelectProfilePicture : null} // Allow changing only in personal context
+           disabled={uploadingImage || loadingProfilePicture} // Disable while uploading
+           style={styles.avatarContainer} // Added container for better layout
+        >
+          {userAvatarUrl && !isOrganizationActive ? (<Image source={{ uri: userAvatarUrl }} style={styles.avatarImage} />) : (
+            <View style={[styles.avatar, isOrganizationActive && styles.orgAvatar]}>
+              <Text style={styles.avatarLetter}>{avatarInitial}</Text>
+            </View>
+          )}
+          {/* Edit Icon Overlay for Personal Avatar */}
+          {!isOrganizationActive && !uploadingImage && !loadingProfilePicture && (
+              <View style={styles.avatarEditIcon}>
+                 <Ionicons name="camera-outline" size={18} color="#fff" />
+              </View>
+          )}
+          {/* Loading Indicator */}
+          {(uploadingImage || loadingProfilePicture) && !isOrganizationActive && (
+              <View style={styles.avatarLoadingOverlay}>
+                  <ActivityIndicator size="small" color="#fff" />
+              </View>
+          )}
+        </TouchableOpacity>
+
+        {/* Rest of the header */}
         <View style={styles.profileInfo}>
            <Text style={styles.headerTitle} numberOfLines={1}>{headerTitle}</Text>
           {hasFullAccount && !isOrganizationActive && (
@@ -755,35 +823,32 @@ const ProfileScreen = () => {
           {!hasFullAccount && (
             <Text style={styles.accountStatus}>Lokaler Account (nicht synchronisiert)</Text>
           )}
-          {/* Maybe show user role within org? */} 
           {isOrganizationActive && currentUserRole && ( // Check currentUserRole exists
              <Text style={styles.roleText}>Deine Rolle: {currentUserRole === 'admin' ? 'Administrator' : 'Mitglied'}</Text>
           )}
         </View>
         <View style={styles.headerActions}>
-          {/* Personal Profile Edit Button - shown for local AND logged-in users when NOT in org context */}
+          {/* Personal Profile Edit Button - NO LONGER NEEDED HERE? (Handled by avatar tap) */}
+          {/* {!isOrganizationActive && (
+            <TouchableOpacity
+                style={styles.headerIconButton}
+                onPress={handleOpenProfileEdit} // Keep if needed for Name/Prefs
+            >
+                <Ionicons name="pencil" size={20} color="#4285F4" />
+            </TouchableOpacity>
+          )} */}
+          {/* Separated Reload Buttons */}
           {!isOrganizationActive && (
-            <>
-              <TouchableOpacity 
-                  style={styles.headerIconButton}
-                  onPress={handleOpenProfileEdit}
-              >
-                  <Ionicons name="pencil" size={20} color="#4285F4" />
-              </TouchableOpacity>
-              {/* Personal Context Reload Button */}
               <TouchableOpacity
-                  style={styles.headerIconButton} 
-                  onPress={() => loadUserProfile(user?.id)} // Reload personal profile/orgs
-                  disabled={authLoading} // Disable while auth context is loading
+                  style={styles.headerIconButton}
+                  onPress={() => loadUserProfile(user?.id)}
+                  disabled={authLoading || loadingProfilePicture}
               >
-                  <Ionicons name="refresh-outline" size={22} color="#4285F4" />{/* Blue color for personal */}
+                  <Ionicons name="refresh-outline" size={22} color="#4285F4" />
               </TouchableOpacity>
-            </>
           )}
-          {/* Org Actions Wrapper (Edit + Reload) - Show only when org active */}
           {isOrganizationActive && (
             <>
-              {/* Org Edit Button - Show only for admin when org active */} 
               {isAdmin === true && (
                   <TouchableOpacity
                       style={styles.headerIconButton} // Use consistent styling
@@ -792,7 +857,6 @@ const ProfileScreen = () => {
                       <Ionicons name="pencil" size={20} color="#34A853" />
                   </TouchableOpacity>
               )}
-              {/* Org Reload Button - Show for admin and members when org active */} 
               <TouchableOpacity
                   style={styles.headerIconButton} // Use consistent styling
                   onPress={handleReloadOrgContext}
@@ -1110,6 +1174,27 @@ const ProfileScreen = () => {
       );
   };
 
+  // --- NEW: Render Card for Temporary Accounts ---
+  const renderMakePermanentSection = () => (
+      <View style={[styles.card, styles.highlightedOrgCard]}>
+         <Text style={[styles.cardTitle, styles.highlightedOrgTitle]}>Account dauerhaft sichern</Text>
+         <Text style={[styles.cardText, styles.highlightedOrgPromptText]}>
+             Dein Account ist aktuell temporär. Sichere deine Daten, und nutze <Text style={styles.boldText}>alle Funktionen</Text>!
+         </Text>
+         <TouchableOpacity onPress={handleOpenMakePermanentSettings} style={{ marginTop: 15 }}>
+           <LinearGradient
+             colors={['#7b4397', '#dc2430']} // Using same gradient as create account
+             start={{ x: 0, y: 0.5 }}
+             end={{ x: 1, y: 0.5 }}
+             style={styles.gradientButton}
+           >
+             <Ionicons name="lock-closed-outline" size={20} color="#fff" style={styles.buttonIcon} />
+             <Text style={styles.primaryButtonText}>Passwort festlegen & Sichern</Text>
+           </LinearGradient>
+         </TouchableOpacity>
+      </View>
+  );
+
   // --- MAIN RETURN --- 
   
   // Show loading indicator during initial auth check or context switching
@@ -1293,43 +1378,74 @@ const ProfileScreen = () => {
           {/* Content based on active tab */} 
           {activeTab === 'email' && (
              <View>
-                <Text style={styles.inputLabel}>Neue E-Mail-Adresse</Text>
-                <TextInput
-                   style={styles.input}
-                   placeholder="Neue E-Mail"
-                   value={newEmail}
-                   onChangeText={setNewEmail}
-                   keyboardType="email-address"
-                   autoCapitalize="none"
-                   autoComplete="email"
-                />
-                <Text style={styles.inputLabel}>Aktuelles Passwort zur Bestätigung</Text>
-                <TextInput
-                   style={styles.input}
-                   placeholder="Aktuelles Passwort"
-                   value={emailCurrentPassword} 
-                   onChangeText={setEmailCurrentPassword}
-                   secureTextEntry
-                   autoCapitalize="none"
-                   autoComplete="current-password"
-                />
-                {accountSettingsError ? <Text style={styles.errorTextModal}>{accountSettingsError}</Text> : null}
-                <TouchableOpacity 
-                  style={[styles.modalButton, styles.saveButton, styles.singleButton, isAccountSettingsLoading && styles.buttonDisabled]} 
-                  onPress={handleUpdateEmail}
-                  disabled={isAccountSettingsLoading}
-                >
-                  {isAccountSettingsLoading ? 
-                     <ActivityIndicator color="#fff" size="small" /> : 
-                     <Text style={styles.modalButtonText}>E-Mail Aktualisieren</Text> 
-                  }
-                </TouchableOpacity>
+                {/* --- MODIFIED: Conditionally disable/hide email change if not making permanent OR email is not temporary --- */}
+                {(!isMakingPermanent && !user?.email?.includes('@temp.mylocalapp.de')) ? (
+                     <>
+                        <Text style={styles.inputLabel}>Neue E-Mail-Adresse</Text>
+                        <TextInput
+                           style={styles.input}
+                           placeholder="Neue E-Mail"
+                           value={newEmail}
+                           onChangeText={setNewEmail}
+                           keyboardType="email-address"
+                           autoCapitalize="none"
+                           autoComplete="email"
+                        />
+                        <Text style={styles.inputLabel}>Aktuelles Passwort zur Bestätigung</Text>
+                        <TextInput
+                           style={styles.input}
+                           placeholder="Aktuelles Passwort"
+                           value={emailCurrentPassword}
+                           onChangeText={setEmailCurrentPassword}
+                           secureTextEntry
+                           autoCapitalize="none"
+                           autoComplete="current-password"
+                        />
+                        {accountSettingsError ? <Text style={styles.errorTextModal}>{accountSettingsError}</Text> : null}
+                        <TouchableOpacity
+                          style={[styles.modalButton, styles.saveButton, styles.singleButton, isAccountSettingsLoading && styles.buttonDisabled]}
+                          onPress={handleUpdateEmail} // Use existing handler for normal email change
+                          disabled={isAccountSettingsLoading}
+                        >
+                          {isAccountSettingsLoading ?
+                             <ActivityIndicator color="#fff" size="small" /> :
+                             <Text style={styles.modalButtonText}>E-Mail Aktualisieren</Text>
+                          }
+                        </TouchableOpacity>
+                     </>
+                 ) : isMakingPermanent && user?.email?.includes('@temp.mylocalapp.de') ? (
+                     <>
+                        <Text style={styles.inputLabel}>Neue E-Mail-Adresse (Optional)</Text>
+                        <TextInput
+                           style={styles.input}
+                           placeholder="Echte E-Mail-Adresse eingeben"
+                           value={newEmail}
+                           onChangeText={setNewEmail}
+                           keyboardType="email-address"
+                           autoCapitalize="none"
+                           autoComplete="email"
+                        />
+                        <Text style={styles.modalInfoText}>Lasse dieses Feld leer, wenn du die temporäre E-Mail behalten möchtest (nicht empfohlen).</Text>
+                        {/* Save button might be removed here if email is saved along with password */}
+                         {accountSettingsError ? <Text style={styles.errorTextModal}>{accountSettingsError}</Text> : null}
+                         {/* Info: Email is updated when setting the password */}
+                          <Text style={styles.modalInfoText}>Die E-Mail wird zusammen mit dem Passwort gespeichert.</Text>
+                     </>
+                 ) : (
+                    <Text style={styles.modalInfoText}>Ändere zuerst dein Passwort, um die E-Mail-Adresse zu ändern.</Text>
+                 )}
              </View>
           )}
-          
+
           {activeTab === 'password' && (
              <View>
-                {/* Current password field removed as not needed for Supabase update */} 
+                {/* --- MODIFIED: Hide current password field when making permanent --- */}
+                {/* {!isMakingPermanent && (
+                   <>
+                     <Text style={styles.inputLabel}>Aktuelles Passwort</Text>
+                     <TextInput ... />
+                   </>
+                )} */}
                 <Text style={styles.inputLabel}>Neues Passwort</Text>
                 <TextInput
                    style={styles.input}
@@ -1351,14 +1467,17 @@ const ProfileScreen = () => {
                    autoComplete="new-password"
                  />
                  {accountSettingsError ? <Text style={styles.errorTextModal}>{accountSettingsError}</Text> : null}
-                 <TouchableOpacity 
-                  style={[styles.modalButton, styles.saveButton, styles.singleButton, isAccountSettingsLoading && styles.buttonDisabled]} 
-                  onPress={handleUpdatePassword}
+                 <TouchableOpacity
+                  style={[styles.modalButton, styles.saveButton, styles.singleButton, isAccountSettingsLoading && styles.buttonDisabled]}
+                  onPress={handleUpdatePassword} // Reusing the password update handler
                   disabled={isAccountSettingsLoading}
                  >
-                  {isAccountSettingsLoading ? 
-                     <ActivityIndicator color="#fff" size="small" /> : 
-                     <Text style={styles.modalButtonText}>Passwort Aktualisieren</Text>
+                  {isAccountSettingsLoading ?
+                     <ActivityIndicator color="#fff" size="small" /> :
+                     <Text style={styles.modalButtonText}>
+                         {/* MODIFIED: Change button text */}
+                         {isMakingPermanent ? 'Passwort festlegen & Sichern' : 'Passwort Aktualisieren'}
+                     </Text>
                   }
                  </TouchableOpacity>
              </View>
@@ -1424,6 +1543,81 @@ const ProfileScreen = () => {
     </Modal>
   );
 
+  // --- NEW: Open account settings modal specifically for making account permanent ---
+  const handleOpenMakePermanentSettings = () => {
+    if (!isTemporaryAccount) {
+      Alert.alert('Fehler', 'Diese Funktion ist nur für temporäre Accounts.');
+      return;
+    }
+    setIsMakingPermanent(true); // Set the flag
+
+    setNewEmail(user?.email?.includes('@temp.mylocalapp.de') ? '' : (user?.email || '')); // Pre-fill email unless temporary
+    setEmailCurrentPassword(''); // Not needed for initial password set
+    setNewPassword('');
+    setConfirmNewPassword('');
+    setActiveTab('password'); // Start on password tab
+    setAccountSettingsError('');
+    setShowAccountSettingsModal(true);
+  };
+
+  // --- NEW: Handler to select and upload profile picture ---
+  const handleSelectProfilePicture = async () => {
+    if (!user) {
+      Alert.alert('Fehler', 'Nur eingeloggte Benutzer können ein Profilbild hochladen.');
+      return;
+    }
+    if (isOrganizationActive) {
+        Alert.alert('Hinweis', 'Profilbild kann nur im persönlichen Kontext geändert werden.');
+        return;
+    }
+    if (uploadingImage || loadingProfilePicture) return; // Prevent multiple uploads
+
+    // Request permission
+    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (permissionResult.granted === false) {
+      Alert.alert('Berechtigung benötigt', 'Zugriff auf die Fotobibliothek wird benötigt, um ein Bild auszuwählen.');
+      return;
+    }
+
+    // Launch image picker
+    const pickerResult = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1], // Square aspect ratio
+      quality: 0.7, // Compress image slightly
+    });
+
+    if (pickerResult.canceled) {
+      return; // User cancelled picker
+    }
+
+    // Start upload process
+    setUploadingImage(true);
+    try {
+      // Use the first asset if available
+      if (pickerResult.assets && pickerResult.assets.length > 0) {
+        const imageUri = pickerResult.assets[0].uri;
+        const result = await updateProfilePicture(imageUri);
+
+        if (result.success) {
+          Alert.alert('Erfolg', 'Profilbild erfolgreich aktualisiert.');
+          // Profile state in context is updated, UI should refresh automatically
+        } else {
+          console.error("Error uploading profile picture:", result.error);
+          Alert.alert('Fehler', result.error?.message || 'Profilbild konnte nicht hochgeladen werden.');
+        }
+      } else {
+          // Handle the case where assets array might be missing or empty
+          console.warn("ImagePicker did not return any assets.");
+          Alert.alert('Fehler', 'Kein Bild ausgewählt oder ein Fehler ist aufgetreten.');
+      }
+    } catch (error) {
+      console.error("Unexpected error selecting/uploading picture:", error);
+      Alert.alert('Fehler', 'Ein unerwarteter Fehler ist aufgetreten.');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 30 }}>
@@ -1434,21 +1628,26 @@ const ProfileScreen = () => {
          renderOrgManagementSection()
       ) : (
          <>
-            {/* Show "Create Permanent Account" card ONLY if user has NO full account */}
+            {/* Render based on account status */}
             {!hasFullAccount && renderNoAccountSection()}
-            
-            {/* Show Personal Profile Section for BOTH local and logged-in users when not in org mode */}
-            {renderPersonalProfileSection()} 
+            {hasFullAccount && (
+              <>
+                {/* Show make permanent card if needed */}
+                {isTemporaryAccount && renderMakePermanentSection()}
+                {/* Always show personal sections if user has an account */}
+                {renderPersonalProfileSection()}
+              </>
+            )}
          </>
       )}
 
-      {/* Sign Out Button - Always shown for personal context */} 
+      {/* Sign Out Button - Always shown for personal context */}
       {!isOrganizationActive && (
         <View style={styles.buttonContainer}>
           <TouchableOpacity
             style={[styles.button, styles.signOutButton]}
             onPress={handleSignOut}
-            disabled={isAccountSettingsLoading} // Disable if delete is in progress
+            disabled={isAccountSettingsLoading || loadingProfilePicture} // Disable if delete/upload in progress
           >
             <Ionicons name="log-out-outline" size={22} style={[styles.settingIcon, styles.signOutIcon]} />
             <Text style={[styles.settingText, styles.signOutText]}>
@@ -1462,7 +1661,7 @@ const ProfileScreen = () => {
               <TouchableOpacity
                   style={[styles.button, styles.deleteButton]} // New style needed
                   onPress={handleDeleteAccount}
-                  disabled={isAccountSettingsLoading} // Disable during sign out/delete
+                  disabled={isAccountSettingsLoading || loadingProfilePicture} // Disable during sign out/delete/upload
               >
                   <Ionicons name="trash-outline" size={22} style={[styles.settingIcon, styles.deleteIcon]} />
                   <Text style={[styles.settingText, styles.deleteButtonText]}>Account löschen</Text>
@@ -1502,22 +1701,58 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },
-  avatar: {
+  // NEW: Container for avatar + edit icon
+  avatarContainer: {
+      width: 55,
+      height: 55,
+      borderRadius: 27.5,
+      marginRight: 15,
+      position: 'relative', // Needed for absolute positioning of edit icon
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: '#ccc', // Fallback background
+  },
+  avatar: { // Style for the initial-based avatar
     width: 55,
     height: 55,
     borderRadius: 27.5,
-    marginRight: 15,
-    backgroundColor: '#4285F4', 
+    backgroundColor: '#4285F4',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  orgAvatar: {
-      backgroundColor: '#34A853', // Different color for orgs
+  avatarImage: { // Style for the Image component
+      width: 55,
+      height: 55,
+      borderRadius: 27.5,
   },
   avatarLetter: {
     color: '#fff',
     fontSize: 24,
     fontWeight: 'bold',
+  },
+  // NEW: Edit icon overlay
+  avatarEditIcon: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 10,
+    padding: 3,
+  },
+  // NEW: Loading overlay for avatar
+  avatarLoadingOverlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      borderRadius: 27.5,
+      justifyContent: 'center',
+      alignItems: 'center',
+  },
+  orgAvatar: {
+      backgroundColor: '#34A853', // Different color for orgs
   },
   profileInfo: {
     flex: 1,
@@ -1840,6 +2075,7 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
     marginBottom: 20,
+    marginTop: -5,
   },
   inputLabel: {
     fontSize: 14,
@@ -1876,6 +2112,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginHorizontal: 5,
+    flex: 1, // Make buttons take equal width
   },
   cancelButton: {
     backgroundColor: '#6c757d', // Gray
@@ -1889,7 +2126,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   modalButtonTextCancel: {
-    color: '#333', // Darker text for better contrast on gray background
+    color: '#fff', // White text on gray for consistency
     fontSize: 16,
     fontWeight: 'bold',
   },
@@ -1993,6 +2230,7 @@ const styles = StyleSheet.create({
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginLeft: 'auto', // Push actions to the right
   },
   headerIconButton: {
     padding: 8, 
@@ -2058,6 +2296,13 @@ const styles = StyleSheet.create({
       textAlign: 'center',
       marginTop: 8,
       fontWeight: '500',
+  },
+  modalInfoText: { // --- NEW STYLE ---
+      fontSize: 13,
+      color: '#666',
+      textAlign: 'center',
+      marginVertical: 10,
+      fontStyle: 'italic',
   },
 });
 

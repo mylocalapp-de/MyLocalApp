@@ -19,7 +19,7 @@ import CreateArticleScreen from '../screens/CreateArticleScreen';
 import EditArticleScreen from '../screens/EditArticleScreen';
 import EventDetailScreen from '../screens/EventDetailScreen';
 import WelcomeScreen from '../screens/WelcomeScreen';
-import CreateBroadcastGroupScreen from '../screens/CreateBroadcastGroupScreen';
+import ManageBroadcastGroupsScreen from '../screens/CreateBroadcastGroupScreen';
 import CreateEventScreen from '../screens/CreateEventScreen';
 import EditEventScreen from '../screens/EditEventScreen';
 import OrganizationSetupScreen from '../screens/OrganizationSetupScreen';
@@ -47,7 +47,7 @@ const ChatStackNavigator = () => {
       <ChatStack.Screen name="ChatList" component={ChatScreen} />
       <ChatStack.Screen name="ChatDetail" component={ChatDetailScreen} />
       <ChatStack.Screen name="Dorfbot" component={DorfbotScreen} />
-      <ChatStack.Screen name="CreateBroadcastGroup" component={CreateBroadcastGroupScreen} />
+      <ChatStack.Screen name="ManageBroadcastGroups" component={ManageBroadcastGroupsScreen} />
       <ChatStack.Screen name="DirectMessages" component={DirectMessagesScreen} />
       <ChatStack.Screen name="NewDirectMessage" component={NewDirectMessageScreen} />
       <ChatStack.Screen name="DirectMessageDetail" component={DirectMessageDetailScreen} />
@@ -217,7 +217,6 @@ const AppNavigator = () => {
         <RootStack.Screen name="EventDetail" component={EventDetailScreen} options={{ headerShown: false }} />
         <RootStack.Screen name="CreateEvent" component={CreateEventScreen} options={{ headerShown: false, presentation: 'modal' }} />
         <RootStack.Screen name="EditEvent" component={EditEventScreen} options={{ headerShown: false, presentation: 'modal' }} />
-        <RootStack.Screen name="CreateBroadcastGroup" component={CreateBroadcastGroupScreen} options={{ headerShown: false, presentation: 'modal' }} />
         <RootStack.Screen name="CreatePoi" component={CreatePoiScreen} options={{ headerShown: false, presentation: 'modal' }} />
         <RootStack.Screen 
             name="ArticleDetail" 
