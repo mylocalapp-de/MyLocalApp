@@ -668,15 +668,20 @@ const ArticleDetailScreen = ({ route, navigation }) => {
           
           <View style={styles.articleMeta}>
             <Text style={styles.date}>{article?.date || '...'}</Text>
-            <Text 
-              style={
-                article?.organization_id 
-                  ? styles.organizationAuthor 
-                  : (authorName === 'Redaktion' ? styles.redaktionAuthor : styles.author)
-              }
+            <TouchableOpacity 
+              disabled={isOfflineMode || article?.is_organization_post || !article?.author_id}
+              onPress={() => !article?.is_organization_post && article?.author_id && navigation.navigate('UserProfileView', { userId: article.author_id })}
             >
-              {authorName}
-            </Text>
+              <Text 
+                style={
+                  article?.organization_id 
+                    ? styles.organizationAuthor 
+                    : (authorName === 'Redaktion' ? styles.redaktionAuthor : styles.author)
+                }
+              >
+                {authorName}
+              </Text>
+            </TouchableOpacity>
           </View>
           
           {/* Conditionally render HTML content or offline message */}

@@ -45,6 +45,9 @@ const ScreenHeader = ({
               fontsLoaded && { fontFamily: 'Lobster_400Regular' },
               // Apply specific appName style only if title is not provided
               !title && styles.appNameStyle, 
+              // Apply Lobster font unconditionally if loaded and title exists
+              // Overrides the default bold if Lobster is loaded
+              fontsLoaded && title ? { fontFamily: 'Lobster_400Regular', fontWeight: 'normal' } : {},
               showBackButton && styles.titleWithBackButton
             ]}
           >
