@@ -184,7 +184,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
                         console.log("AuthContext: USER_UPDATED event, reloading profile/orgs.");
                         await loadUserProfileAndOrgs(newSupabaseUser.id);
                     } else {
-                       setLoadingProfile(false);
+                    setLoadingProfile(false);
                     }
                  } // Otherwise, profile loading is managed by loadUserProfileAndOrgs
         }
@@ -278,7 +278,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
 
       // Handle organizations result (keep as is)
       // ... existing org handling code ...
-       if (orgsResult.error) {
+      if (orgsResult.error) {
         console.error(`AuthContext: [${callTimestamp}] Error loading user organizations for ID ${userId}:`, JSON.stringify(orgsResult.error, null, 2));
         setUserOrganizations([]); // Clear on error
       } else {
@@ -321,7 +321,9 @@ export const AuthProvider = ({ children, expoPushToken }) => {
 
       // Generate temporary credentials
       const password = generateRandomPassword(16); // Generate a strong random password
-      const email = userEmail ? userEmail.trim() : `${userDisplayName.replace(/\s+/g, '.')}.${uuidv4()}@temp.mylocalapp.de`; // Generate temp email if none provided
+      // Generate shorter random number instead of UUID for temp email
+      const randomSuffix = Math.floor(Math.random() * 10000).toString().padStart(4, '0'); // 0000-9999
+      const email = userEmail ? userEmail.trim() : `${userDisplayName.trim().replace(/\s+/g, '.').toLowerCase()}.${randomSuffix}@temp.mylocalapp.de`;
       const allPreferences = ['kultur', 'sport', 'verkehr', 'politik', 'vereine', 'gemeinde']; // Pre-select all preferences
 
       console.log(`AuthContext: Generated credentials - Email: ${email}, Password: [REDACTED], DisplayName: ${userDisplayName}`);
@@ -364,9 +366,9 @@ export const AuthProvider = ({ children, expoPushToken }) => {
 
       console.log('AuthContext: Checking if profile exists for temporary user ID:', userId);
       const { data: createdProfile, error: profileCheckError, status } = await supabase
-        .from('profiles')
+          .from('profiles')
         .select('id, is_temporary') // Check if is_temporary was set correctly
-        .eq('id', userId)
+          .eq('id', userId)
         .maybeSingle();
 
       if (profileCheckError && status !== 406) {
@@ -381,7 +383,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
         setHasCompletedOnboarding(true); // Update local state immediately
         return { success: true, data: { user: signUpData.user } };
-      } else {
+        } else {
         console.error('AuthContext: Temporary profile verification failed or is_temporary not set correctly.', createdProfile);
         // If profile wasn't created or flag isn't set, it's an issue.
         // Try manual profile creation as fallback? Might be complex due to trigger race conditions.
@@ -549,7 +551,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         console.log('AuthContext: Updating push token to anonymous after sign out.');
         await registerOrUpdatePushToken(currentToken, null);
       }
-
+      
       console.log('AuthContext: SignOut complete, local state cleared.');
       return { success: true };
     } catch (error) {
@@ -587,31 +589,31 @@ export const AuthProvider = ({ children, expoPushToken }) => {
     // await AsyncStorage.setItem('userDisplayName', newDisplayName.trim()); // Keep local storage?
 
     // Update DB
-    try {
-      console.log('AuthContext: Updating profile display name in DB for user:', user.id);
-      const { error } = await supabase
-        .from('profiles')
+      try {
+        console.log('AuthContext: Updating profile display name in DB for user:', user.id);
+        const { error } = await supabase
+          .from('profiles')
         .update({ display_name: newDisplayName.trim(), updated_at: new Date() })
-        .eq('id', user.id);
+          .eq('id', user.id);
 
-      if (error) {
-        console.error('AuthContext: Error updating display name in DB:', error);
+        if (error) {
+          console.error('AuthContext: Error updating display name in DB:', error);
         // Revert local state
         // await AsyncStorage.setItem('userDisplayName', originalDisplayName);
         setDisplayName(originalDisplayName);
-        return {
+          return {
           success: false,
           error: { message: 'Fehler beim Speichern des Namens in der Datenbank.' }
-        };
-      }
+          };
+        }
       // Update profile state in context
       setProfile(prev => prev ? ({ ...prev, display_name: newDisplayName.trim() }) : null);
-      console.log('AuthContext: Profile display name updated successfully in DB.');
+        console.log('AuthContext: Profile display name updated successfully in DB.');
       return { success: true, data: newDisplayName.trim() };
-    } catch (e) {
-       console.error('AuthContext: Unexpected error updating display name in DB:', e);
+      } catch (e) {
+         console.error('AuthContext: Unexpected error updating display name in DB:', e);
        setDisplayName(originalDisplayName); // Revert state on unexpected error
-       return { success: false, error: { message: 'Unerwarteter Fehler beim DB-Update.' } };
+         return { success: false, error: { message: 'Unerwarteter Fehler beim DB-Update.' } };
     }
   };
 
@@ -636,31 +638,31 @@ export const AuthProvider = ({ children, expoPushToken }) => {
      // await AsyncStorage.setItem('userPreferences', JSON.stringify(newPreferences)); // Keep local storage?
 
      // Update DB
-     try {
-       console.log('AuthContext: Updating profile preferences in DB for user:', user.id);
-       const { error } = await supabase
-         .from('profiles')
-         .update({ preferences: newPreferences, updated_at: new Date() })
-         .eq('id', user.id);
+       try {
+         console.log('AuthContext: Updating profile preferences in DB for user:', user.id);
+         const { error } = await supabase
+           .from('profiles')
+           .update({ preferences: newPreferences, updated_at: new Date() })
+           .eq('id', user.id);
 
-       if (error) {
-         console.error('AuthContext: Error updating preferences in DB:', error);
+         if (error) {
+           console.error('AuthContext: Error updating preferences in DB:', error);
          // Revert local state
          // await AsyncStorage.setItem('userPreferences', JSON.stringify(originalPreferences));
          setPreferences(originalPreferences);
-         return {
+           return {
            success: false,
            error: { message: 'Fehler beim Speichern der Präferenzen in der Datenbank.' }
-         };
-       }
+           };
+         }
        // Update profile state in context
        setProfile(prev => prev ? ({ ...prev, preferences: newPreferences }) : null);
-       console.log('AuthContext: Profile preferences updated successfully in DB.');
-       return { success: true, data: newPreferences };
-     } catch (e) {
-        console.error('AuthContext: Unexpected error updating preferences in DB:', e);
+         console.log('AuthContext: Profile preferences updated successfully in DB.');
+         return { success: true, data: newPreferences };
+       } catch (e) {
+          console.error('AuthContext: Unexpected error updating preferences in DB:', e);
         setPreferences(originalPreferences); // Revert state on unexpected error
-        return { success: false, error: { message: 'Unerwarteter Fehler beim DB-Update.' } };
+          return { success: false, error: { message: 'Unerwarteter Fehler beim DB-Update.' } };
      }
   };
 
@@ -750,24 +752,19 @@ export const AuthProvider = ({ children, expoPushToken }) => {
       return result; // Return the captured result
    };
 
-  // ... (Organization Actions: createOrganization, joinOrganizationByInviteCode, etc. - check if they rely on full account)
-  // Need to ensure org actions require a non-temporary account. Add checks.
-
-  // --- Organization Actions ---
+  // --- Organization Actions (kept in AuthContext as they relate to the logged-in user joining/leaving/creating) ---
   const createOrganization = async (name) => {
       if (!user) return { success: false, error: { message: 'Nicht angemeldet.' } };
-      if (profile?.is_temporary) return { success: false, error: { message: 'Temporäre Konten können keine Organisationen erstellen.' } }; // ADDED CHECK
+      if (profile?.is_temporary) return { success: false, error: { message: 'Temporäre Konten können keine Organisationen erstellen.' } };
       if (!name || name.trim() === '') {
           return { success: false, error: { message: 'Organisationsname benötigt.' } };
       }
       setLoading(true);
-      let newOrg = null; // Variable to hold the new org data
+      let newOrg = null;
       try {
-          // Call the RPC function instead of direct insert
-          console.log(`AuthContext: Calling RPC create_new_organization for name: ${name.trim()}`);
           const { data: rpcData, error: rpcError } = await supabase.rpc(
               'create_new_organization',
-              { org_name: name.trim() } // Pass arguments as an object
+              { org_name: name.trim() } 
           );
 
           if (rpcError) {
@@ -780,14 +777,10 @@ export const AuthProvider = ({ children, expoPushToken }) => {
               return { success: false, error: { message: 'RPC zur Erstellung fehlgeschlagen.' } };
           }
 
-          newOrg = rpcData[0]; // Get the newly created org data
+          newOrg = rpcData[0]; 
           console.log('AuthContext: Organization created via RPC:', newOrg);
-
-          // Refetch user organizations to update the context state
-          console.log('AuthContext: Refetching user profile and orgs after creation...');
-          await loadUserProfileAndOrgs(user.id);
+          await loadUserProfileAndOrgs(user.id); // Refetch to include the new org
           console.log('AuthContext: User profile and orgs refetched.');
-
           return { success: true, data: newOrg };
 
       } catch (error) {
@@ -799,128 +792,55 @@ export const AuthProvider = ({ children, expoPushToken }) => {
   };
 
   const joinOrganizationByInviteCode = async (inviteCode) => {
-      console.log(`[AuthContext] Attempting joinOrganizationByInviteCode with code: "${inviteCode}"`); // Log entry
-      if (!user) {
-          console.error('[AuthContext] joinOrganizationByInviteCode failed: User not logged in.');
-          return { success: false, error: { message: 'Nicht angemeldet.' } };
-      }
-      if (profile?.is_temporary) return { success: false, error: { message: 'Temporäre Konten können Organisationen nicht beitreten.' } }; // ADDED CHECK
-      if (!inviteCode || inviteCode.trim() === '') {
-           console.error('[AuthContext] joinOrganizationByInviteCode failed: Invite code is empty.');
-           return { success: false, error: { message: 'Einladungscode benötigt.' } };
-      }
-      // ... rest of joinOrganizationByInviteCode code ...
-       setLoading(true);
-      let finalResult = {}; // Define final result variable
-
+      if (!user) return { success: false, error: { message: 'Nicht angemeldet.' } };
+      if (profile?.is_temporary) return { success: false, error: { message: 'Temporäre Konten können Organisationen nicht beitreten.' } };
+      if (!inviteCode || inviteCode.trim() === '') return { success: false, error: { message: 'Einladungscode benötigt.' } };
+      
+      setLoading(true);
+      let finalResult = {};
       try {
-          // 1. Find the organization by invite code
-          console.log(`[AuthContext] Finding organization with invite code: ${inviteCode.trim()}`);
           const { data: org, error: findError } = await supabase
               .from('organizations')
               .select('id, name')
               .eq('invite_code', inviteCode.trim())
               .maybeSingle();
 
-          if (findError) {
-              console.error("[AuthContext] Error finding organization by invite code:", findError);
-              throw new Error(findError.message || 'Fehler bei Codesuche.'); // Throw to be caught below
-          }
+          if (findError) throw new Error(findError.message || 'Fehler bei Codesuche.');
           if (!org) {
-              console.warn("[AuthContext] No organization found for invite code:", inviteCode.trim());
               finalResult = { success: false, error: { message: 'Ungültiger oder abgelaufener Einladungscode.' } };
-              // No need to return early, finally block handles loading state
           } else {
-             console.log(`[AuthContext] Found organization: ${org.name} (ID: ${org.id})`);
-
-             // 2. Prepare member data
              const memberData = { organization_id: org.id, user_id: user.id, role: 'member' };
-             console.log('[AuthContext] Attempting to insert into organization_members:', memberData);
-
-             // 3. Add the user as a member
-             const { data: insertData, error: joinError } = await supabase
-                 .from('organization_members')
-                 .insert(memberData);
-                 // NOTE: .select() was removed here as it caused RLS issues immediately after insert.
-                 // The function relies on loadUserProfileAndOrgs refetching the org list.
-
-             console.log('[AuthContext] Insert operation result - Error:', joinError); // Log the error
-             // Data is null without .select(), which is expected now.
+             const { error: joinError } = await supabase.from('organization_members').insert(memberData);
 
              if (joinError) {
-                  // Handle potential duplicate entry if user is already a member
-                  if (joinError.code === '23505') { // Unique violation code
-                      console.warn('[AuthContext] User is already a member of this organization (Code 23505). Treating as success.');
-                      // Refetch anyway to ensure state is up-to-date
-                      console.log('[AuthContext] Refetching user profile and orgs (already member case)...');
+                  if (joinError.code === '23505') { // Already a member
                       await loadUserProfileAndOrgs(user.id);
-                      console.log('[AuthContext] Refetch completed (already member case).');
-                      finalResult = { success: true, data: org }; // Treat as success, already joined
+                      finalResult = { success: true, data: org }; 
                   } else {
-                      console.error("[AuthContext] Error joining organization (Insert failed): ", joinError);
-                      // Throw specific error to be caught
                       throw new Error(joinError.message || 'Fehler beim Beitreten.');
                   }
              } else {
-                 // Insert seems successful (no error)
-                 console.log(`[AuthContext] User ${user.id} successfully inserted into organization ${org.name} (${org.id}) membership.`);
-
-                 // 4. Refetch user organizations to update the context state
-                 console.log('[AuthContext] Refetching user profile and orgs after successful join...');
                  await loadUserProfileAndOrgs(user.id);
-                 console.log('[AuthContext] Refetch completed after successful join.');
-
                  finalResult = { success: true, data: org };
              }
           }
-
       } catch (error) {
-          console.error("[AuthContext] Unexpected error caught in joinOrganizationByInviteCode:", error);
-          // Ensure the error message passed back is a string
+          console.error("[AuthContext] Error in joinOrganizationByInviteCode:", error);
           finalResult = { success: false, error: { message: String(error.message || 'Ein unerwarteter Fehler ist aufgetreten.') } };
       } finally {
           setLoading(false);
-          console.log("[AuthContext] joinOrganizationByInviteCode finished. Returning:", finalResult); // Log final result
       }
-
       return finalResult;
   };
 
   const leaveOrganization = async (organizationId) => {
       if (!user) return { success: false, error: { message: 'Nicht angemeldet.' } };
-      // No temporary check needed, anyone can leave
       if (!organizationId) return { success: false, error: { message: 'Organisations-ID benötigt.' } };
-      // ... rest of leaveOrganization code ...
-       setLoading(true); // Set loading true at the start
-      let result = {}; // Define result variable
+      
+      setLoading(true); 
+      let result = {};
       try {
-          // ** CHECK: Prevent last admin from leaving **
-          console.log(`AuthContext: Checking membership status before leaving org ${organizationId}`);
-          const { data: members, error: memberCheckError } = await supabase
-              .from('organization_members')
-              .select('user_id, role')
-              .eq('organization_id', organizationId);
-
-          if (memberCheckError) {
-              console.error("AuthContext: Error checking members before leaving:", memberCheckError);
-              throw new Error("Fehler beim Prüfen der Mitgliederzahl."); // Throw to be caught by catch block
-          }
-
-          const isAdmin = members.some(m => m.user_id === user.id && m.role === 'admin');
-          const adminCount = members.filter(m => m.role === 'admin').length;
-
-          if (isAdmin && adminCount === 1 && members.length > 1) {
-             // Is the sole admin, but other members exist
-             console.warn(`AuthContext: User ${user.id} is the last admin of org ${organizationId} with other members.`);
-             result = { success: false, error: { message: 'Du bist der letzte Admin. Bitte übertrage die Admin-Rolle oder entferne zuerst alle anderen Mitglieder.' } };
-             setLoading(false); // <-- Need to set loading false here before returning
-             return result;
-          }
-          // Note: If isAdmin && adminCount === 1 && members.length === 1,
-          // the RLS policy should ideally prevent deletion anyway, but the backend check adds clarity.
-          // If !isAdmin, they can always leave.
-
-          console.log(`AuthContext: Proceeding with DELETE from organization_members for user ${user.id} and org ${organizationId}`);
+          // Simplified check - RLS should handle last admin prevention
           const { error } = await supabase
               .from('organization_members')
               .delete()
@@ -928,37 +848,24 @@ export const AuthProvider = ({ children, expoPushToken }) => {
               .eq('user_id', user.id);
 
           if (error) {
-              console.error("AuthContext: Error leaving organization (delete op):", error);
-              // Check if the error is from our RLS policy
-              if (error.message.includes('policy "prevent_last_admin_leave"' ) || error.message.includes('check constraint violation')) { // Adjust based on actual error
+               // Check if the error is from our RLS policy
+              if (error.message.includes('prevent_last_admin_leave')) { 
                    result = { success: false, error: { message: 'Du bist der letzte Admin und kannst die Organisation nicht verlassen.', code: 'LAST_ADMIN_VIOLATION' } };
               } else {
                   result = { success: false, error: { message: error.message || 'Fehler beim Verlassen.' } };
               }
           } else {
-              console.log(`AuthContext: User ${user.id} successfully deleted membership for org ${organizationId}`);
-
-              // Refetch user organizations immediately AFTER successful delete
-              console.log('AuthContext: Refetching user profile and orgs after leaving...');
-              await loadUserProfileAndOrgs(user.id); // This updates userOrganizations state
-              console.log('AuthContext: User profile and orgs refetched after leaving.');
-
-              // Let OrganizationContext react to the change in userOrganizations if the left org was active.
-
+              await loadUserProfileAndOrgs(user.id); // Refetch orgs list
               result = { success: true };
           }
-
       } catch (error) {
           console.error("AuthContext: Unexpected error leaving organization:", error);
           result = { success: false, error: { message: error.message || 'Ein unerwarteter Fehler ist aufgetreten.' } };
       } finally {
-          setLoading(false); // Ensure loading is set to false in finally block
+          setLoading(false); 
       }
-      return result; // Return the result
+      return result;
   };
-
-  // ... (keep Member Management Functions: removeOrganizationMember, transferOrganizationAdmin)
-  // Add temporary check if necessary? Unlikely for these admin actions.
 
   // --- NEW: Delete Current User Account --- (Needs is_temporary check?)
   const deleteCurrentUserAccount = async () => {
@@ -969,12 +876,12 @@ export const AuthProvider = ({ children, expoPushToken }) => {
     // if (profile?.is_temporary) {
     //   return { success: false, error: { message: 'Temporäre Accounts können nicht gelöscht werden.'}}; // Or allow?
     // }
-
+    
     const currentToken = expoPushToken; // Capture token before anything happens
     setLoading(true);
     try {
       console.log(`AuthContext: Attempting to delete account for user ${user.id} via RPC.`);
-
+      
       // Call the RPC function to perform checks (like admin status) and delete profile data
       const { error: rpcError } = await supabase.rpc('delete_user_account');
 
@@ -991,13 +898,13 @@ export const AuthProvider = ({ children, expoPushToken }) => {
 
       // Sign out the user locally after profile data is cleared via RPC
       // SignOut now also handles updating the push token to anonymous
-      const signOutResult = await signOut();
+      const signOutResult = await signOut(); 
       if (!signOutResult.success) {
         console.error("AuthContext: Sign out failed after account deletion RPC.");
         // Even if sign out fails, the DB part succeeded conceptually
-        return { success: true, warning: 'Account data deleted, but local sign out failed.' };
+        return { success: true, warning: 'Account data deleted, but local sign out failed.' }; 
       }
-
+      
       console.log(`AuthContext: Account deletion process complete (profile data removed, user signed out, token updated).`);
       return { success: true };
 
@@ -1006,7 +913,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         console.error("AuthContext: Unexpected error in deleteCurrentUserAccount:", error);
         return { success: false, error: { message: 'Ein unerwarteter Fehler ist beim Löschen aufgetreten.' } };
     } finally {
-        setLoading(false);
+        setLoading(false); 
     }
   };
 
@@ -1027,22 +934,16 @@ export const AuthProvider = ({ children, expoPushToken }) => {
     upgradeToFullAccount, // Now used for temp -> full
     signIn,
     signOut,
-    resetOnboarding, // Keep for dev/testing
     // Profile Updates
     updateDisplayName,
     updatePreferences,
     updateEmail, // Add temporary check inside
     updatePassword, // Add temporary check inside
     loadUserProfile: loadUserProfileAndOrgs, // Keep combined loading function
-    // Organization Functions (add temporary checks inside)
-    createOrganization,
+    // Organization Functions (These DO belong in AuthContext)
+    createOrganization, 
     joinOrganizationByInviteCode,
     leaveOrganization,
-    fetchOrganizationMembers, // Keep as is
-    updateOrganizationDetails, // Add temporary check inside if needed
-    updateOrganizationName, // Add temporary check inside
-    removeOrganizationMember, // Add temporary check inside? Unlikely needed.
-    transferOrganizationAdmin, // Add temporary check inside? Unlikely needed.
     // Account Deletion
     deleteCurrentUserAccount, // Keep
     // Push Token Management

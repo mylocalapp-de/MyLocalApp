@@ -21,28 +21,29 @@ A mobile application designed to strengthen community spirit in rural villages b
 
 ## Authentication System
 
-- **One-Click Account Creation:** Users can instantly create a local account with all preferences pre-selected
-- **Frictionless Onboarding:** Alternative manual preference selection available for customized experience
-- **Progressive Authentication:** 
-  - Start with localStorage account (preferences and display name only)
-  - Option to upgrade to permanent account with email/password
-  - Seamless migration of preferences when upgrading
+- **Simplified Onboarding:**
+  - Clicking "Neu hier?" on the Welcome Screen navigates to an onboarding screen.
+  - Onboarding requires a display name and offers an optional email address.
+- **Temporary Accounts:**
+  - Completing onboarding creates a full Supabase Auth account immediately, but marked as temporary (`is_temporary: true` in `profiles` table).
+  - If no email is provided, a placeholder email (`username.uuid@temp.mylocalapp.de`) is generated.
+  - A random, secure password is generated (user doesn't know it).
+  - All preferences are pre-selected by default for temporary accounts.
+- **Account Permanence:**
+  - Temporary users can later make their account permanent via the Profile screen by setting a real email (if they used a placeholder) and a chosen password.
 - **Robust Error Handling:**
-  - Comprehensive validation for email and password
-  - Specific error messages for common scenarios (invalid email, duplicate accounts, etc.)
-  - Fallback mechanisms for account creation and authentication
+  - Validation for display name and optional email during onboarding.
+  - Handles Supabase errors during temporary account creation (e.g., email conflicts).
 - **Account Management:**
-  - Profile editing with display name and preferences
-  - Email and password change functionality
-  - Secure sign-out with onboarding reset option
-  - Secure account deletion (checks for organization admin status)
+  - All users (temporary and permanent) can edit their display name and preferences.
+  - Only permanent users can change their email or password.
+  - Secure sign-out is available for all.
+  - Account deletion is available (requires transferring admin rights first if applicable).
 - **Data Persistence:**
-  - AsyncStorage for local account data
-  - Supabase for permanent account storage
-  - Automatic preference sync across devices
-  - Local users can modify display name and preferences directly in the Profile tab.
-  - Option for logged-in users to delete their account (requires transferring admin rights first)
-- **Organization Mode:** Separate functionality for organizations to create content
+  - User data (profile, preferences, temporary status) stored in Supabase.
+  - AsyncStorage primarily used for the `hasCompletedOnboarding` flag and active organization ID.
+- **Organization Mode:**
+  - Requires a permanent (non-temporary) account to create/join/manage organizations.
 
 ## Technology Stack
 
@@ -147,11 +148,23 @@ App.js              - Main application entry point
 
 ## Authentication Flow
 
-1. First launch: User sees Welcome screen with "Neu hier?" and "Login mit existierendem Account" options
-2. New user selects "Neu hier?", chooses content preferences (Kultur, Sport, Verkehr, Politik)
-3. Preferences are stored in AsyncStorage and user enters the main app
-4. In Profile tab, user can create a permanent account with email and password
-5. Account data is securely stored in Supabase for future sessions
+1.  **Welcome Screen:** User sees "Neu hier?" and "Login mit existierendem Account" options.
+2.  **Login:** Existing users log in via the login form.
+3.  **Onboarding:**
+    *   User clicks "Neu hier?", navigates to Onboarding Screen.
+    *   Enters display name, optionally provides an email.
+    *   Clicks "Account erstellen & Loslegen".
+4.  **Temporary Account Creation:**
+    *   `createTemporaryAccount` function in `AuthContext` is called.
+    *   Supabase account created with provided/generated credentials and `is_temporary: true` metadata.
+    *   `handle_new_user` trigger creates the `profiles` entry with `is_temporary=true`.
+    *   Auth state changes, `AppNavigator` detects `user` and `profile`, sets `hasCompletedOnboarding` flag in AsyncStorage, and navigates to the main app.
+5.  **Using the App:** User interacts with the app using their temporary account (can edit name/prefs, react, comment, etc.).
+6.  **Making Account Permanent (Optional):**
+    *   User goes to Profile screen.
+    *   Clicks option to make account permanent (UI element needs to be added).
+    *   Provides a valid email (if they used a temp one) and a chosen password.
+    *   `upgradeToFullAccount` function updates Auth user and sets `is_temporary=false` in the profile.
 
 ## Known Issues
 
