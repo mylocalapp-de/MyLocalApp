@@ -18,8 +18,6 @@ export const OrganizationProvider = ({ children }) => {
       user,
       userOrganizations,
       loadUserProfile,
-      removeOrganizationMember, // Get from AuthContext
-      transferOrganizationAdmin // Get from AuthContext
   } = useAuth(); // Get user status, userOrganizations and loadUserProfile function
 
   // Effect to log changes in userOrganizations (for debugging the trigger)
@@ -276,6 +274,190 @@ export const OrganizationProvider = ({ children }) => {
     }
   };
 
+  // --- Organization Management Functions (Moved from AuthContext) ---
+  const fetchOrganizationMembers = async (organizationId) => {
+      if (!organizationId) return { success: false, error: { message: 'Organisations-ID benötigt.' } };
+      // RLS policies should handle authorization (user must be a member to call)
+      // Or add an explicit membership check if needed.
+      console.log(`[OrgContext] Fetching members for org ID: ${organizationId} using RPC get_organization_members_with_names`);
+      try {
+          const { data, error } = await supabase.rpc('get_organization_members_with_names', {
+              p_organization_id: organizationId
+          });
+          if (error) {
+              console.error("OrgContext: Error calling get_organization_members_with_names RPC:", error);
+              return { success: false, error: { message: error.message || 'Fehler beim Laden der Mitglieder.' } };
+          }
+          const memberData = data ?? [];
+          console.log(`[OrgContext] Member data received from RPC for org ${organizationId}:`, memberData);
+          return { success: true, data: memberData };
+      } catch (error) {
+          console.error("OrgContext: Unexpected error fetching members:", error);
+          return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+      }
+  };
+
+  const updateOrganizationDetails = async (organizationId, details) => {
+       if (!user) return { success: false, error: { message: 'Nicht angemeldet.' } }; // Check user
+       if (!organizationId) return { success: false, error: { message: 'Organisations-ID benötigt.' } };
+       // RLS Policy "Allow admin to manage their organization" should handle authz
+       
+       setIsLoading(true); // Use OrgContext loading state
+       try {
+           const { data, error } = await supabase
+               .from('organizations')
+               .update({ 
+                   name: details.name, 
+                   // logo_url: details.logo_url, // Example of other fields
+                   updated_at: new Date() 
+               })
+               .eq('id', organizationId)
+               .select('id, name') // Return updated data
+               .single();
+
+           if (error) {
+               console.error("OrgContext: Error updating organization details:", error);
+               return { success: false, error: { message: error.message || 'Fehler beim Aktualisieren.' } };
+           }
+           
+           // If the active org was updated, refresh its details in state
+           if(activeOrganizationId === organizationId) {
+               setActiveOrganization(prev => prev ? { ...prev, name: data.name } : null); 
+           }
+           // Refresh user's org list in AuthContext to reflect potential name change in lists
+           await loadUserProfile(); 
+
+           return { success: true, data };
+
+       } catch (error) {
+           console.error("OrgContext: Unexpected error updating org details:", error);
+           return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+       } finally {
+           setIsLoading(false);
+       }
+  };
+
+  const updateOrganizationName = async (organizationId, newName) => {
+    if (!user) return { success: false, error: { message: 'Nicht angemeldet.' } };
+    if (!organizationId) return { success: false, error: { message: 'Organisations-ID benötigt.' } };
+    if (!newName || newName.trim() === '') return { success: false, error: { message: 'Organisationsname darf nicht leer sein.' } };
+
+    setIsLoading(true); // Use OrgContext loading
+    try {
+        console.log(`OrgContext: Attempting to update name for org ${organizationId} to "${newName.trim()}" by admin ${user.id}`);
+        // RLS policy "Allow admin to manage their organization" handles authorization
+        const { data, error } = await supabase
+            .from('organizations')
+            .update({ name: newName.trim(), updated_at: new Date() })
+            .eq('id', organizationId)
+            .select('id, name') // Select the updated data
+            .single(); // Expect a single row back
+
+        if (error) {
+            console.error("OrgContext: Error updating organization name:", error);
+            const message = error.message.includes('duplicate key value violates unique constraint')
+                ? 'Eine Organisation mit diesem Namen existiert bereits.'
+                : error.message.includes('permission denied')
+                ? 'Berechtigung verweigert. Nur Admins können den Namen ändern.'
+                : error.message || 'Fehler beim Aktualisieren des Namens.';
+            return { success: false, error: { message } };
+        }
+
+        console.log(`OrgContext: Successfully updated org name to "${data.name}"`);
+        // Refresh the active org state if this is the active org
+        if (activeOrganizationId === organizationId) {
+            setActiveOrganization(prev => prev ? { ...prev, name: data.name } : null);
+        }
+        // Refresh user's org list in AuthContext
+        await loadUserProfile();
+        
+        return { success: true, data };
+
+    } catch (error) {
+        console.error("OrgContext: Unexpected error updating org name:", error);
+        return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+    } finally {
+        setIsLoading(false);
+    }
+  };
+
+  const removeOrganizationMember = async (organizationId, memberUserId) => {
+    if (!user) return { success: false, error: { message: 'Nicht angemeldet.' } };
+    if (!organizationId || !memberUserId) return { success: false, error: { message: 'Organisations- und Mitglieds-ID benötigt.' } };
+    if (memberUserId === user.id) return { success: false, error: { message: 'Du kannst dich nicht selbst entfernen.'}}; // Prevent self-removal via this function
+
+    setIsLoading(true); // Use OrgContext loading
+    try {
+        console.log(`OrgContext: Attempting to remove member ${memberUserId} from org ${organizationId} by admin ${user.id}`);
+        // RLS policy "prevent_last_admin_leave_or_remove_others" handles authorization
+        const { error } = await supabase
+            .from('organization_members')
+            .delete()
+            .eq('organization_id', organizationId)
+            .eq('user_id', memberUserId);
+
+        if (error) {
+            console.error("OrgContext: Error removing member:", error);
+            const message = error.message.includes('permission denied')
+              ? 'Berechtigung verweigert. Nur Admins können Mitglieder entfernen.'
+              : error.message || 'Fehler beim Entfernen des Mitglieds.';
+            return { success: false, error: { message } };
+        }
+
+        console.log(`OrgContext: Successfully removed member ${memberUserId} from org ${organizationId}`);
+        // ProfileScreen will need to refetch members after this succeeds using fetchOrganizationMembers
+        return { success: true };
+
+    } catch (error) {
+        console.error("OrgContext: Unexpected error removing member:", error);
+        return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+    } finally {
+        setIsLoading(false);
+    }
+  };
+
+  const transferOrganizationAdmin = async (organizationId, newAdminUserId) => {
+    if (!user) return { success: false, error: { message: 'Nicht angemeldet.' } };
+    if (!organizationId || !newAdminUserId) return { success: false, error: { message: 'Organisations- und neue Admin-ID benötigt.' } };
+
+    setIsLoading(true); // Use OrgContext loading
+    try {
+      console.log(`OrgContext: Attempting to transfer admin role in org ${organizationId} to user ${newAdminUserId} by current admin ${user.id}`);
+      const { data, error } = await supabase.rpc('set_organization_admin', {
+        p_organization_id: organizationId,
+        p_new_admin_user_id: newAdminUserId
+      });
+
+      if (error) {
+        console.error("OrgContext: Error calling set_organization_admin RPC:", error);
+        return { success: false, error: { message: error.message || 'Fehler bei der Admin-Übertragung.' } };
+      }
+
+      if (data === false) { // RPC returns false on internal error
+        console.warn("OrgContext: set_organization_admin RPC returned false.");
+        return { success: false, error: { message: 'Admin-Übertragung fehlgeschlagen (RPC).' } };
+      }
+
+      console.log(`OrgContext: Successfully transferred admin role in org ${organizationId} to user ${newAdminUserId}`);
+      // Refresh user profile & orgs because the current user's role might have changed
+      await loadUserProfile(); 
+      // Refresh the active org state if this is the active org to update current user's role
+       if (activeOrganizationId === organizationId) {
+           // Re-fetch active org details or just update role locally
+           // Re-fetching is safer to ensure consistency
+           await switchOrganizationContext(organizationId); 
+       }
+      // ProfileScreen will also need to refetch members to update roles visually
+      return { success: true };
+
+    } catch (error) {
+        console.error("OrgContext: Unexpected error transferring admin role:", error);
+        return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+    } finally {
+        setIsLoading(false);
+    }
+  };
+
   return (
     <OrganizationContext.Provider
         value={{
@@ -285,7 +467,10 @@ export const OrganizationProvider = ({ children }) => {
             switchOrganizationContext,
             deleteOrganization, // Add the new function
             isOrganizationActive: !!activeOrganizationId, // Convenience boolean
-            // Member management functions passed through
+            // Add moved functions to the context value
+            fetchOrganizationMembers,
+            updateOrganizationDetails,
+            updateOrganizationName,
             removeOrganizationMember,
             transferOrganizationAdmin,
         }}

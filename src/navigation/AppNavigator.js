@@ -27,12 +27,14 @@ import CreatePoiScreen from '../screens/CreatePoiScreen';
 import DirectMessagesScreen from '../screens/DirectMessagesScreen';
 import NewDirectMessageScreen from '../screens/NewDirectMessageScreen';
 import DirectMessageDetailScreen from '../screens/DirectMessageDetailScreen';
+import OnboardingScreen from '../screens/OnboardingScreen';
 
 const Tab = createBottomTabNavigator();
 const ChatStack = createStackNavigator();
 const HomeStack = createStackNavigator();
 const CalendarStack = createStackNavigator();
 const RootStack = createStackNavigator();
+const AuthStack = createStackNavigator();
 
 // Chat stack navigator
 const ChatStackNavigator = () => {
@@ -82,6 +84,23 @@ const CalendarStackNavigator = () => {
       <CalendarStack.Screen name="CreateEvent" component={CreateEventScreen} />
       <CalendarStack.Screen name="EditEvent" component={EditEventScreen} />
     </CalendarStack.Navigator>
+  );
+};
+
+// Auth stack navigator for Welcome/Onboarding flow
+const AuthStackNavigator = () => {
+  return (
+    <AuthStack.Navigator screenOptions={{ headerShown: false }}>
+      <AuthStack.Screen 
+        name="Welcome"
+        component={WelcomeScreen}
+        options={{ gestureEnabled: false }} 
+      />
+      <AuthStack.Screen 
+        name="Onboarding"
+        component={OnboardingScreen}
+      />
+    </AuthStack.Navigator>
   );
 };
 
@@ -185,20 +204,56 @@ const AppNavigator = () => {
           />
         ) : (
           <RootStack.Screen 
-            name="Welcome" 
-            component={WelcomeScreen} 
+            name="AuthFlow" 
+            component={AuthStackNavigator}
             options={{ gestureEnabled: false }}
           />
         )}
         <RootStack.Screen 
             name="OrganizationSetup" 
             component={OrganizationSetupScreen}
+            options={{ presentation: 'modal' }}
         />
         <RootStack.Screen name="EventDetail" component={EventDetailScreen} options={{ headerShown: false }} />
         <RootStack.Screen name="CreateEvent" component={CreateEventScreen} options={{ headerShown: false, presentation: 'modal' }} />
         <RootStack.Screen name="EditEvent" component={EditEventScreen} options={{ headerShown: false, presentation: 'modal' }} />
         <RootStack.Screen name="CreateBroadcastGroup" component={CreateBroadcastGroupScreen} options={{ headerShown: false, presentation: 'modal' }} />
         <RootStack.Screen name="CreatePoi" component={CreatePoiScreen} options={{ headerShown: false, presentation: 'modal' }} />
+        <RootStack.Screen 
+            name="ArticleDetail" 
+            component={ArticleDetailScreen} 
+            options={{ headerShown: false, presentation: 'modal' }} 
+        />
+        <RootStack.Screen 
+            name="CreateArticle" 
+            component={CreateArticleScreen} 
+            options={{ headerShown: false, presentation: 'modal' }} 
+        />
+        <RootStack.Screen 
+            name="EditArticle" 
+            component={EditArticleScreen} 
+            options={{ headerShown: false, presentation: 'modal' }} 
+        />
+        <RootStack.Screen 
+            name="ChatDetail" 
+            component={ChatDetailScreen} 
+            options={{ headerShown: false, presentation: 'modal' }} 
+        />
+        <RootStack.Screen 
+            name="DirectMessages" 
+            component={DirectMessagesScreen} 
+            options={{ headerShown: false, presentation: 'modal' }} 
+        />
+        <RootStack.Screen 
+            name="NewDirectMessage" 
+            component={NewDirectMessageScreen} 
+            options={{ headerShown: false, presentation: 'modal' }} 
+        />
+        <RootStack.Screen 
+            name="DirectMessageDetail" 
+            component={DirectMessageDetailScreen} 
+            options={{ headerShown: false, presentation: 'modal' }} 
+        />
       </RootStack.Navigator>
     </NavigationContainer>
   );

@@ -40,12 +40,11 @@ const scrollAmount = totalWidth / 2; // Scroll half the total width for looping
 const effectiveAnimationDuration = ANIMATION_DURATION * (numRepeats / 1.5); // Adjust duration factor as needed for speed
 
 const WelcomeScreen = ({ navigation }) => {
-  const { createLocalAccount, signIn } = useAuth();
-  const [step, setStep] = useState('welcome'); // 'welcome', 'preferences', 'login'
-  const [selectedPreferences, setSelectedPreferences] = useState([]);
+  const { signIn } = useAuth();
+  const [step, setStep] = useState('welcome'); // Only 'welcome' and 'login' steps needed now
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(false); // Keep loading state for login
   const [error, setError] = useState('');
   const scrollX = useRef(new Animated.Value(0)).current;
 
@@ -66,47 +65,7 @@ const WelcomeScreen = ({ navigation }) => {
     }
 
     return () => scrollX.stopAnimation(); // Cleanup on unmount/step change
-}, [step, scrollX]); // Rerun effect if step changes
-
-  const categories = [
-    { id: 'kultur', name: 'Kultur', icon: 'film-outline' },
-    { id: 'sport', name: 'Sport', icon: 'football-outline' },
-    { id: 'verkehr', name: 'Verkehr', icon: 'car-outline' },
-    { id: 'politik', name: 'Politik', icon: 'megaphone-outline' },
-  ];
-
-  const togglePreference = (id) => {
-    if (selectedPreferences.includes(id)) {
-      setSelectedPreferences(selectedPreferences.filter(item => item !== id));
-    } else {
-      setSelectedPreferences([...selectedPreferences, id]);
-    }
-  };
-
-  const handleCreateLocalAccount = async () => {
-    setLoading(true);
-    setError('');
-    const allPreferences = categories.map(category => category.id);
-    setSelectedPreferences(allPreferences);
-
-    try {
-      console.log('Creating local account with all preferences:', allPreferences);
-      console.log('Display name: Neuer Account');
-      const { success, error: contextError } = await createLocalAccount(allPreferences, "Neuer Account");
-      
-      if (success) {
-        console.log('Local account created successfully, navigating via context.');
-      } else {
-        console.error('Error creating local account:', contextError);
-        setError(contextError?.message || 'Es gab ein Problem. Bitte versuche es erneut.');
-      }
-    } catch (err) {
-      console.error('Unexpected error in auto account creation:', err);
-      setError('Ein unerwarteter Fehler ist aufgetreten.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [step, scrollX]);
 
   const handleLoginSubmit = async () => {
     if (!email.trim() || !email.includes('@')) {
@@ -259,18 +218,11 @@ const WelcomeScreen = ({ navigation }) => {
         
         <View style={styles.buttonsContainer}>
           <TouchableOpacity 
-            style={[
-              styles.primaryButton,
-              loading && styles.buttonDisabled
-            ]}
-            onPress={handleCreateLocalAccount}
+            style={styles.primaryButton}
+            onPress={() => navigation.navigate('Onboarding')}
             disabled={loading}
           >
-            {loading ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
-              <Text style={styles.primaryButtonText}>Neu hier?</Text>
-            )}
+            <Text style={styles.primaryButtonText}>Neu hier?</Text>
           </TouchableOpacity>
           
           <TouchableOpacity 
@@ -283,69 +235,6 @@ const WelcomeScreen = ({ navigation }) => {
           
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
         </View>
-      </View>
-    </View>
-  );
-
-  const renderPreferences = () => (
-    <View style={styles.contentContainer}>
-      <Text style={styles.preferencesTitle}>Deine Interessen</Text>
-      <Text style={styles.preferencesText}>
-        Wähle Themen aus, die dich interessieren. Du kannst diese jederzeit in deinem Profil ändern.
-      </Text>
-      
-      <View style={styles.categoriesContainer}>
-        {categories.map((category) => (
-          <TouchableOpacity
-            key={category.id}
-            style={[
-              styles.categoryItem,
-              selectedPreferences.includes(category.id) && styles.categoryItemSelected
-            ]}
-            onPress={() => togglePreference(category.id)}
-          >
-            <Ionicons 
-              name={category.icon} 
-              size={24} 
-              color={selectedPreferences.includes(category.id) ? '#fff' : '#4285F4'} 
-            />
-            <Text 
-              style={[
-                styles.categoryText,
-                selectedPreferences.includes(category.id) && styles.categoryTextSelected
-              ]}
-            >
-              {category.name}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-      
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
-      
-      <View style={styles.actionsContainer}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => setStep('welcome')}
-        >
-          <Ionicons name="arrow-back" size={20} color="#666" />
-          <Text style={styles.backButtonText}>Zurück</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={[
-            styles.continueButton,
-            loading && styles.buttonDisabled
-          ]}
-          onPress={handleCreateLocalAccount}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#fff" size="small" />
-          ) : (
-            <Text style={styles.continueButtonText}>Fertig</Text>
-          )}
-        </TouchableOpacity>
       </View>
     </View>
   );
@@ -419,12 +308,11 @@ const WelcomeScreen = ({ navigation }) => {
     <SafeAreaView style={styles.container}>
       {step === 'welcome' ? (
          renderWelcome() 
-      ) : (
+      ) : step === 'login' ? (
         <ScrollView contentContainerStyle={styles.scrollContainer}>
-          {step === 'preferences' && renderPreferences()}
-          {step === 'login' && renderLoginForm()}
+          {renderLoginForm()}
         </ScrollView>
-      )}
+      ) : null}
     </SafeAreaView>
   );
 };
@@ -460,6 +348,7 @@ const styles = StyleSheet.create({
   },
   scrollContainer: {
     flexGrow: 1,
+    justifyContent: 'center',
     padding: 20,
   },
   contentContainer: {
@@ -541,33 +430,6 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
     marginBottom: 30,
-  },
-  categoriesContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    width: '100%',
-    marginBottom: 30,
-  },
-  categoryItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-    borderRadius: 8,
-    padding: 15,
-    marginBottom: 15,
-    width: '48%',
-  },
-  categoryItemSelected: {
-    backgroundColor: '#4285F4',
-  },
-  categoryText: {
-    fontSize: 16,
-    color: '#333',
-    marginLeft: 10,
-  },
-  categoryTextSelected: {
-    color: '#fff',
   },
   actionsContainer: {
     flexDirection: 'row',

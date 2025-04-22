@@ -26,6 +26,10 @@ const ProfileScreen = () => {
     switchOrganizationContext,
     deleteOrganization,
     isLoading: isOrgContextLoading, // Renamed to avoid clash
+    // Get moved functions from OrganizationContext
+    fetchOrganizationMembers, 
+    updateOrganizationDetails, // Assuming this will be used later
+    updateOrganizationName,
     removeOrganizationMember,
     transferOrganizationAdmin
   } = useOrganization();
@@ -41,26 +45,27 @@ const ProfileScreen = () => {
     saveDataForOffline
   } = useNetwork();
 
-  // Use auth context with Supabase
+  // Use auth context with Supabase - Remove the functions that were moved
   const { 
-    user, // Supabase auth user object (null if not logged in)
-    profile, // Profile data from public.profiles (null if not loaded or doesn't exist)
-    preferences, // Preferences (from profile or local storage)
-    displayName, // Display name (from profile or local storage)
-    userOrganizations, // List of orgs user is member of [{id, name, role}, ...]
-    fetchOrganizationMembers, // Function to get member list
-    leaveOrganization, // Function to leave an org
+    user, 
+    profile,
+    preferences,
+    displayName,
+    userOrganizations,
+    // fetchOrganizationMembers, // REMOVE
+    leaveOrganization, // Keep: User leaves, part of Auth context
     signOut, 
     upgradeToFullAccount, 
-    resetOnboarding, // Keep for testing?
-    updateDisplayName,
-    updatePreferences,
-    updateEmail,
-    updatePassword,
-    loadUserProfile, // Add this to use the reload function
-    loading: authLoading, // Auth context loading state
-    updateOrganizationName, // <-- Add this function (comes from AuthContext)
-    deleteCurrentUserAccount // <-- Add this function (needs to be added to AuthContext)
+    // updateDisplayName, // Keep: Relates to user profile
+    // updatePreferences, // Keep: Relates to user profile
+    // updateEmail, // Keep: Relates to user auth
+    // updatePassword, // Keep: Relates to user auth
+    loadUserProfile, 
+    loading: authLoading,
+    // updateOrganizationName, // REMOVE
+    createOrganization, // Keep: User creates, part of Auth context
+    joinOrganizationByInviteCode, // Keep: User joins, part of Auth context
+    deleteCurrentUserAccount 
   } = useAuth();
   
   // State for account creation modal
@@ -134,29 +139,20 @@ const ProfileScreen = () => {
     if (user && isOrganizationActive && activeOrganizationId) {
       setIsFetchingMembers(true);
       setOrgMgmtError('');
-      console.log(`[ProfileScreen] Calling RPC get_organization_members_with_names for org: ${activeOrganizationId}`);
-      try {
-        const { data, error: rpcError } = await supabase.rpc('get_organization_members_with_names', {
-          p_organization_id: activeOrganizationId
-        });
-
-        if (rpcError) {
-          console.error("[ProfileScreen] Error calling RPC:", rpcError);
-          setOrgMgmtError(rpcError.message || 'Mitglieder konnten nicht geladen werden.');
+      console.log(`[ProfileScreen] Calling fetchOrganizationMembers (from OrgContext) for org: ${activeOrganizationId}`);
+      // Use fetchOrganizationMembers directly from useOrganization context
+      const result = await fetchOrganizationMembers(activeOrganizationId);
+      if (result.success) {
+          console.log("[ProfileScreen] Members received:", result.data);
+          setOrganizationMembers(result.data || []);
+      } else {
+          console.error("[ProfileScreen] Error fetching members:", result.error);
+          setOrgMgmtError(result.error?.message || 'Mitglieder konnten nicht geladen werden.');
           setOrganizationMembers([]);
-        } else {
-          console.log("[ProfileScreen] Members received from RPC:", data);
-          // The RPC already returns the needed format {user_id, role, display_name}
-          setOrganizationMembers(data || []);
-        }
-      } catch (err) {
-         console.error("[ProfileScreen] Unexpected error fetching members via RPC:", err);
-         setOrgMgmtError('Ein unerwarteter Fehler ist aufgetreten.');
-         setOrganizationMembers([]);
       }
       setIsFetchingMembers(false);
     }
-  }, [user, isOrganizationActive, activeOrganizationId]); // Removed fetchOrganizationMembers from dependency
+  }, [user, isOrganizationActive, activeOrganizationId, fetchOrganizationMembers]); // Add fetchOrganizationMembers dependency
 
   // Fetch organization members when context becomes active (use the helper)
   useEffect(() => {
@@ -361,6 +357,7 @@ const ProfileScreen = () => {
     setOrgEditError('');
 
     try {
+      // Use updateOrganizationName from useOrganization context
       const result = await updateOrganizationName(activeOrganizationId, editOrgName.trim());
       if (result.success) {
         Alert.alert('Erfolg', 'Organisationsname aktualisiert.');
@@ -481,21 +478,22 @@ const ProfileScreen = () => {
         ]
       );
     } else {
-      // Logic for local users (reset onboarding)
+      // Logic for local/temporary users (reset app state by signing out)
       Alert.alert(
         "App Zurücksetzen",
-        "Möchtest du die App wirklich zurücksetzen und alle lokalen Daten löschen?",
+        "Möchtest du die App wirklich zurücksetzen und dich abmelden?", // Updated text
         [
           { text: "Abbrechen", style: "cancel" },
           {
-            text: "Zurücksetzen",
+            text: "Zurücksetzen & Abmelden", // Updated text
             style: "destructive",
             onPress: async () => {
-              const { success, error } = await resetOnboarding();
+              // Replace resetOnboarding with signOut
+              const { success, error } = await signOut(); 
               if (!success) {
                 Alert.alert("Fehler", `Zurücksetzen fehlgeschlagen: ${error?.message || 'Unbekannter Fehler'}`);
               }
-              // Navigation should react to hasCompletedOnboarding becoming false
+              // Navigation handled by AppNavigator via AuthContext change
             },
           },
         ]
@@ -624,6 +622,7 @@ const ProfileScreen = () => {
           style: "destructive",
           onPress: async () => {
             setMemberManagementLoading(true);
+            // Use removeOrganizationMember from useOrganization context
             const result = await removeOrganizationMember(activeOrganizationId, memberUserId);
             setMemberManagementLoading(false);
             if (result.success) {
@@ -650,6 +649,7 @@ const ProfileScreen = () => {
           style: "default", // Or "destructive" if preferred
           onPress: async () => {
             setMemberManagementLoading(true);
+            // Use transferOrganizationAdmin from useOrganization context
             const result = await transferOrganizationAdmin(activeOrganizationId, newAdminUserId);
             setMemberManagementLoading(false);
             if (result.success) {
