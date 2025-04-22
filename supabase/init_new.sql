@@ -66,17 +66,17 @@ CREATE TABLE public.articles (
   type TEXT NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   published_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-  author_id UUID REFERENCES public.profiles(id),
-  organization_id UUID REFERENCES public.organizations(id) ON DELETE SET NULL, -- Added Org Link
+  author_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+  organization_id UUID REFERENCES public.organizations(id) ON DELETE SET NULL,
   is_published BOOLEAN DEFAULT true,
-  image_url TEXT, -- Added field for article images
-  preview_image_url TEXT -- Added field for preview/thumbnail images
+  image_url TEXT,
+  preview_image_url TEXT
 );
 
 CREATE TABLE public.article_comments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   article_id UUID NOT NULL REFERENCES public.articles(id) ON DELETE CASCADE,
-  user_id UUID REFERENCES public.profiles(id),
+  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
   text TEXT NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
@@ -84,7 +84,7 @@ CREATE TABLE public.article_comments (
 CREATE TABLE public.article_reactions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   article_id UUID NOT NULL REFERENCES public.articles(id) ON DELETE CASCADE,
-  user_id UUID REFERENCES public.profiles(id),
+  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
   emoji TEXT NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   UNIQUE (article_id, user_id, emoji)
@@ -99,7 +99,6 @@ CREATE TABLE public.chat_groups (
   tags TEXT[] DEFAULT '{}',
   is_pinned BOOLEAN DEFAULT false, -- Added pinned flag
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-  -- admin_id UUID REFERENCES public.profiles(id), -- Replaced by org admin concept for broadcast
   organization_id UUID REFERENCES public.organizations(id) ON DELETE SET NULL, -- Added Org Link
   is_active BOOLEAN DEFAULT true
 );
@@ -107,7 +106,7 @@ CREATE TABLE public.chat_groups (
 CREATE TABLE public.chat_messages (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   chat_group_id UUID NOT NULL REFERENCES public.chat_groups(id) ON DELETE CASCADE,
-  user_id UUID REFERENCES public.profiles(id),
+  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
   text TEXT, -- Made nullable
   image_url TEXT, -- Added image URL column
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
@@ -117,7 +116,7 @@ CREATE TABLE public.chat_messages (
 CREATE TABLE public.message_comments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   message_id UUID NOT NULL REFERENCES public.chat_messages(id) ON DELETE CASCADE,
-  user_id UUID REFERENCES public.profiles(id),
+  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
   text TEXT NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
@@ -125,7 +124,7 @@ CREATE TABLE public.message_comments (
 CREATE TABLE public.message_reactions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   message_id UUID NOT NULL REFERENCES public.chat_messages(id) ON DELETE CASCADE,
-  user_id UUID REFERENCES public.profiles(id),
+  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
   emoji TEXT NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   UNIQUE (message_id, user_id, emoji)
@@ -142,7 +141,7 @@ CREATE TABLE public.events (
   location TEXT,
   category TEXT,
   image_url TEXT,
-  organizer_id UUID REFERENCES public.profiles(id),
+  organizer_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
   organization_id UUID REFERENCES public.organizations(id) ON DELETE SET NULL,
   is_published BOOLEAN DEFAULT true,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
@@ -157,7 +156,7 @@ COMMENT ON COLUMN public.events.recurrence_end_date IS 'The date when the recurr
 CREATE TABLE public.event_comments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   event_id UUID NOT NULL REFERENCES public.events(id) ON DELETE CASCADE,
-  user_id UUID REFERENCES public.profiles(id),
+  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
   text TEXT NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
@@ -165,7 +164,7 @@ CREATE TABLE public.event_comments (
 CREATE TABLE public.event_reactions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   event_id UUID NOT NULL REFERENCES public.events(id) ON DELETE CASCADE,
-  user_id UUID REFERENCES public.profiles(id),
+  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
   emoji TEXT NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   UNIQUE (event_id, user_id, emoji)
@@ -174,7 +173,7 @@ CREATE TABLE public.event_reactions (
 CREATE TABLE public.event_attendees (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   event_id UUID NOT NULL REFERENCES public.events(id) ON DELETE CASCADE,
-  user_id UUID REFERENCES public.profiles(id),
+  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
   status TEXT NOT NULL CHECK (status IN ('attending', 'maybe', 'declined')),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   UNIQUE (event_id, user_id)
@@ -587,6 +586,60 @@ COMMENT ON FUNCTION public.set_organization_admin(uuid, uuid) IS 'Transfers the 
 
 -- Grant EXECUTE permission on the function to authenticated users
 GRANT EXECUTE ON FUNCTION public.set_organization_admin(uuid, uuid) TO authenticated;
+
+-- ====================================================================
+-- == RPC Function for Deleting User Account ==
+-- ====================================================================
+
+CREATE OR REPLACE FUNCTION public.delete_user_account()
+RETURNS void AS $$
+DECLARE
+  target_user_id uuid := auth.uid();
+  is_admin_in_org boolean;
+BEGIN
+  -- 1. Check if the user is an admin in any organization
+  SELECT EXISTS (
+    SELECT 1 FROM public.organization_members
+    WHERE user_id = target_user_id AND role = 'admin'
+  ) INTO is_admin_in_org;
+
+  IF is_admin_in_org THEN
+    RAISE EXCEPTION 'User is an admin in one or more organizations. Please transfer admin rights before deleting the account.';
+  END IF;
+
+  -- 2. If not an admin anywhere, proceed with deletion
+  -- Note: Deleting from auth.users requires the service_role key or specific privileges.
+  -- This function will delete the profile and rely on CASCADE/SET NULL for related data.
+  -- The final step of deleting the auth.users entry must be handled by a trusted backend/service role call.
+
+  -- Delete the user's profile entry (this triggers cascades)
+  DELETE FROM public.profiles WHERE id = target_user_id;
+
+  -- Explicitly delete memberships just in case (though cascade should handle it)
+  DELETE FROM public.organization_members WHERE user_id = target_user_id;
+
+  -- Explicitly delete push subscriptions (though cascade should handle it)
+  DELETE FROM public.push_notification_subscriptions WHERE user_id = target_user_id;
+
+  -- The actual deletion from auth.users needs to happen separately using a service role key.
+  -- Example (run this from a secure backend context):
+  -- supabase.auth.admin.deleteUser(target_user_id)
+
+EXCEPTION
+  WHEN raise_exception THEN
+    -- Re-raise the specific exception for admin check failure
+    RAISE EXCEPTION '%', SQLERRM;
+  WHEN others THEN
+    -- Log other errors and raise a generic failure message
+    RAISE WARNING 'Error deleting user account %: %', target_user_id, SQLERRM;
+    RAISE EXCEPTION 'Failed to delete user account due to an internal error.';
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER; -- SECURITY DEFINER needed to check memberships reliably
+
+COMMENT ON FUNCTION public.delete_user_account() IS 'Deletes the calling users profile and associated data after checking they are not an admin in any organization. Does NOT delete the auth.users entry (requires service role).';
+
+-- Grant EXECUTE permission on the function to authenticated users
+GRANT EXECUTE ON FUNCTION public.delete_user_account() TO authenticated;
 
 -- 8. Enable RLS and Define Policies
 -- Profiles
@@ -1104,12 +1157,6 @@ INSERT INTO public.event_categories (name, display_order, is_highlighted, is_adm
 ON CONFLICT (name) DO UPDATE SET display_order = EXCLUDED.display_order, is_highlighted = EXCLUDED.is_highlighted, is_admin_only = EXCLUDED.is_admin_only; -- Update existing
 
 -- ====================================================================
--- == Additions for Event Categories (RLS Grant) ==
--- ====================================================================
--- Grant Permissions for Event Categories Table
-GRANT SELECT ON public.event_categories TO anon, authenticated;
-
--- ====================================================================
 -- == Additions for Article Filters ==
 -- ====================================================================
 
@@ -1300,6 +1347,354 @@ GRANT UPDATE (is_used, used_at, user_id) ON public.organization_vouchers TO auth
 -- INSERT/UPDATE/DELETE should likely be restricted to admin/service roles
 
 -- ====================================================================
+-- == Additions for Direct Message Feature ==
+-- ====================================================================
+
+-- 1. Tables for Direct Messages
+
+-- Table to represent a DM conversation thread
+CREATE TABLE public.dm_conversations (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  last_message_at TIMESTAMP WITH TIME ZONE DEFAULT now(), -- To help sort conversations
+  is_org_conversation BOOLEAN NOT NULL DEFAULT false, -- Flag for org DMs
+  organization_id UUID NULL REFERENCES public.organizations(id) ON DELETE CASCADE, -- Link to org if is_org_conversation = true
+  CONSTRAINT org_conversation_link CHECK ( (is_org_conversation = true AND organization_id IS NOT NULL) OR (is_org_conversation = false AND organization_id IS NULL) )
+);
+COMMENT ON TABLE public.dm_conversations IS 'Represents a direct message conversation thread between users or between a user and an organization.';
+COMMENT ON COLUMN public.dm_conversations.is_org_conversation IS 'True if this is a conversation with an organization, false if between two users.';
+COMMENT ON COLUMN public.dm_conversations.organization_id IS 'The organization ID if is_org_conversation is true.';
+COMMENT ON COLUMN public.dm_conversations.last_message_at IS 'Timestamp of the last message sent in this conversation, used for sorting.';
+COMMENT ON CONSTRAINT org_conversation_link ON public.dm_conversations IS 'Ensures organization_id is set if and only if is_org_conversation is true.';
+
+-- Table linking users to conversations (ensures only two participants for USER DMs)
+CREATE TABLE public.dm_participants (
+  conversation_id UUID NOT NULL REFERENCES public.dm_conversations(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  PRIMARY KEY (conversation_id, user_id) -- Composite key
+  -- Constraint to ensure participants only exist for user DMs
+  -- This might be better handled by RLS/application logic to avoid trigger complexity
+  -- CONSTRAINT user_dm_only CHECK ( (SELECT is_org_conversation FROM public.dm_conversations WHERE id = conversation_id) = false )
+);
+COMMENT ON TABLE public.dm_participants IS 'Links users to their direct message conversations (only for user-to-user DMs).';
+
+-- Table for storing direct messages
+CREATE TABLE public.direct_messages (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  conversation_id UUID NOT NULL REFERENCES public.dm_conversations(id) ON DELETE CASCADE,
+  sender_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  text TEXT,
+  image_url TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  CHECK (text IS NOT NULL OR image_url IS NOT NULL) -- Ensure message has content
+);
+COMMENT ON TABLE public.direct_messages IS 'Stores individual messages within a direct message conversation.';
+COMMENT ON COLUMN public.direct_messages.sender_id IS 'The user who sent the message.';
+
+-- Index for faster message retrieval within a conversation
+CREATE INDEX idx_direct_messages_conversation_created ON public.direct_messages(conversation_id, created_at DESC);
+
+-- 2. Trigger to update last_message_at in dm_conversations
+
+CREATE OR REPLACE FUNCTION public.update_dm_conversation_last_message_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  UPDATE public.dm_conversations
+  SET last_message_at = NEW.created_at
+  WHERE id = NEW.conversation_id;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER; -- Added SECURITY DEFINER
+
+-- Ensure trigger exists (idempotent)
+DROP TRIGGER IF EXISTS on_direct_message_insert ON public.direct_messages;
+CREATE TRIGGER on_direct_message_insert
+  AFTER INSERT ON public.direct_messages
+  FOR EACH ROW EXECUTE FUNCTION public.update_dm_conversation_last_message_at();
+
+COMMENT ON FUNCTION public.update_dm_conversation_last_message_at() IS 'Updates the last_message_at timestamp in dm_conversations when a new message is inserted.';
+
+-- 3. RLS Policies
+
+-- dm_conversations
+ALTER TABLE public.dm_conversations ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow participants or members to access their conversations" ON public.dm_conversations;
+-- Allow access to user DMs if participant, or ANY org DM (frontend filters which org DMs to show)
+CREATE POLICY "Allow access to relevant DM conversations" ON public.dm_conversations
+FOR SELECT TO authenticated
+USING (
+  (is_org_conversation = false AND id IN (SELECT p.conversation_id FROM public.dm_participants p WHERE p.user_id = auth.uid())) -- User is participant in user DM
+  OR
+  (is_org_conversation = true) -- Allow selecting ANY org conversation row
+);
+COMMENT ON POLICY "Allow access to relevant DM conversations" ON public.dm_conversations IS 'Allows users to select user-DMs they participate in, or ANY org-DM row (frontend filters).';
+
+-- Allow INSERT (handled by RPC)
+DROP POLICY IF EXISTS "Allow authenticated users to create conversations via RPC" ON public.dm_conversations;
+CREATE POLICY "Allow authenticated users to create conversations via RPC" ON public.dm_conversations
+  FOR INSERT TO authenticated
+  WITH CHECK (true); -- Creation logic is within the RPC functions
+
+-- Allow UPDATE (for trigger)
+DROP POLICY IF EXISTS "Allow participants or members to update their conversations (trigger)" ON public.dm_conversations;
+CREATE POLICY "Allow participants or members to update their conversations (trigger)" ON public.dm_conversations
+  FOR UPDATE TO authenticated
+  USING (
+    (is_org_conversation = false AND id IN (SELECT p.conversation_id FROM public.dm_participants p WHERE p.user_id = auth.uid()))
+    OR
+    -- Allow trigger update if it's ANY org conversation (since any user can message)
+    (is_org_conversation = true AND organization_id IS NOT NULL)
+  )
+  WITH CHECK ( -- Ensure check matches using
+    (is_org_conversation = false AND id IN (SELECT p.conversation_id FROM public.dm_participants p WHERE p.user_id = auth.uid()))
+    OR
+    (is_org_conversation = true AND organization_id IS NOT NULL)
+  );
+COMMENT ON POLICY "Allow participants or members to update their conversations (trigger)" ON public.dm_conversations IS 'Allows the update trigger to modify last_message_at for accessible conversations (user DMs or any org DM).';
+
+-- dm_participants
+ALTER TABLE public.dm_participants ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow participants to view their own participation" ON public.dm_participants;
+DROP POLICY IF EXISTS "Allow users to manage their own participation" ON public.dm_participants;
+-- Fixed SELECT policy (non-recursive)
+DROP POLICY IF EXISTS "Allow participants to view their own participation row" ON public.dm_participants;
+CREATE POLICY "Allow participants to view their own participation row" ON public.dm_participants
+  FOR SELECT TO authenticated
+  USING ( user_id = auth.uid() );
+-- Added INSERT Policy (only for user DMs, handled by RPC)
+DROP POLICY IF EXISTS "Allow participants to be added via RPC" ON public.dm_participants;
+CREATE POLICY "Allow participants to be added via RPC" ON public.dm_participants
+  FOR INSERT TO authenticated
+  WITH CHECK (
+     -- Ensure this participant row is only added if the target conversation is NOT an org conversation
+     (SELECT c.is_org_conversation FROM public.dm_conversations c WHERE c.id = conversation_id) = false
+  );
+
+-- direct_messages
+ALTER TABLE public.direct_messages ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow participants or members to access messages in their conversations" ON public.direct_messages;
+DROP POLICY IF EXISTS "Allow participants or members to send messages in their conversations" ON public.direct_messages;
+DROP POLICY IF EXISTS "Allow users to delete their own messages" ON public.direct_messages;
+
+-- Use underlying dm_conversations RLS for access control
+CREATE POLICY "Allow access to messages in accessible conversations" ON public.direct_messages
+FOR SELECT TO authenticated
+USING (
+  conversation_id IN (SELECT c.id FROM public.dm_conversations c) -- Relies on updated dm_conversations SELECT RLS
+);
+
+CREATE POLICY "Allow sending messages in accessible conversations" ON public.direct_messages
+FOR INSERT TO authenticated
+WITH CHECK (
+  sender_id = auth.uid()
+  AND (
+      -- User is participant in the target user-DM conversation
+      ( (SELECT is_org_conversation FROM public.dm_conversations WHERE id = conversation_id) = false AND
+         conversation_id IN (SELECT p.conversation_id FROM public.dm_participants p WHERE p.user_id = auth.uid())
+      )
+      OR
+      -- OR the target conversation is ANY organization conversation
+      ( (SELECT is_org_conversation FROM public.dm_conversations WHERE id = conversation_id) = true )
+   )
+);
+
+CREATE POLICY "Allow users to delete their own messages" ON public.direct_messages
+FOR DELETE TO authenticated
+USING (sender_id = auth.uid()); -- Only the sender can delete
+
+-- 4. Views
+
+-- View to list DM conversations for the current user, showing the other participant OR the organization
+CREATE OR REPLACE VIEW public.dm_conversation_list AS
+WITH LatestMessages AS (
+  SELECT
+    dm.conversation_id,
+    dm.sender_id,
+    dm.text,
+    dm.image_url,
+    dm.created_at,
+    ROW_NUMBER() OVER (PARTITION BY dm.conversation_id ORDER BY dm.created_at DESC) as rn
+  FROM public.direct_messages dm
+)
+-- User-to-User DMs
+SELECT
+  c.id as conversation_id,
+  c.is_org_conversation,
+  c.organization_id, -- NULL for user DMs
+  p_other.user_id as other_user_id, -- The other user's ID
+  prof_other.display_name as target_name, -- The other user's name
+  -- Add other profile fields like avatar if needed
+  lm.text as last_message_text,
+  lm.image_url as last_message_image_url,
+  lm.created_at as last_message_created_at,
+  format_time_german(lm.created_at) as last_message_time,
+  lm.sender_id as last_message_sender_id,
+  CASE
+    WHEN lm.sender_id = p_current.user_id THEN prof_current.display_name -- Sender is current user
+    ELSE prof_sender.display_name -- Sender is the other user (or system if null)
+  END as last_message_sender_name,
+  c.last_message_at
+FROM public.dm_conversations c
+JOIN public.dm_participants p_current ON c.id = p_current.conversation_id AND p_current.user_id = auth.uid()
+JOIN public.dm_participants p_other ON c.id = p_other.conversation_id AND p_other.user_id != auth.uid() -- Join to get the OTHER participant
+JOIN public.profiles prof_current ON p_current.user_id = prof_current.id -- Join current user's profile
+JOIN public.profiles prof_other ON p_other.user_id = prof_other.id -- Join other user's profile
+LEFT JOIN LatestMessages lm ON c.id = lm.conversation_id AND lm.rn = 1
+LEFT JOIN public.profiles prof_sender ON lm.sender_id = prof_sender.id -- Join sender's profile for last message
+WHERE c.is_org_conversation = false -- Filter for user-to-user DMs
+
+UNION ALL
+
+-- Organization DMs
+SELECT
+  c.id as conversation_id,
+  c.is_org_conversation,
+  c.organization_id, -- The Org ID
+  NULL as other_user_id, -- No specific other user
+  org.name as target_name, -- The Organization's name
+  -- Add org logo URL if needed
+  lm.text as last_message_text,
+  lm.image_url as last_message_image_url,
+  lm.created_at as last_message_created_at,
+  format_time_german(lm.created_at) as last_message_time,
+  lm.sender_id as last_message_sender_id,
+  -- Determine sender name (could be user or potentially org in future?)
+  CASE
+      WHEN lm.sender_id IS NULL THEN org.name -- If sender is null assume Org sent it (e.g. automated)
+      ELSE COALESCE(prof_sender.display_name, 'Unbekannt') -- Otherwise show user's display name
+  END as last_message_sender_name,
+  c.last_message_at
+FROM public.dm_conversations c
+JOIN public.organizations org ON c.organization_id = org.id -- Join to get Org details
+LEFT JOIN LatestMessages lm ON c.id = lm.conversation_id AND lm.rn = 1
+LEFT JOIN public.profiles prof_sender ON lm.sender_id = prof_sender.id -- Join potential sender's profile
+WHERE c.is_org_conversation = true;
+
+-- No final ORDER BY here, client should order by last_message_at DESC
+
+COMMENT ON VIEW public.dm_conversation_list IS 'Lists active DM conversations (user-to-user and user-to-org) for the logged-in user, including target name and last message details.';
+
+-- 5. RPC Functions
+
+-- Original function for User DMs
+CREATE OR REPLACE FUNCTION public.find_or_create_user_dm_conversation(p_other_user_id uuid)
+RETURNS uuid AS $$
+DECLARE
+  current_user_id uuid := auth.uid();
+  existing_conversation_id uuid;
+  new_conversation_id uuid;
+BEGIN
+  -- Check if p_other_user_id is the same as current_user_id
+  IF p_other_user_id = current_user_id THEN
+    RAISE EXCEPTION 'Cannot create a DM conversation with yourself.';
+  END IF;
+
+  -- Check if a USER conversation already exists between these two users
+  SELECT p1.conversation_id INTO existing_conversation_id
+  FROM public.dm_participants p1
+  JOIN public.dm_participants p2 ON p1.conversation_id = p2.conversation_id
+  JOIN public.dm_conversations c ON p1.conversation_id = c.id -- Join conversations
+  WHERE p1.user_id = current_user_id
+    AND p2.user_id = p_other_user_id
+    AND c.is_org_conversation = false -- Ensure it's a user conversation
+  LIMIT 1;
+
+  -- If conversation exists, return its ID
+  IF existing_conversation_id IS NOT NULL THEN
+    RETURN existing_conversation_id;
+  END IF;
+
+  -- If not, create a new USER conversation and add participants
+  INSERT INTO public.dm_conversations (created_at, last_message_at, is_org_conversation, organization_id)
+  VALUES (now(), now(), false, null) RETURNING id INTO new_conversation_id;
+
+  INSERT INTO public.dm_participants (conversation_id, user_id) VALUES (new_conversation_id, current_user_id);
+  INSERT INTO public.dm_participants (conversation_id, user_id) VALUES (new_conversation_id, p_other_user_id);
+
+  RETURN new_conversation_id;
+
+EXCEPTION
+  WHEN others THEN
+    RAISE WARNING 'Error in find_or_create_user_dm_conversation: %', SQLERRM;
+    RETURN NULL; -- Or re-raise the exception
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+COMMENT ON FUNCTION public.find_or_create_user_dm_conversation(uuid) IS 'Finds an existing USER-TO-USER DM conversation or creates a new one. Returns the conversation ID.';
+
+-- Grant execute permission for user DMs
+GRANT EXECUTE ON FUNCTION public.find_or_create_user_dm_conversation(uuid) TO authenticated;
+
+-- NEW Function for Organization DMs
+CREATE OR REPLACE FUNCTION public.find_or_create_org_dm_conversation(p_organization_id uuid)
+RETURNS uuid AS $$
+DECLARE
+  current_user_id uuid := auth.uid();
+  existing_conversation_id uuid;
+  new_conversation_id uuid;
+BEGIN
+  -- REMOVED membership check: Any user can message an org
+
+  -- Check if an ORG conversation already exists for this user and organization
+  -- Let's assume ONE conversation per organization for simplicity now.
+  SELECT c.id INTO existing_conversation_id
+  FROM public.dm_conversations c
+  WHERE c.is_org_conversation = true
+    AND c.organization_id = p_organization_id
+  LIMIT 1;
+
+  -- If conversation exists, return its ID
+  IF existing_conversation_id IS NOT NULL THEN
+    RETURN existing_conversation_id;
+  END IF;
+
+  -- If not, create a new ORG conversation
+  INSERT INTO public.dm_conversations (created_at, last_message_at, is_org_conversation, organization_id)
+  VALUES (now(), now(), true, p_organization_id) RETURNING id INTO new_conversation_id;
+
+  -- No need to insert into dm_participants for org conversations
+
+  RETURN new_conversation_id;
+
+EXCEPTION
+  WHEN others THEN
+    RAISE WARNING 'Error in find_or_create_org_dm_conversation: %', SQLERRM;
+    RETURN NULL; -- Or re-raise the exception
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+COMMENT ON FUNCTION public.find_or_create_org_dm_conversation(uuid) IS 'Finds an existing ORG DM conversation for the given organization or creates a new one if the user is a member. Returns the conversation ID.';
+
+-- Grant execute permission for org DMs
+GRANT EXECUTE ON FUNCTION public.find_or_create_org_dm_conversation(uuid) TO authenticated;
+
+-- NEW Function to get Organizations with Members
+CREATE OR REPLACE FUNCTION public.get_organizations_with_members()
+RETURNS TABLE (id uuid, name text, logo_url text) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT DISTINCT
+    o.id,
+    o.name,
+    o.logo_url -- Include logo URL
+  FROM public.organizations o
+  JOIN public.organization_members m ON o.id = m.organization_id;
+END;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER; -- STABLE is appropriate, SECURITY DEFINER if needed to bypass RLS on organizations/members
+
+COMMENT ON FUNCTION public.get_organizations_with_members() IS 'Returns a list of organizations that have at least one member.';
+
+-- Grant execute permission
+GRANT EXECUTE ON FUNCTION public.get_organizations_with_members() TO authenticated;
+
+
+-- Grant Permissions on Views and Tables
+GRANT SELECT ON public.dm_conversation_list TO authenticated;
+GRANT SELECT, INSERT, UPDATE ON public.dm_conversations TO authenticated; -- INSERT/UPDATE needed for RPCs/trigger
+GRANT SELECT, INSERT ON public.dm_participants TO authenticated; -- INSERT needed for RPC
+GRANT SELECT, INSERT, DELETE ON public.direct_messages TO authenticated;
+
+-- ====================================================================
 -- == Final Commit ==
 -- ====================================================================
 COMMIT;
@@ -1319,3 +1714,62 @@ COMMIT;
 --   'https://supabase.myownapp.net/storage/v1/object/public/article_images/200730-havel-projektgebiet-boelkershof-ifa.jpeg?t=2025-04-02T18%3A53%3A59.423Z',
 --   'https://supabase.myownapp.net/storage/v1/object/public/article_images/200730-havel-projektgebiet-boelkershof-ifa.jpeg?t=2025-04-02T18%3A53%3A59.423Z',
 -- );
+
+-- ====================================================================
+-- == RPC Function to Search Users by Email ==
+-- ====================================================================
+
+CREATE OR REPLACE FUNCTION public.search_users_by_email(p_search_query text)
+RETURNS TABLE (id uuid, display_name text, email text) AS $$
+DECLARE
+  current_user_id uuid := auth.uid();
+  search_pattern text := '%' || p_search_query || '%';
+BEGIN
+  RETURN QUERY
+  SELECT
+    p.id,
+    p.display_name,
+    u.email::TEXT -- Cast email to TEXT
+  FROM public.profiles p
+  JOIN auth.users u ON p.id = u.id
+  WHERE
+    u.email ILIKE search_pattern
+    AND p.id != current_user_id; -- Exclude the current user
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+
+COMMENT ON FUNCTION public.search_users_by_email(text) IS 'Searches for users by email (case-insensitive partial match), joining profiles and auth.users, excluding the caller. Returns id, display_name, and email.';
+
+-- Grant execute permission
+GRANT EXECUTE ON FUNCTION public.search_users_by_email(text) TO authenticated;
+
+-- Grant Permissions on Views and Tables
+GRANT SELECT ON public.dm_conversation_list TO authenticated;
+
+-- NEW Function to get Organization Members WITH NAMES (bypasses profile RLS)
+CREATE OR REPLACE FUNCTION public.get_organization_members_with_names(p_organization_id uuid)
+RETURNS TABLE (user_id uuid, role text, display_name text) AS $$
+BEGIN
+  -- Ensure the CALLER is actually a member of the organization first
+  IF NOT public.is_org_member(auth.uid(), p_organization_id) THEN
+      RAISE EXCEPTION 'Access denied: User must be a member of the organization to view members.';
+  END IF;
+
+  -- If caller is a member, proceed to fetch members and join profiles
+  -- The SECURITY DEFINER context allows bypassing RLS on profiles for this specific join
+  RETURN QUERY
+  SELECT
+      mem.user_id,
+      mem.role,
+      COALESCE(prof.display_name, 'Unbekannt') AS display_name
+  FROM public.organization_members mem
+  LEFT JOIN public.profiles prof ON mem.user_id = prof.id
+  WHERE mem.organization_id = p_organization_id;
+
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+
+COMMENT ON FUNCTION public.get_organization_members_with_names(uuid) IS 'Returns member list for an organization including display names. Checks caller membership first, then uses SECURITY DEFINER to bypass profile RLS for the name lookup.';
+
+-- Grant execute permission
+GRANT EXECUTE ON FUNCTION public.get_organization_members_with_names(uuid) TO authenticated;

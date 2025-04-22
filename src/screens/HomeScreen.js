@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, ActivityIndicator, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, ActivityIndicator, Image, Alert } from 'react-native';
 import ScreenHeader from '../components/common/ScreenHeader';
 import { Ionicons } from '@expo/vector-icons';
 import { useOrganization } from '../context/OrganizationContext';
@@ -93,28 +93,17 @@ const HomeScreen = ({ navigation }) => {
       // Load Filters
       const offlineFilters = await loadOfflineData('article_filters');
       if (offlineFilters) {
-          // Ensure 'Aktuell' is present and at the beginning (same logic as fetchFilters)
-          let storedFilters = offlineFilters.map(f => ({ 
-              name: f.name, 
-              is_highlighted: f.is_highlighted || false 
-          }));
-          const aktuellExists = storedFilters.some(f => f.name === 'Aktuell');
-          if (aktuellExists) {
-              storedFilters = storedFilters.filter(f => f.name !== 'Aktuell');
-          }
+          // Build storedFilters without duplicates
+          let storedFilters = offlineFilters.map(f => ({ name: f.name, is_highlighted: f.is_highlighted || false }));
+          storedFilters = storedFilters.filter(f => f.name !== 'Aktuell' && f.name !== 'Schwarzes Brett');
+          // Prepend
+          storedFilters.unshift({ name: 'Schwarzes Brett', is_highlighted: true });
           storedFilters.unshift({ name: 'Aktuell', is_highlighted: false });
-          loadedFilters = storedFilters;
-          setAvailableFilters(loadedFilters);
-          console.log(`[HomeScreen] Loaded ${loadedFilters.length} filters from storage.`);
-          // Check if current filter exists in loaded filters
-          const currentFilterExists = loadedFilters.some(f => f.name === selectedFilter);
-          if (!currentFilterExists) {
-              setSelectedFilter('Aktuell');
-          }
+          setAvailableFilters(storedFilters);
+          if (!storedFilters.some(f => f.name === selectedFilter)) setSelectedFilter('Aktuell');
       } else {
-          setAvailableFilters(loadedFilters); // Set default if none stored
+          setAvailableFilters([{ name: 'Aktuell', is_highlighted: false }, { name: 'Schwarzes Brett', is_highlighted: true }]);
           setSelectedFilter('Aktuell');
-          console.log('[HomeScreen] No offline filters found, using default.');
       }
 
       // Note: Pinned articles won't work correctly offline without storing pin status
@@ -125,7 +114,7 @@ const HomeScreen = ({ navigation }) => {
       console.error('[HomeScreen] Error loading data from storage:', err);
       setError('Fehler beim Laden der Offline-Daten.');
       setArticles([]);
-      setAvailableFilters([{ name: 'Aktuell', is_highlighted: false }]);
+      setAvailableFilters([{ name: 'Aktuell', is_highlighted: false }, { name: 'Schwarzes Brett', is_highlighted: true }]);
       setSelectedFilter('Aktuell');
     } finally {
       setIsLoading(false);
@@ -134,47 +123,32 @@ const HomeScreen = ({ navigation }) => {
   };
 
   const fetchFilters = async () => {
-    // Added check: Don't fetch if offline
     if (isOfflineMode) return;
 
     setIsLoadingFilters(true);
     try {
       const { data, error } = await supabase
         .from('article_filters')
-        .select('name, is_highlighted') // Select new flag
+        .select('name, is_highlighted')
         .order('display_order', { ascending: true });
 
       if (error) {
         console.error('Error fetching filters:', error);
-        // Keep default 'Aktuell' if fetch fails
-        setAvailableFilters([{ name: 'Aktuell', is_highlighted: false }]); // Keep default
+        setAvailableFilters([{ name: 'Aktuell', is_highlighted: false }, { name: 'Schwarzes Brett', is_highlighted: true }]);
       } else {
-        // Map to the required structure
-        let fetchedFilters = data.map(f => ({ 
-          name: f.name, 
-          is_highlighted: f.is_highlighted || false // Ensure boolean
-        }));
-        
-        // Ensure 'Aktuell' is present and at the beginning
-        const aktuellExists = fetchedFilters.some(f => f.name === 'Aktuell');
-        if (aktuellExists) {
-          // Remove it from its current position
-          fetchedFilters = fetchedFilters.filter(f => f.name !== 'Aktuell');
-        }
-        // Add 'Aktuell' object to the start
-        fetchedFilters.unshift({ name: 'Aktuell', is_highlighted: false });
-
-        setAvailableFilters(fetchedFilters);
-        
-        // Check if the current selectedFilter (string) exists in the new array of objects
-        const currentFilterExists = fetchedFilters.some(f => f.name === selectedFilter);
-        if (!currentFilterExists) {
-          setSelectedFilter('Aktuell'); // Default back to 'Aktuell' string
-        }
+        // Map and remove any existing 'Aktuell' and 'Schwarzes Brett'
+        let fetched = data.map(f => ({ name: f.name, is_highlighted: f.is_highlighted || false }));
+        fetched = fetched.filter(f => f.name !== 'Aktuell' && f.name !== 'Schwarzes Brett');
+        // Prepend 'Aktuell' and then 'Schwarzes Brett'
+        fetched.unshift({ name: 'Schwarzes Brett', is_highlighted: true });
+        fetched.unshift({ name: 'Aktuell', is_highlighted: false });
+        setAvailableFilters(fetched);
+        if (!fetched.some(f => f.name === selectedFilter)) setSelectedFilter('Aktuell');
       }
     } catch (err) {
       console.error('Unexpected error fetching filters:', err);
-      setAvailableFilters([{ name: 'Aktuell', is_highlighted: false }]); // Fallback
+      setAvailableFilters([{ name: 'Aktuell', is_highlighted: false }, { name: 'Schwarzes Brett', is_highlighted: true }]);
+      setSelectedFilter('Aktuell');
     } finally {
       setIsLoadingFilters(false);
     }
@@ -238,16 +212,16 @@ const HomeScreen = ({ navigation }) => {
   // Filter articles based on the selected filter
   const applyFilter = useCallback((filter) => {
     if (!articles.length) {
-        setFilteredArticles([]); // Ensure it's empty if no articles
+        setFilteredArticles([]);
         return;
     }
 
     let sortedArticles = [];
     if (filter === 'Aktuell') {
-      // Show all articles sorted by date (newest first)
-      sortedArticles = [...articles].sort((a, b) => 
-        new Date(b.published_at) - new Date(a.published_at)
-      );
+      // Show all articles except 'Schwarzes Brett', sorted by date
+      sortedArticles = articles
+        .filter(article => article.type !== 'Schwarzes Brett')
+        .sort((a, b) => new Date(b.published_at) - new Date(a.published_at));
     } else {
       // Filter by the selected type, separating pinned articles
       const relevantArticles = articles.filter(article => article.type === filter);
@@ -286,34 +260,46 @@ const HomeScreen = ({ navigation }) => {
   
   // Open article creation screen (for active organization context)
   const handleCreateArticle = () => {
-    if (isOrganizationActive && user) {
-      navigation.navigate('CreateArticle', { 
-        organizationId: activeOrganizationId // Pass the active org ID
-      }); 
+    if (!user) {
+      Alert.alert(
+        'Permanenter Account erforderlich',
+        'Bitte erstelle einen permanenten Account, um einen Artikel zu verfassen.'
+      );
+      return;
     }
+    navigation.navigate('CreateArticle', { filter: selectedFilter });
   };
 
   // Helper function to format article data (extracted from fetchArticles)
   const formatArticles = (rawData) => {
+    // Ensure rawData is an array
+    if (!Array.isArray(rawData)) {
+        console.warn('[HomeScreen formatArticles] Received non-array data:', rawData);
+        return [];
+    }
     return rawData.map(article => {
-        const publishDate = new Date(article.published_at);
+        // Use default values or optional chaining for safety
+        const publishDate = article?.published_at ? new Date(article.published_at) : new Date(); // Default to now if missing
         const formattedDate = `${publishDate.getDate().toString().padStart(2, '0')}.${(publishDate.getMonth() + 1).toString().padStart(2, '0')}.${publishDate.getFullYear()}`;
-        const plainTextContent = article.content.replace(/<[^>]*>/g, '');
+        
+        const contentString = article?.content ?? ''; // Default to empty string if null/undefined
+        const plainTextContent = contentString.replace(/<[^>]*>/g, '');
         const truncatedContent = plainTextContent.length > 100
             ? plainTextContent.substring(0, 100) + '...'
             : plainTextContent;
+            
         return {
-            id: article.id,
-            title: article.title,
-            content: truncatedContent,
-            type: article.type,
-            published_at: article.published_at,
+            id: article?.id ?? Math.random().toString(), // Use a random fallback ID if necessary
+            title: article?.title ?? 'Unbenannter Artikel', // Default title
+            content: truncatedContent, // Already defaulted via contentString
+            type: article?.type ?? 'Unbekannt', // Default type
+            published_at: article?.published_at ?? publishDate.toISOString(), // Use ISO string if needed
             date: formattedDate,
-            author_id: article.author_id,
-            author_name: article.author_name,
-            is_organization_post: article.is_organization_post,
-            image_url: article.image_url,
-            preview_image_url: article.preview_image_url
+            author_id: article?.author_id ?? null,
+            author_name: article?.author_name ?? 'Unbekannter Autor', // Default author name
+            is_organization_post: article?.is_organization_post ?? false,
+            image_url: article?.image_url ?? null, // Keep null if not present
+            preview_image_url: article?.preview_image_url ?? null // Keep null if not present
         };
     });
   };
@@ -373,11 +359,12 @@ const HomeScreen = ({ navigation }) => {
                   <Text 
                     style={article.is_organization_post ? styles.organizationAuthor : (article.author_name === 'Redaktion' ? styles.redaktionAuthor : styles.articleAuthor)}
                   >
-                    {article.author_name}
+                    {/* Default author name if somehow still null/undefined */}
+                    {article.author_name ?? 'Unbekannter Autor'}
                   </Text>
                 </View>
-                <Text style={styles.articleTitle}>{article.title}</Text>
-                {/* Show image if available */}
+                <Text style={styles.articleTitle}>{article.title ?? 'Unbenannter Artikel'}</Text>
+                {/* Show image if available - check is already safe */}
                 {article.preview_image_url && (
                   <Image 
                     source={{ uri: article.preview_image_url }} 
@@ -386,7 +373,8 @@ const HomeScreen = ({ navigation }) => {
                   />
                 )}
                 <Text style={styles.articleContent} numberOfLines={3}>
-                  {article.content}
+                  {/* Default content if somehow still null/undefined */}
+                  {article.content ?? ''} 
                 </Text>
               </TouchableOpacity>
             ))
@@ -395,8 +383,8 @@ const HomeScreen = ({ navigation }) => {
         </ScrollView>
       )}
       
-      {/* Show Add button only if an organization context is active, user logged in, AND online */}
-      {isOrganizationActive && user && !isOfflineMode && (
+      {/* Show Add button when 'Schwarzes Brett' filter is selected */}
+      {selectedFilter === 'Schwarzes Brett' && (
         <TouchableOpacity 
           style={styles.addButton}
           onPress={handleCreateArticle}

@@ -184,8 +184,8 @@ const MapScreen = ({ navigation }) => {
           initialRegion={initialRegion}
         >
           {filteredPois.map(poi => {
-            // Check if the current user can delete this POI
-            const canDelete = user && poi.organization_id === activeOrganizationId;
+            // Check if the current user can delete this POI only in organization context
+            const canDelete = user && isOrganizationActive && poi.organization_id === activeOrganizationId;
             return (
               <Marker
                 key={poi.id}
@@ -193,9 +193,9 @@ const MapScreen = ({ navigation }) => {
                   latitude: Number(poi.latitude),
                   longitude: Number(poi.longitude)
                 }}
+                pinColor="red" // All pins red
                 title={poi.title}
                 description={poi.description}
-                pinColor={poi.organization_id ? 'blue' : 'red'} // Example: Blue for org, Red for public
               >
                 <Callout tooltip onPress={() => {
                   // Prevent default Callout behavior if delete button exists

@@ -15,7 +15,8 @@ import {
   ActionSheetIOS,
   Dimensions,
   Image,
-  useWindowDimensions
+  useWindowDimensions,
+  Linking
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
@@ -684,6 +685,21 @@ const ArticleDetailScreen = ({ route, navigation }) => {
                 contentWidth={width - 30}
                 source={{ html: article?.content || '' }}
                 tagsStyles={htmlStyles}
+                renderersProps={{
+                  a: {
+                    onPress: (_evt, href) => {
+                      if (!href) return;
+                      if (href.startsWith('meinhavelaue://')) {
+                        // Deep-link pattern: meinhavelaue://events/<uuid>
+                        const parts = href.split('/');
+                        const eventId = parts[parts.length - 1];
+                        navigation.navigate('EventDetail', { eventId });
+                      } else {
+                        Linking.openURL(href);
+                      }
+                    }
+                  }
+                }}
              />
           ) : (
               <View style={styles.offlineContentWarning}>
