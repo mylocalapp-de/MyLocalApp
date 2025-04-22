@@ -28,7 +28,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 const { height } = Dimensions.get('window');
 const androidPaddingTop = height * 0.03; // 3% of screen height for better scaling
 
-const CreateArticleScreen = ({ navigation }) => {
+const CreateArticleScreen = ({ navigation, route }) => {
+  const personalFilter = route.params?.filter;
   const { user } = useAuth();
   const { activeOrganizationId } = useOrganization();
   
@@ -36,6 +37,7 @@ const CreateArticleScreen = ({ navigation }) => {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [type, setType] = useState('');
+  const isPersonal = !activeOrganizationId && !!personalFilter;
   const [isPublishing, setIsPublishing] = useState(false);
   const [imageAsset, setImageAsset] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -48,6 +50,13 @@ const CreateArticleScreen = ({ navigation }) => {
   useEffect(() => {
     fetchArticleTypes();
   }, []);
+
+  // Preselect filter for personal context
+  useEffect(() => {
+    if (isPersonal) {
+      setType(personalFilter);
+    }
+  }, [isPersonal, personalFilter]);
 
   const fetchArticleTypes = async () => {
     setLoadingTypes(true);
@@ -289,6 +298,9 @@ const CreateArticleScreen = ({ navigation }) => {
   
   // Render type selection buttons
   const renderTypeButtons = () => {
+    if (isPersonal) {
+      return <Text style={styles.inputLabel}>{personalFilter}</Text>;
+    }
     if (loadingTypes) {
       return <ActivityIndicator size="small" color="#4285F4" style={styles.loadingIndicator}/>;
     }

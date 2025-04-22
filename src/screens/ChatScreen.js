@@ -10,7 +10,7 @@ import { supabase } from '../lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const ChatScreen = ({ navigation, route }) => {
-  const { isOrganizationActive, activeOrganizationId } = useOrganization();
+  const { isOrganizationActive, activeOrganizationId, activeOrganization } = useOrganization();
   const { user, displayName } = useAuth();
   const { isOfflineMode, isConnected } = useNetwork();
 
@@ -425,6 +425,52 @@ const ChatScreen = ({ navigation, route }) => {
       {/* Dorfbot always at the top */}
       {renderDorfbotItem()}
       
+      {/* Direct Messages Entry - Conditional */}
+      {isOrganizationActive ? (
+        // Show Org DM entry when Org Context is active
+        <TouchableOpacity
+          style={styles.chatItem}
+          onPress={() => navigation.navigate('DirectMessages')}
+        >
+          <View style={[styles.avatarPlaceholder, styles.orgDmAvatar]}> 
+            <Ionicons name="mail-outline" size={24} color="#fff" />
+          </View>
+          <View style={styles.chatInfo}>
+            <View style={styles.chatTopLine}>
+              {/* Use activeOrganization from context if available */}
+              <Text style={styles.chatName}>Nachrichten an {activeOrganization?.name || 'Organisation'}</Text>
+              <Text style={styles.chatTime}></Text> 
+            </View>
+            <View style={styles.chatBottomLine}>
+              <Text style={styles.chatMessage} numberOfLines={1}>
+                Direktnachrichten an diese Organisation sehen.
+              </Text>
+            </View>
+          </View>
+        </TouchableOpacity>
+      ) : (
+        // Show User DM entry when Personal Context is active
+        <TouchableOpacity
+          style={styles.chatItem}
+          onPress={() => navigation.navigate('DirectMessages')}
+        >
+          <View style={[styles.avatarPlaceholder, styles.dmAvatar]}>
+            <Text style={styles.avatarLetter}>DM</Text>
+          </View>
+          <View style={styles.chatInfo}>
+            <View style={styles.chatTopLine}>
+              <Text style={styles.chatName}>Direktnachrichten schreiben</Text>
+              <Text style={styles.chatTime}></Text> 
+            </View>
+            <View style={styles.chatBottomLine}>
+              <Text style={styles.chatMessage} numberOfLines={1}>
+                Hier kannst du Direktnachrichten schreiben.
+              </Text>
+            </View>
+          </View>
+        </TouchableOpacity>
+      )}
+
       {/* Divider */}
       <View style={styles.divider} />
       
@@ -489,6 +535,9 @@ const styles = StyleSheet.create({
   },
   botAvatar: {
     backgroundColor: '#34A853',
+  },
+  dmAvatar: {
+    backgroundColor: '#EA4335', // Example: Use a different color for DMs
   },
   avatarLetter: {
     color: '#fff',
@@ -603,6 +652,9 @@ const styles = StyleSheet.create({
   },
   pinIcon: {
     marginRight: 5,
+  },
+  orgDmAvatar: {
+    backgroundColor: '#EA4335', // Example: Use a different color for Org DMs
   },
 });
 

@@ -6,6 +6,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useNetwork } from '../context/NetworkContext';
+import { supabase } from '../lib/supabase';
 
 const { height } = Dimensions.get('window');
 const androidPaddingTop = height * 0.05; // 3% of screen height for Android
@@ -58,7 +59,8 @@ const ProfileScreen = () => {
     updatePassword,
     loadUserProfile, // Add this to use the reload function
     loading: authLoading, // Auth context loading state
-    updateOrganizationName // <-- Add this function (comes from AuthContext)
+    updateOrganizationName, // <-- Add this function (comes from AuthContext)
+    deleteCurrentUserAccount // <-- Add this function (needs to be added to AuthContext)
   } = useAuth();
   
   // State for account creation modal
@@ -128,19 +130,33 @@ const ProfileScreen = () => {
   
   // Helper function to reload members
   const reloadMembers = useCallback(async () => {
-    if (isOrganizationActive && activeOrganizationId) {
+    // Ensure user is logged in and org context is active
+    if (user && isOrganizationActive && activeOrganizationId) {
       setIsFetchingMembers(true);
       setOrgMgmtError('');
-      const result = await fetchOrganizationMembers(activeOrganizationId);
-      if (result.success) {
-        setOrganizationMembers(result.data || []);
-      } else {
-        setOrgMgmtError(result.error?.message || 'Mitglieder konnten nicht geladen werden.');
-        setOrganizationMembers([]);
+      console.log(`[ProfileScreen] Calling RPC get_organization_members_with_names for org: ${activeOrganizationId}`);
+      try {
+        const { data, error: rpcError } = await supabase.rpc('get_organization_members_with_names', {
+          p_organization_id: activeOrganizationId
+        });
+
+        if (rpcError) {
+          console.error("[ProfileScreen] Error calling RPC:", rpcError);
+          setOrgMgmtError(rpcError.message || 'Mitglieder konnten nicht geladen werden.');
+          setOrganizationMembers([]);
+        } else {
+          console.log("[ProfileScreen] Members received from RPC:", data);
+          // The RPC already returns the needed format {user_id, role, display_name}
+          setOrganizationMembers(data || []);
+        }
+      } catch (err) {
+         console.error("[ProfileScreen] Unexpected error fetching members via RPC:", err);
+         setOrgMgmtError('Ein unerwarteter Fehler ist aufgetreten.');
+         setOrganizationMembers([]);
       }
       setIsFetchingMembers(false);
     }
-  }, [isOrganizationActive, activeOrganizationId, fetchOrganizationMembers]);
+  }, [user, isOrganizationActive, activeOrganizationId]); // Removed fetchOrganizationMembers from dependency
 
   // Fetch organization members when context becomes active (use the helper)
   useEffect(() => {
@@ -660,6 +676,62 @@ const ProfileScreen = () => {
     }
   };
 
+  // --- NEW: Handle Account Deletion --- 
+  const handleDeleteAccount = async () => {
+    if (!hasFullAccount) return; // Should not happen, but safety check
+
+    // Check if user is admin in any organization
+    const isAdminAnywhere = userOrganizations?.some(org => org.role === 'admin');
+
+    if (isAdminAnywhere) {
+      Alert.alert(
+        "Fehler",
+        "Du kannst deinen Account nicht löschen, solange du Administrator in einer Organisation bist. Bitte übertrage zuerst die Admin-Rechte in allen betroffenen Organisationen.",
+        [{ text: "OK" }]
+      );
+      return;
+    }
+
+    // Confirmation Alert
+    Alert.alert(
+      "Account löschen",
+      "Warnung: Möchtest du deinen Account wirklich endgültig löschen? Alle deine Daten (Profil, Kommentare, Reaktionen usw.) werden unwiderruflich entfernt. Diese Aktion kann nicht rückgängig gemacht werden.",
+      [
+        { text: "Abbrechen", style: "cancel" },
+        {
+          text: "Endgültig löschen",
+          style: "destructive",
+          onPress: async () => {
+            setIsAccountSettingsLoading(true); // Reuse loading state for visual feedback
+            try {
+              // Call the new function from AuthContext
+              // This function should call the `delete_user_account` RPC
+              // and then call signOut().
+              const result = await deleteCurrentUserAccount(); 
+
+              if (!result.success) {
+                  // Handle specific error for admin check (though UI should catch it)
+                  if (result.error?.message?.includes('User is an admin')) {
+                      Alert.alert("Fehler", "Du musst zuerst die Admin-Rechte übertragen.");
+                  } else {
+                      Alert.alert("Fehler", `Account konnte nicht gelöscht werden: ${result.error?.message || 'Unbekannter Fehler'}`);
+                  }
+                  setIsAccountSettingsLoading(false);
+              }
+              // On success, signOut within deleteCurrentUserAccount should trigger navigation
+              // No need to set loading false here if sign out navigates away.
+
+            } catch (error) {
+              console.error("Error during account deletion process:", error);
+              Alert.alert("Fehler", "Ein unerwarteter Fehler ist beim Löschen des Accounts aufgetreten.");
+              setIsAccountSettingsLoading(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   // --- Render Functions --- 
 
   const renderHeader = () => {
@@ -802,7 +874,7 @@ const ProfileScreen = () => {
               {organizationMembers.map(item => (
                   <View key={item.user_id} style={styles.memberItem}>
                       <View style={styles.memberInfo}>
-                        <Text style={styles.memberName}>{item.profiles?.display_name || 'Unbekannter Benutzer'}{item.user_id === currentUserId ? ' (Du)' : ''}</Text>
+                        <Text style={styles.memberName}>{item.display_name || 'Unbekannter Benutzer'}{item.user_id === currentUserId ? ' (Du)' : ''}</Text>
                         <Text style={styles.memberRole}>{item.role === 'admin' ? 'Admin' : 'Mitglied'}</Text>
                       </View>
                       {/* Admin actions - Show only if current user is admin AND the item is NOT the current user */}
@@ -810,14 +882,14 @@ const ProfileScreen = () => {
                         <View style={styles.memberActions}>
                           <TouchableOpacity 
                             style={[styles.memberActionButton, styles.removeButton]} 
-                            onPress={() => handleRemoveMember(item.user_id, item.profiles?.display_name)}
+                            onPress={() => handleRemoveMember(item.user_id, item.display_name)}
                             disabled={memberManagementLoading}
                           >
                             <Text style={styles.memberActionButtonTextRemove}>Entfernen</Text>
                           </TouchableOpacity>
                           <TouchableOpacity 
                             style={[styles.memberActionButton, styles.makeAdminButton]} 
-                            onPress={() => handleMakeAdmin(item.user_id, item.profiles?.display_name)}
+                            onPress={() => handleMakeAdmin(item.user_id, item.display_name)}
                             disabled={memberManagementLoading}
                           >
                             <Text style={styles.memberActionButtonTextAdmin}>Admin ernennen</Text>
@@ -1370,19 +1442,34 @@ const ProfileScreen = () => {
          </>
       )}
 
-      {/* Sign Out Button - *** MODIFIED: Always show *** */}
-      <View style={styles.signOutContainer}>
-        <TouchableOpacity
-          style={[styles.button, styles.signOutButton]}
-          onPress={handleSignOut}
-        >
-          <Ionicons name="log-out-outline" size={22} style={[styles.settingIcon, styles.signOutIcon]} />
-          {/* Change text based on whether user is logged in or local */}
-          <Text style={[styles.settingText, styles.signOutText]}>
-            {hasFullAccount ? 'Abmelden' : 'App Zurücksetzen'}
-          </Text>
-        </TouchableOpacity>
-      </View>
+      {/* Sign Out Button - Always shown for personal context */} 
+      {!isOrganizationActive && (
+        <View style={styles.buttonContainer}>
+          <TouchableOpacity
+            style={[styles.button, styles.signOutButton]}
+            onPress={handleSignOut}
+            disabled={isAccountSettingsLoading} // Disable if delete is in progress
+          >
+            <Ionicons name="log-out-outline" size={22} style={[styles.settingIcon, styles.signOutIcon]} />
+            <Text style={[styles.settingText, styles.signOutText]}>
+              {hasFullAccount ? 'Abmelden' : 'App Zurücksetzen'}
+            </Text>
+          </TouchableOpacity>
+
+          {/* --- NEW: Delete Account Button --- */}
+          {/* Show only for full accounts in personal context */} 
+          {hasFullAccount && (
+              <TouchableOpacity
+                  style={[styles.button, styles.deleteButton]} // New style needed
+                  onPress={handleDeleteAccount}
+                  disabled={isAccountSettingsLoading} // Disable during sign out/delete
+              >
+                  <Ionicons name="trash-outline" size={22} style={[styles.settingIcon, styles.deleteIcon]} />
+                  <Text style={[styles.settingText, styles.deleteButtonText]}>Account löschen</Text>
+              </TouchableOpacity>
+          )}
+        </View>
+      )}
 
       {/* Modals */}
       {renderCreateAccountModal()}
@@ -1546,11 +1633,11 @@ const styles = StyleSheet.create({
   signOutButton: {
     backgroundColor: '#fff', // Changed background
     borderWidth: 1,
-    borderColor: '#ddd', 
+    borderColor: '#ddd',
   },
-  signOutContainer: {
-     marginTop: 30, 
-     paddingHorizontal: 15,
+  buttonContainer: { // Container for Sign Out and Delete buttons
+      marginTop: 30,
+      paddingHorizontal: 15,
   },
   signOutText: {
     color: '#dc3545', // Red color for sign out
@@ -1559,6 +1646,20 @@ const styles = StyleSheet.create({
   signOutIcon: {
       color: '#dc3545',
   },
+  // --- NEW Styles for Delete Button ---
+  deleteButton: {
+    backgroundColor: '#fff', // Same background as sign out
+    borderWidth: 1,
+    borderColor: '#cc0000', // More prominent red border
+  },
+  deleteButtonText: {
+    color: '#cc0000', // Darker red text
+    fontWeight: '600',
+  },
+  deleteIcon: {
+      color: '#cc0000', // Darker red icon
+  },
+  // -------------------------------------
   preferencesContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',

@@ -46,6 +46,9 @@ module.exports = {
     // Add environment variables here
     supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL,
     supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
+    // Add RevenueCat keys
+    revenueCatApiKeyAndroid: process.env.REVENUECAT_API_KEY_ANDROID,
+    revenueCatApiKeyIos: process.env.REVENUECAT_API_KEY_IOS,
     eas: {
       projectId: "3adb5b7e-7622-44f3-9375-5f23371e77b7"
     }

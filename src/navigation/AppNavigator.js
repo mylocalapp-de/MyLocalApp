@@ -24,6 +24,9 @@ import CreateEventScreen from '../screens/CreateEventScreen';
 import EditEventScreen from '../screens/EditEventScreen';
 import OrganizationSetupScreen from '../screens/OrganizationSetupScreen';
 import CreatePoiScreen from '../screens/CreatePoiScreen';
+import DirectMessagesScreen from '../screens/DirectMessagesScreen';
+import NewDirectMessageScreen from '../screens/NewDirectMessageScreen';
+import DirectMessageDetailScreen from '../screens/DirectMessageDetailScreen';
 
 const Tab = createBottomTabNavigator();
 const ChatStack = createStackNavigator();
@@ -43,6 +46,9 @@ const ChatStackNavigator = () => {
       <ChatStack.Screen name="ChatDetail" component={ChatDetailScreen} />
       <ChatStack.Screen name="Dorfbot" component={DorfbotScreen} />
       <ChatStack.Screen name="CreateBroadcastGroup" component={CreateBroadcastGroupScreen} />
+      <ChatStack.Screen name="DirectMessages" component={DirectMessagesScreen} />
+      <ChatStack.Screen name="NewDirectMessage" component={NewDirectMessageScreen} />
+      <ChatStack.Screen name="DirectMessageDetail" component={DirectMessageDetailScreen} />
     </ChatStack.Navigator>
   );
 };

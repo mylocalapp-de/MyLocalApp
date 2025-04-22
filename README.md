@@ -35,11 +35,13 @@ A mobile application designed to strengthen community spirit in rural villages b
   - Profile editing with display name and preferences
   - Email and password change functionality
   - Secure sign-out with onboarding reset option
+  - Secure account deletion (checks for organization admin status)
 - **Data Persistence:**
   - AsyncStorage for local account data
   - Supabase for permanent account storage
   - Automatic preference sync across devices
-  - Local users can modify their display name and preferences directly in the Profile tab.
+  - Local users can modify display name and preferences directly in the Profile tab.
+  - Option for logged-in users to delete their account (requires transferring admin rights first)
 - **Organization Mode:** Separate functionality for organizations to create content
 
 ## Technology Stack
@@ -97,7 +99,8 @@ The application requires the following tables in your Supabase database:
 1. User profiles table (automatically created by Supabase Auth)
 2. Article preferences relationship
 
-Initialize your Supabase database with the SQL query provided in the `supabase/init.sql` file.
+Initialize your Supabase database with the SQL script provided in `supabase/init_new.sql`.
+This script sets up all necessary tables, views, functions (including `delete_user_account`), and RLS policies.
 
 ## Project Structure
 
@@ -106,8 +109,13 @@ Initialize your Supabase database with the SQL query provided in the `supabase/i
   /components       - Reusable components
   /context          - Context providers for state management
     /AuthContext.js - Authentication state management
+    /OrganizationContext.js - Active organization state
+    /NetworkContext.js - Offline status management
   /screens          - Main screen components
     /WelcomeScreen.js - Onboarding and preferences selection
+    /DirectMessagesScreen.js - List of direct messages (user & org)
+    /NewDirectMessageScreen.js - Screen to start new DMs
+    /DirectMessageDetailScreen.js - Screen showing a single DM conversation
   /navigation       - Navigation configurations
   /theme            - Styling constants
   /assets           - Images and assets

@@ -248,7 +248,7 @@ const WelcomeScreen = ({ navigation }) => {
 
       <View style={styles.contentContainer}>
         <Image
-          source={require('../../assets/icon.png')}
+          source={require('../../assets/splash.png')}
           style={styles.logo}
           resizeMode="contain"
         />
