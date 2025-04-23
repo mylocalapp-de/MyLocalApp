@@ -5,6 +5,10 @@
 -- Dumped from database version 15.8
 -- Dumped by pg_dump version 15.8
 
+-- <<< ADDED: Drop the old, redundant function >>>
+DROP FUNCTION IF EXISTS public.find_or_create_dm_conversation(uuid);
+-- <<< END ADDED >>>
+
 SET statement_timeout = 0;
 SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;
@@ -1047,9 +1051,16 @@ CREATE FUNCTION public.find_or_create_org_dm_conversation(p_organization_id uuid
     LANGUAGE plpgsql SECURITY DEFINER
     AS $$
 DECLARE
+  current_user_id       uuid := auth.uid(); -- Get the caller's ID
   existing_conversation   uuid;
   new_conversation        uuid;
 BEGIN
+  -- Check if the caller is actually a user
+  IF current_user_id IS NULL THEN
+     RAISE EXCEPTION 'User must be authenticated to initiate an Org DM.';
+  END IF;
+
+  -- Find existing conversation
   SELECT c.id
   INTO   existing_conversation
   FROM   public.dm_conversations c
@@ -1061,9 +1072,10 @@ BEGIN
     RETURN existing_conversation;
   END IF;
 
+  -- Create new conversation and store the initiator
   INSERT INTO public.dm_conversations
-         (created_at, last_message_at, is_org_conversation, organization_id)
-  VALUES (now(),      now(),          true,                p_organization_id)
+         (created_at, last_message_at, is_org_conversation, organization_id, initiator_user_id) -- Added initiator
+  VALUES (now(),      now(),          true,                p_organization_id, current_user_id)  -- Store caller's ID
   RETURNING id INTO new_conversation;
 
   RETURN new_conversation;
@@ -1077,7 +1089,7 @@ ALTER FUNCTION public.find_or_create_org_dm_conversation(p_organization_id uuid)
 -- Name: FUNCTION find_or_create_org_dm_conversation(p_organization_id uuid); Type: COMMENT; Schema: public; Owner: supabase_admin
 --
 
-COMMENT ON FUNCTION public.find_or_create_org_dm_conversation(p_organization_id uuid) IS 'Finds an existing ORG DM conversation for the given organization or creates a new one. Returns the conversation ID.';
+COMMENT ON FUNCTION public.find_or_create_org_dm_conversation(p_organization_id uuid) IS 'Finds an existing ORG DM conversation for the given organization or creates a new one, storing the initiator. Returns the conversation ID.';
 
 
 --
@@ -1113,8 +1125,8 @@ BEGIN
   END IF;
 
   INSERT INTO public.dm_conversations
-         (created_at, last_message_at, is_org_conversation, organization_id)
-  VALUES (now(),      now(),          false,               NULL)
+         (created_at, last_message_at, is_org_conversation, organization_id, initiator_user_id) -- Added initiator
+  VALUES (now(),      now(),          false,               NULL,              current_user_id) -- Store caller's ID
   RETURNING id INTO new_conversation;
 
   INSERT INTO public.dm_participants (conversation_id, user_id)
@@ -1132,7 +1144,7 @@ ALTER FUNCTION public.find_or_create_user_dm_conversation(p_other_user_id uuid) 
 -- Name: FUNCTION find_or_create_user_dm_conversation(p_other_user_id uuid); Type: COMMENT; Schema: public; Owner: supabase_admin
 --
 
-COMMENT ON FUNCTION public.find_or_create_user_dm_conversation(p_other_user_id uuid) IS 'Finds an existing USER-DM or creates a new one. Returns the conversation ID.';
+COMMENT ON FUNCTION public.find_or_create_user_dm_conversation(p_other_user_id uuid) IS 'Finds an existing USER-DM or creates a new one, storing the initiator. Returns the conversation ID.';
 
 
 --
@@ -3911,6 +3923,7 @@ CREATE TABLE public.dm_conversations (
     last_message_at timestamp with time zone DEFAULT now(),
     is_org_conversation boolean DEFAULT false NOT NULL,
     organization_id uuid,
+    initiator_user_id uuid NULL REFERENCES public.profiles(id) ON DELETE SET NULL, -- <<< ADDED
     CONSTRAINT org_conversation_link CHECK ((((is_org_conversation = true) AND (organization_id IS NOT NULL)) OR ((is_org_conversation = false) AND (organization_id IS NULL))))
 );
 
@@ -3944,6 +3957,11 @@ COMMENT ON COLUMN public.dm_conversations.is_org_conversation IS 'True if this i
 
 COMMENT ON COLUMN public.dm_conversations.organization_id IS 'The organization ID if is_org_conversation is true.';
 
+--
+-- Name: COLUMN dm_conversations.initiator_user_id; Type: COMMENT; Schema: public; Owner: supabase_admin
+--
+
+COMMENT ON COLUMN public.dm_conversations.initiator_user_id IS 'The user who initiated this conversation (relevant for Org DMs started by users).'; -- <<< ADDED
 
 --
 -- Name: CONSTRAINT org_conversation_link ON dm_conversations; Type: COMMENT; Schema: public; Owner: supabase_admin
@@ -3976,7 +3994,9 @@ COMMENT ON TABLE public.dm_participants IS 'Links users to their direct message 
 --
 
 DROP VIEW IF EXISTS public.dm_conversation_list;
-CREATE VIEW public.dm_conversation_list AS
+CREATE OR REPLACE VIEW public.dm_conversation_list
+WITH (security_invoker=false) -- <<< ADDED THIS LINE
+AS
  WITH latestmessages AS (
          SELECT dm.conversation_id,
             dm.sender_id,
@@ -3985,19 +4005,13 @@ CREATE VIEW public.dm_conversation_list AS
             dm.created_at,
             row_number() OVER (PARTITION BY dm.conversation_id ORDER BY dm.created_at DESC) AS rn
            FROM public.direct_messages dm
-        ),
-    firstmessages AS (
-        SELECT dm.conversation_id,
-               dm.sender_id AS initiator_id,
-               row_number() OVER (PARTITION BY dm.conversation_id ORDER BY dm.created_at ASC) AS rn
-          FROM public.direct_messages dm
         )
  SELECT c.id AS conversation_id,
     c.is_org_conversation,
     c.organization_id,
     p_other.user_id AS other_user_id,
     prof_other.display_name AS target_name,
-    fm.initiator_id, -- Added initiator ID
+    c.initiator_user_id AS initiator_id, -- Use the direct column
     lm.text AS last_message_text,
     lm.image_url AS last_message_image_url,
     lm.created_at AS last_message_created_at,
@@ -4015,7 +4029,6 @@ CREATE VIEW public.dm_conversation_list AS
      JOIN public.profiles prof_other ON ((p_other.user_id = prof_other.id)))
      LEFT JOIN latestmessages lm ON (((c.id = lm.conversation_id) AND (lm.rn = 1))))
      LEFT JOIN public.profiles prof_sender ON ((lm.sender_id = prof_sender.id)))
-    LEFT JOIN firstmessages fm ON (((c.id = fm.conversation_id) AND (fm.rn = 1)))
   WHERE (NOT c.is_org_conversation)
 UNION ALL
  SELECT c.id AS conversation_id,
@@ -4023,7 +4036,7 @@ UNION ALL
     c.organization_id,
     NULL::uuid AS other_user_id,
     org.name AS target_name,
-    fm.initiator_id, -- Added initiator ID
+    c.initiator_user_id AS initiator_id, -- Use the direct column
     lm.text AS last_message_text,
     lm.image_url AS last_message_image_url,
     lm.created_at AS last_message_created_at,
@@ -4038,7 +4051,6 @@ UNION ALL
      JOIN public.organizations org ON ((c.organization_id = org.id)))
      LEFT JOIN latestmessages lm ON (((c.id = lm.conversation_id) AND (lm.rn = 1))))
      LEFT JOIN public.profiles prof_sender ON ((lm.sender_id = prof_sender.id)))
-    LEFT JOIN firstmessages fm ON (((c.id = fm.conversation_id) AND (fm.rn = 1)))
   WHERE c.is_org_conversation;
 
 
@@ -4048,7 +4060,11 @@ ALTER TABLE public.dm_conversation_list OWNER TO supabase_admin;
 -- Name: VIEW dm_conversation_list; Type: COMMENT; Schema: public; Owner: supabase_admin
 --
 
-COMMENT ON VIEW public.dm_conversation_list IS 'Lists active DM conversations (user-to-user and user-to-org) for the logged-in user, including target name, initiator, and last message details.';
+COMMENT ON VIEW public.dm_conversation_list IS 'Lists active DM conversations (user-to-user and user-to-org) for the logged-in user, including target name, initiator (from dm_conversations table), and last message details. Uses security_invoker=false.'; -- <<< UPDATED COMMENT
+
+-- Grant necessary permissions on the view again (might be needed after recreation)
+GRANT SELECT ON public.dm_conversation_list TO authenticated;
+GRANT SELECT ON public.dm_conversation_list TO service_role;
 
 
 --

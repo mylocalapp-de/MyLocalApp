@@ -28,6 +28,14 @@ import { RRule, RRuleSet, rrulestr } from 'rrule';
 const { height } = Dimensions.get('window');
 const androidPaddingTop = height * 0.05; // 3% of screen height for better scaling
 
+// Helper function to transform Supabase Storage URLs
+const getTransformedImageUrl = (originalUrl, width = 800, quality = 75) => {
+  if (!originalUrl || !originalUrl.includes('/storage/v1/object/public/')) {
+    return originalUrl;
+  }
+  return `${originalUrl.replace('/object/public/', '/render/image/public/')}?width=${width}&quality=${quality}`;
+};
+
 // German translations for rrule.toText()
 const germanRuleTranslator = (key, index) => {
     //console.log(`[germanRuleTranslator] Attempting key: "${key}", index: ${index}`);
@@ -888,13 +896,24 @@ const EventDetailScreen = ({ route, navigation }) => {
              {/* Organizer Item */}
              <View style={styles.eventMetaItem}>
                  <Ionicons name="person-outline" size={16} color="#666" />
-                 <Text
-                   style={[styles.eventMetaText, event.organization_id ? styles.organizationOrganizer : styles.eventOrganizer]}
-                   numberOfLines={1}
-                   ellipsizeMode="tail"
-                  >
-                   {organizerName} 
-                 </Text>
+                 {/* Make organizer name clickable if it's an organization */}
+                 <TouchableOpacity
+                   disabled={isOfflineMode || !event?.organization_id} // Disable if offline or not an org event
+                   onPress={() => {
+                     if (event?.organization_id) {
+                       navigation.navigate('OrganizationProfileView', { organizationId: event.organization_id });
+                     }
+                     // Add else if to navigate to UserProfileView for individual organizers if needed later
+                   }}
+                 >
+                   <Text
+                     style={[styles.eventMetaText, event.organization_id ? styles.organizationOrganizer : styles.eventOrganizer]}
+                     numberOfLines={1}
+                     ellipsizeMode="tail"
+                   >
+                     {organizerName} 
+                   </Text>
+                 </TouchableOpacity>
              </View>
           </View>
           
@@ -909,7 +928,7 @@ const EventDetailScreen = ({ route, navigation }) => {
           {/* Display event image if available (access event.image_url safely) */}
           {event.image_url && (
             <Image
-              source={{ uri: event.image_url }}
+              source={{ uri: getTransformedImageUrl(event.image_url) }}
               style={styles.eventImage}
               resizeMode="cover"
             />

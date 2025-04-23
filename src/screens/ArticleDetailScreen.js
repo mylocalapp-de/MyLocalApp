@@ -30,6 +30,14 @@ import RenderHTML from 'react-native-render-html';
 const { height } = Dimensions.get('window');
 const androidPaddingTop = height * 0.05; // 3% of screen height for better scaling
 
+// Helper function to transform Supabase Storage URLs
+const getTransformedImageUrl = (originalUrl) => {
+  if (!originalUrl || !originalUrl.includes('/storage/v1/object/public/')) {
+    return originalUrl;
+  }
+  return originalUrl.replace('/object/public/', '/render/image/public/') + '?width=800&quality=75'; // Use larger width for detail view
+};
+
 const ArticleDetailScreen = ({ route, navigation }) => {
   const { articleId } = route.params;
   const { user, displayName } = useAuth();
@@ -660,7 +668,7 @@ const ArticleDetailScreen = ({ route, navigation }) => {
           {/* Display article image if available */}
           {article?.image_url && (
             <Image 
-              source={{ uri: article.image_url }} 
+              source={{ uri: getTransformedImageUrl(article.image_url) }} 
               style={styles.articleImage}
               resizeMode="cover"
             />
@@ -669,8 +677,15 @@ const ArticleDetailScreen = ({ route, navigation }) => {
           <View style={styles.articleMeta}>
             <Text style={styles.date}>{article?.date || '...'}</Text>
             <TouchableOpacity 
-              disabled={isOfflineMode || article?.is_organization_post || !article?.author_id}
-              onPress={() => !article?.is_organization_post && article?.author_id && navigation.navigate('UserProfileView', { userId: article.author_id })}
+              disabled={isOfflineMode || (!article?.organization_id && !article?.author_id)} 
+              onPress={() => {
+                  if (article?.organization_id) {
+                     navigation.navigate('OrganizationProfileView', { organizationId: article.organization_id });
+                  }
+                  else if (!article?.is_organization_post && article?.author_id) {
+                     navigation.navigate('UserProfileView', { userId: article.author_id });
+                  }
+              }}
             >
               <Text 
                 style={

@@ -119,6 +119,8 @@ const ProfileScreen = () => {
   const [isOrgEditLoading, setIsOrgEditLoading] = useState(false);
   const [orgEditError, setOrgEditError] = useState('');
   const [editAboutMe, setEditAboutMe] = useState(''); // <<< ADD THIS LINE
+  // <<< ADD THIS STATE VARIABLE >>>
+  const [editOrgAboutMe, setEditOrgAboutMe] = useState('');
 
 
   // Derived state: Check if user has a full Supabase account
@@ -356,41 +358,65 @@ const ProfileScreen = () => {
     setEditOrgName(activeOrganization.name || '');
     setOrgEditError('');
     setShowOrgEditModal(true);
+    // <<< ADD THIS LINE >>>
+    setEditOrgAboutMe(activeOrganization.about_me || ''); 
   };
 
   // --- NEW: Save Org Name ---
-  const handleSaveOrgName = async () => {
+  // <<< RENAME this function from handleSaveOrgName to handleSaveOrgDetails >>>
+  const handleSaveOrgDetails = async () => { 
     if (!isOrganizationActive || !activeOrganizationId) return;
-    if (!editOrgName.trim()) {
+    
+    const trimmedName = editOrgName.trim();
+    const trimmedAboutMe = editOrgAboutMe.trim(); // <<< ADD THIS LINE >>>
+
+    if (!trimmedName) { // <<< Use trimmedName >>>
       setOrgEditError('Organisationsname darf nicht leer sein.');
       return;
     }
-    if (editOrgName.trim() === activeOrganization?.name) {
-      setShowOrgEditModal(false); // Nothing changed
-      return;
+
+    // <<< START MODIFIED SECTION >>>
+    const updates = {};
+    let needsUpdate = false;
+
+    if (trimmedName !== activeOrganization?.name) {
+      updates.name = trimmedName;
+      needsUpdate = true;
     }
+    // Check if about_me changed (treat null/undefined as empty string for comparison)
+    if (trimmedAboutMe !== (activeOrganization?.about_me || '')) {
+        updates.about_me = trimmedAboutMe;
+        needsUpdate = true;
+    }
+
+    if (!needsUpdate) {
+        console.log("No organization details changed.");
+        setShowOrgEditModal(false); // Nothing changed
+        return;
+    }
+    // <<< END MODIFIED SECTION >>>
 
     setIsOrgEditLoading(true);
     setOrgEditError('');
 
     try {
-      // Use updateOrganizationName from useOrganization context
-      const result = await updateOrganizationName(activeOrganizationId, editOrgName.trim());
+      // <<< MODIFY: Use updateOrganizationDetails (assuming it exists/handles partial updates) >>>
+      // If updateOrganizationDetails doesn't exist, you'll need to add it to OrganizationContext
+      // or modify updateOrganizationName to accept an object.
+      console.log("Calling updateOrganizationDetails with updates:", updates); 
+      const result = await updateOrganizationDetails(activeOrganizationId, updates); 
+      // <<< END MODIFICATION >>>
+
       if (result.success) {
-        Alert.alert('Erfolg', 'Organisationsname aktualisiert.');
+        Alert.alert('Erfolg', 'Organisationsdetails aktualisiert.');
         setShowOrgEditModal(false);
-        // Active organization name in OrganizationContext will update automatically 
-        // because updateOrganizationName calls loadUserProfileAndOrgs, which updates userOrganizations,
-        // and OrganizationContext has a useEffect listening to userOrganizations to update its state.
-        // A direct update here might cause race conditions.
-        // You *could* potentially update the `activeOrganization` state in *this* component
-        // immediately for faster UI feedback, but it's usually better to rely on the context flow.
+        // Context should update automatically
       } else {
-        console.error("Failed to update org name:", result.error);
-        setOrgEditError(result.error?.message || 'Fehler beim Speichern des Namens.');
+        console.error("Failed to update org details:", result.error);
+        setOrgEditError(result.error?.message || 'Fehler beim Speichern der Details.');
       }
     } catch (error) {
-      console.error('Unexpected error saving org name:', error);
+      console.error('Unexpected error saving org details:', error);
       setOrgEditError('Ein unerwarteter Fehler ist aufgetreten.');
     } finally {
       setIsOrgEditLoading(false);
@@ -1584,6 +1610,18 @@ const ProfileScreen = () => {
             autoCapitalize="words"
           />
 
+          {/* <<< START ADDED SECTION >>> */}
+          <Text style={styles.inputLabel}>Über die Organisation (optional)</Text>
+          <TextInput
+            style={[styles.input, styles.textArea]} // Reuse textArea style
+            value={editOrgAboutMe}
+            onChangeText={setEditOrgAboutMe}
+            placeholder="Beschreibe deine Organisation..."
+            multiline={true}
+            numberOfLines={4} // Suggest initial height
+          />
+          {/* <<< END ADDED SECTION >>> */}
+
           {orgEditError ? <Text style={styles.errorTextModal}>{orgEditError}</Text> : null}
 
           <View style={styles.modalActions}>
@@ -1596,7 +1634,7 @@ const ProfileScreen = () => {
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.modalButton, styles.saveButton, isOrgEditLoading && styles.buttonDisabled]}
-              onPress={handleSaveOrgName}
+              onPress={handleSaveOrgDetails} // <<< Use the renamed handler >>>
               disabled={isOrgEditLoading}
             >
               {isOrgEditLoading ?
