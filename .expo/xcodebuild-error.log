@@ -1,3 +1,3 @@
 --- xcodebuild: WARNING: Using the first of multiple matching destinations:
-{ platform:iOS Simulator, id:EC9092BC-236F-44A6-865C-C8ED69D62CBD, OS:18.2, name:iPhone 16 Pro }
-{ platform:iOS Simulator, id:EC9092BC-236F-44A6-865C-C8ED69D62CBD, OS:18.2, name:iPhone 16 Pro }
+{ platform:iOS Simulator, id:DACD8939-DEB4-4AE8-B4DC-BFF8EEC4AE33, OS:18.2, name:iPad Air 13-inch (M2) }
+{ platform:iOS Simulator, id:DACD8939-DEB4-4AE8-B4DC-BFF8EEC4AE33, OS:18.2, name:iPad Air 13-inch (M2) }
