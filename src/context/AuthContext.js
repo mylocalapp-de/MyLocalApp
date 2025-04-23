@@ -453,7 +453,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         .eq('id', user.id);
 
       if (profileUpdateError) {
-        console.error('AuthContext: Error updating profile during upgrade (setting is_temporary=false):', profileUpdateError);
+        console.warn('AuthContext: Error updating profile during upgrade (setting is_temporary=false):', profileUpdateError);
         // Account auth updated, but profile flag failed. Critical? Maybe warn.
         return {
             success: true, // Auth part succeeded
@@ -474,7 +474,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
       return { success: true, data: { user: updateData.user } };
 
     } catch (error) {
-      console.error('AuthContext: Unexpected error in upgradeToFullAccount:', error);
+      console.warn('AuthContext: Unexpected error in upgradeToFullAccount:', error);
       return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
     } finally {
       setLoading(false);
@@ -794,7 +794,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
           });
 
           if (authUpdateError) {
-              console.error("AuthContext: Supabase updateUser (password) error:", authUpdateError);
+              console.warn("AuthContext: Supabase updateUser (password) error:", authUpdateError);
               return { success: false, error: { message: authUpdateError.message || 'Passwort konnte nicht geändert werden.' } };
           }
 
@@ -811,7 +811,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
                   .eq('id', user.id);
 
               if (updateError) {
-                  console.error('AuthContext: Error updating profile (setting is_temporary=false): ', updateError);
+                  console.warn('AuthContext: Error updating profile (setting is_temporary=false): ', updateError);
                   profileUpdateError = updateError; // Store the error
               } else {
                   console.log('AuthContext: Profile updated successfully (is_temporary=false).');
@@ -823,7 +823,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
           }
 
       } catch (error) {
-          console.error("AuthContext: Unexpected error during password update process:", error);
+          console.warn("AuthContext: Unexpected error during password update process:", error);
           return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
       }
 

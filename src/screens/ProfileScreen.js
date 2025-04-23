@@ -121,6 +121,8 @@ const ProfileScreen = () => {
   const [editAboutMe, setEditAboutMe] = useState(''); // <<< ADD THIS LINE
   // <<< ADD THIS STATE VARIABLE >>>
   const [editOrgAboutMe, setEditOrgAboutMe] = useState('');
+  // Open About Me modal
+  const [showAboutMeModal, setShowAboutMeModal] = useState(false);
 
 
   // Derived state: Check if user has a full Supabase account
@@ -433,30 +435,22 @@ const ProfileScreen = () => {
        setAccountSettingsError('Die neue E-Mail-Adresse muss sich von der aktuellen unterscheiden.');
        return;
     }
-    // No password needed if confirmation disabled
-    // if (!emailCurrentPassword) {
-    //   setAccountSettingsError('Bitte gib dein aktuelles Passwort ein, um die Änderung zu bestätigen.');
-    //   return;
-    // }
-    
     setIsAccountSettingsLoading(true);
     setAccountSettingsError('');
-    
     try {
       const result = await updateEmail(newEmail.trim(), emailCurrentPassword);
-      
       if (result.success) {
         setShowAccountSettingsModal(false);
         Alert.alert('Erfolgreich', 'Deine E-Mail-Adresse wurde aktualisiert.');
-        // No confirmation needed now
-        // if (result.needsConfirmation) { ... } else { ... }
       } else {
-        console.error('Failed to update email:', result.error);
+        // console.error removed to avoid expo error overlay
+        console.log('Failed to update email:', result.error);
         const errorMessage = result.error?.message || 'E-Mail konnte nicht geändert werden.';
         setAccountSettingsError(errorMessage);
       }
     } catch (error) {
-      console.error('Unexpected error during email update:', error);
+      // console.error removed
+      console.log('Unexpected error during email update:', error);
       setAccountSettingsError('Ein unerwarteter Fehler ist aufgetreten.');
     } finally {
       setIsAccountSettingsLoading(false);
@@ -477,54 +471,38 @@ const ProfileScreen = () => {
       setAccountSettingsError('Die neuen Passwörter stimmen nicht überein.');
       return;
     }
-
     setIsAccountSettingsLoading(true);
     setAccountSettingsError('');
-
     try {
-      // Call the existing updatePassword function from AuthContext
       const result = await updatePassword(newPassword);
-
       if (result.success) {
-        // --- MODIFIED: Check if we also need to update email for temporary accounts ---
+        // existing success handling
         const needsEmailUpdate = isMakingPermanent && user?.email?.includes('@temp.mylocalapp.de') && newEmail.trim() && newEmail.trim() !== user.email;
-
         if (needsEmailUpdate) {
-            // If making permanent and a new valid email was entered for a temp email address, update it too.
-            if (!newEmail.trim() || !newEmail.includes('@')) {
-               setAccountSettingsError('Bitte gib eine gültige neue E-Mail-Adresse ein, um den Account permanent zu machen.');
-               // Password update was likely successful, but we stop here. User needs to retry with valid email.
-               // Ideally, validation happens *before* calling updatePassword in this flow.
-               setIsAccountSettingsLoading(false);
-               return; // Stop processing here
-            }
-            // Update email (no current password needed as we just set a new one)
-            const emailResult = await updateEmail(newEmail.trim());
-            if (!emailResult.success) {
-               console.error('Failed to update email during permanent setup:', emailResult.error);
-               // Show error, but acknowledge password was set
-               Alert.alert(
-                   'Passwort gesetzt, E-Mail fehlgeschlagen',
-                   `Dein Passwort wurde festgelegt, aber die E-Mail konnte nicht geändert werden: ${emailResult.error?.message || 'Fehler'}. Bitte versuche die E-Mail später erneut zu ändern.`
-               );
-               // Proceed to close modal etc., but flag was not fully cleared
-            } else {
-               Alert.alert('Erfolgreich', 'Dein Passwort wurde festgelegt und die E-Mail aktualisiert. Dein Account ist jetzt permanent.');
-            }
+          if (!newEmail.trim() || !newEmail.includes('@')) {
+            setAccountSettingsError('Bitte gib eine gültige neue E-Mail-Adresse ein, um den Account permanent zu machen.');
+            setIsAccountSettingsLoading(false);
+            return;
+          }
+          const emailResult = await updateEmail(newEmail.trim());
+          if (!emailResult.success) {
+             Alert.alert('Passwort gesetzt, E-Mail fehlgeschlagen', `Dein Passwort wurde festgelegt, aber die E-Mail konnte nicht geändert werden: ${emailResult.error?.message || 'Fehler'}. Bitte versuche die E-Mail später erneut zu ändern.`);
+          } else {
+             Alert.alert('Erfolgreich', 'Dein Passwort wurde festgelegt und die E-Mail aktualisiert. Dein Account ist jetzt permanent.');
+          }
         } else {
              Alert.alert('Erfolgreich', isMakingPermanent ? 'Dein Passwort wurde festgelegt. Dein Account ist jetzt permanent.' : 'Dein Passwort wurde aktualisiert.');
         }
-
-        // On full success (or partial success where only password worked), close modal and reset flag
         setShowAccountSettingsModal(false);
-        setIsMakingPermanent(false); // Reset flag
-        // AuthContext's updatePassword/updateEmail should handle refetching profile and setting is_temporary=false
+        setIsMakingPermanent(false);
       } else {
-        console.error('Failed to update password:', result.error);
+        // console.error removed
+        console.log('Failed to update password:', result.error);
         setAccountSettingsError(result.error?.message || 'Passwort konnte nicht geändert werden.');
       }
     } catch (error) {
-      console.error('Unexpected error during password update:', error);
+      // console.error removed
+      console.log('Unexpected error during password update:', error);
       setAccountSettingsError('Ein unerwarteter Fehler ist aufgetreten.');
     } finally {
       setIsAccountSettingsLoading(false);
@@ -1061,6 +1039,21 @@ const ProfileScreen = () => {
               {(isOrgContextLoading || authLoading) ? <ActivityIndicator size="small" color="#dc3545" /> : <Text style={styles.leaveButtonText}>Organisation verlassen</Text>}
           </TouchableOpacity>
         )}
+        {/* Link list to org member actions */}
+        <View style={styles.linkListContainer}>
+          <TouchableOpacity onPress={() => navigation.navigate('CreateArticle')} style={styles.linkItem}>
+            <Text style={styles.linkText}>Neuen Artikel erstellen</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate('ManageBroadcastGroups')} style={styles.linkItem}>
+            <Text style={styles.linkText}>Chatgruppen verwalten</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate('CreateEvent')} style={styles.linkItem}>
+            <Text style={styles.linkText}>Neues Event erstellen</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate('CreatePoi')} style={styles.linkItem}>
+            <Text style={styles.linkText}>Neuen Marker auf der Karte setzen</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   };
@@ -1202,9 +1195,9 @@ const ProfileScreen = () => {
                   {/* Edit button can also trigger opening the main profile edit modal */}
                   <TouchableOpacity 
                     style={styles.editButtonInline} 
-                    onPress={handleOpenProfileEdit}
+                    onPress={handleOpenAboutMeModal}
                   >
-                    <Text style={styles.editButtonText}>Profil bearbeiten</Text>
+                    <Text style={styles.editButtonText}>Über mich bearbeiten</Text>
                     <Ionicons name="chevron-forward" size={16} color="#4285F4" />
                   </TouchableOpacity>
               </View>
@@ -1403,18 +1396,6 @@ const ProfileScreen = () => {
             ))}
           </View>
           
-          {/* <<< START ADDED SECTION >>> */}
-          <Text style={styles.inputLabel}>Über Mich (optional)</Text>
-          <TextInput
-            style={[styles.input, styles.textArea]} // Add textArea style
-            value={editAboutMe}
-            onChangeText={setEditAboutMe}
-            placeholder="Erzähl etwas über dich..."
-            multiline={true}
-            numberOfLines={4} // Suggest initial height
-          />
-          {/* <<< END ADDED SECTION >>> */}
-          
           {editFormError ? <Text style={styles.errorTextModal}>{editFormError}</Text> : null}
           
           <View style={styles.modalActions}>
@@ -1451,139 +1432,102 @@ const ProfileScreen = () => {
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
           <Text style={styles.modalTitle}>Account Einstellungen</Text>
-          
-          {/* Tabs */} 
           <View style={styles.tabContainer}>
-             <TouchableOpacity 
-                style={[styles.tabButton, activeTab === 'email' && styles.tabButtonActive]}
-                onPress={() => {setActiveTab('email'); setAccountSettingsError('');}}
-             >
-                 <Text style={[styles.tabText, activeTab === 'email' && styles.tabTextActive]}>E-Mail ändern</Text>
-             </TouchableOpacity>
-             <TouchableOpacity 
-                style={[styles.tabButton, activeTab === 'password' && styles.tabButtonActive]}
-                onPress={() => {setActiveTab('password'); setAccountSettingsError('');}}
-             >
-                 <Text style={[styles.tabText, activeTab === 'password' && styles.tabTextActive]}>Passwort ändern</Text>
-             </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tabButton, activeTab === 'email' && styles.tabButtonActive]}
+              onPress={() => { setActiveTab('email'); setAccountSettingsError(''); }}
+            >
+              <Text style={[styles.tabText, activeTab === 'email' && styles.tabTextActive]}>E-Mail ändern</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tabButton, activeTab === 'password' && styles.tabButtonActive]}
+              onPress={() => { setActiveTab('password'); setAccountSettingsError(''); }}
+            >
+              <Text style={[styles.tabText, activeTab === 'password' && styles.tabTextActive]}>Passwort ändern</Text>
+            </TouchableOpacity>
           </View>
-          
-          {/* Content based on active tab */} 
           {activeTab === 'email' && (
-             <View>
-                {/* --- MODIFIED: Conditionally disable/hide email change if not making permanent OR email is not temporary --- */}
-                {(!isMakingPermanent && !user?.email?.includes('@temp.mylocalapp.de')) ? (
-                     <>
-                        <Text style={styles.inputLabel}>Neue E-Mail-Adresse</Text>
-                        <TextInput
-                           style={styles.input}
-                           placeholder="Neue E-Mail"
-                           value={newEmail}
-                           onChangeText={setNewEmail}
-                           keyboardType="email-address"
-                           autoCapitalize="none"
-                           autoComplete="email"
-                        />
-                        <Text style={styles.inputLabel}>Aktuelles Passwort zur Bestätigung</Text>
-                        <TextInput
-                           style={styles.input}
-                           placeholder="Aktuelles Passwort"
-                           value={emailCurrentPassword}
-                           onChangeText={setEmailCurrentPassword}
-                           secureTextEntry
-                           autoCapitalize="none"
-                           autoComplete="current-password"
-                        />
-                        {accountSettingsError ? <Text style={styles.errorTextModal}>{accountSettingsError}</Text> : null}
-                        <TouchableOpacity
-                          style={[styles.modalButton, styles.saveButton, styles.singleButton, isAccountSettingsLoading && styles.buttonDisabled]}
-                          onPress={handleUpdateEmail} // Use existing handler for normal email change
-                          disabled={isAccountSettingsLoading}
-                        >
-                          {isAccountSettingsLoading ?
-                             <ActivityIndicator color="#fff" size="small" /> :
-                             <Text style={styles.modalButtonText}>E-Mail Aktualisieren</Text>
-                          }
-                        </TouchableOpacity>
-                     </>
-                 ) : isMakingPermanent && user?.email?.includes('@temp.mylocalapp.de') ? (
-                     <>
-                        <Text style={styles.inputLabel}>Neue E-Mail-Adresse (Optional)</Text>
-                        <TextInput
-                           style={styles.input}
-                           placeholder="Echte E-Mail-Adresse eingeben"
-                           value={newEmail}
-                           onChangeText={setNewEmail}
-                           keyboardType="email-address"
-                           autoCapitalize="none"
-                           autoComplete="email"
-                        />
-                        <Text style={styles.modalInfoText}>Lasse dieses Feld leer, wenn du die temporäre E-Mail behalten möchtest (nicht empfohlen).</Text>
-                        {/* Save button might be removed here if email is saved along with password */}
-                         {accountSettingsError ? <Text style={styles.errorTextModal}>{accountSettingsError}</Text> : null}
-                         {/* Info: Email is updated when setting the password */}
-                          <Text style={styles.modalInfoText}>Die E-Mail wird zusammen mit dem Passwort gespeichert.</Text>
-                     </>
-                 ) : (
-                    <Text style={styles.modalInfoText}>Ändere zuerst dein Passwort, um die E-Mail-Adresse zu ändern.</Text>
-                 )}
-             </View>
-          )}
-
-          {activeTab === 'password' && (
-             <View>
-                {/* --- MODIFIED: Hide current password field when making permanent --- */}
-                {/* {!isMakingPermanent && (
-                   <>
-                     <Text style={styles.inputLabel}>Aktuelles Passwort</Text>
-                     <TextInput ... />
-                   </>
-                )} */}
-                <Text style={styles.inputLabel}>Neues Passwort</Text>
-                <TextInput
-                   style={styles.input}
-                   placeholder="Neues Passwort (min. 6 Zeichen)"
-                   value={newPassword}
-                   onChangeText={setNewPassword}
-                   secureTextEntry
-                   autoCapitalize="none"
-                   autoComplete="new-password"
-                />
-                <Text style={styles.inputLabel}>Neues Passwort bestätigen</Text>
-                <TextInput
-                   style={styles.input}
-                   placeholder="Neues Passwort bestätigen"
-                   value={confirmNewPassword}
-                   onChangeText={setConfirmNewPassword}
-                   secureTextEntry
-                   autoCapitalize="none"
-                   autoComplete="new-password"
-                 />
-                 {accountSettingsError ? <Text style={styles.errorTextModal}>{accountSettingsError}</Text> : null}
-                 <TouchableOpacity
-                  style={[styles.modalButton, styles.saveButton, styles.singleButton, isAccountSettingsLoading && styles.buttonDisabled]}
-                  onPress={handleUpdatePassword} // Reusing the password update handler
+            <>
+              <Text style={styles.inputLabel}>Neue E-Mail-Adresse</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Neue E-Mail"
+                value={newEmail}
+                onChangeText={setNewEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoComplete="email"
+              />
+              <Text style={styles.inputLabel}>Aktuelles Passwort zur Bestätigung</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Aktuelles Passwort"
+                value={emailCurrentPassword}
+                onChangeText={setEmailCurrentPassword}
+                secureTextEntry
+                autoCapitalize="none"
+                autoComplete="current-password"
+              />
+              {accountSettingsError ? <Text style={styles.errorTextModal}>{accountSettingsError}</Text> : null}
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.cancelButton]}
+                  onPress={() => setShowAccountSettingsModal(false)}
                   disabled={isAccountSettingsLoading}
-                 >
-                  {isAccountSettingsLoading ?
-                     <ActivityIndicator color="#fff" size="small" /> :
-                     <Text style={styles.modalButtonText}>
-                         {/* MODIFIED: Change button text */}
-                         {isMakingPermanent ? 'Passwort festlegen & Sichern' : 'Passwort Aktualisieren'}
-                     </Text>
-                  }
-                 </TouchableOpacity>
-             </View>
+                >
+                  <Text style={styles.modalButtonText}>Abbrechen</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.saveButton, isAccountSettingsLoading && styles.buttonDisabled]}
+                  onPress={handleUpdateEmail}
+                  disabled={isAccountSettingsLoading}
+                >
+                  {isAccountSettingsLoading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.modalButtonText}>E-Mail aktualisieren</Text>}
+                </TouchableOpacity>
+              </View>
+            </>
           )}
-          
-          <TouchableOpacity 
-            style={[styles.modalButton, styles.cancelButton, styles.marginTop]} 
-            onPress={() => setShowAccountSettingsModal(false)}
-            disabled={isAccountSettingsLoading}
-          >
-            <Text style={styles.modalButtonText}>Abbrechen</Text>
-          </TouchableOpacity>
-
+          {activeTab === 'password' && (
+            <>
+              <Text style={styles.inputLabel}>Neues Passwort (min. 6 Zeichen)</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Neues Passwort"
+                value={newPassword}
+                onChangeText={setNewPassword}
+                secureTextEntry
+                autoCapitalize="none"
+                autoComplete="new-password"
+              />
+              <Text style={styles.inputLabel}>Neues Passwort bestätigen</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Neues Passwort bestätigen"
+                value={confirmNewPassword}
+                onChangeText={setConfirmNewPassword}
+                secureTextEntry
+                autoCapitalize="none"
+                autoComplete="new-password"
+              />
+              {accountSettingsError ? <Text style={styles.errorTextModal}>{accountSettingsError}</Text> : null}
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.cancelButton]}
+                  onPress={() => setShowAccountSettingsModal(false)}
+                  disabled={isAccountSettingsLoading}
+                >
+                  <Text style={styles.modalButtonText}>Abbrechen</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.saveButton, isAccountSettingsLoading && styles.buttonDisabled]}
+                  onPress={handleUpdatePassword}
+                  disabled={isAccountSettingsLoading}
+                >
+                  {isAccountSettingsLoading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.modalButtonText}>Passwort aktualisieren</Text>}
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
         </View>
       </View>
     </Modal>
@@ -1654,13 +1598,12 @@ const ProfileScreen = () => {
       Alert.alert('Fehler', 'Diese Funktion ist nur für temporäre Accounts.');
       return;
     }
-    setIsMakingPermanent(true); // Set the flag
-
-    setNewEmail(user?.email?.includes('@temp.mylocalapp.de') ? '' : (user?.email || '')); // Pre-fill email unless temporary
-    setEmailCurrentPassword(''); // Not needed for initial password set
+    setIsMakingPermanent(true);
+    setNewEmail(user?.email || ''); // Always pre-fill email
+    setEmailCurrentPassword('');
     setNewPassword('');
     setConfirmNewPassword('');
-    setActiveTab('password'); // Start on password tab
+    setActiveTab('password');
     setAccountSettingsError('');
     setShowAccountSettingsModal(true);
   };
@@ -1782,6 +1725,181 @@ const ProfileScreen = () => {
     // Loading state is handled within updateOrganizationLogo and OrganizationContext
   };
 
+  // Handler to make temporary account permanent using upgradeToFullAccount
+  const handleMakePermanent = async () => {
+    if (!newPassword) {
+      setAccountSettingsError('Bitte gib ein neues Passwort ein.');
+      return;
+    }
+    if (newPassword.length < 6) {
+      setAccountSettingsError('Das Passwort muss mindestens 6 Zeichen lang sein.');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setAccountSettingsError('Die Passwörter stimmen nicht überein.');
+      return;
+    }
+    setIsAccountSettingsLoading(true);
+    setAccountSettingsError('');
+    try {
+      const result = await upgradeToFullAccount(newEmail.trim(), newPassword);
+      if (result.success) {
+        Alert.alert('Erfolgreich', 'Dein Account ist jetzt permanent.');
+        setIsMakingPermanent(false);
+        setShowAccountSettingsModal(false);
+      } else {
+        setAccountSettingsError(result.error?.message || 'Konnte Account nicht permanent machen.');
+      }
+    } catch (error) {
+      setAccountSettingsError('Ein unerwarteter Fehler ist aufgetreten.');
+    } finally {
+      setIsAccountSettingsLoading(false);
+    }
+  };
+
+  // Add a dedicated modal for making temporary accounts permanent
+  const renderMakePermanentModal = () => (
+    <Modal
+      visible={showAccountSettingsModal && isMakingPermanent}
+      animationType="slide"
+      transparent={true}
+      onRequestClose={() => {
+        setIsMakingPermanent(false);
+        setShowAccountSettingsModal(false);
+      }}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <Text style={styles.modalTitle}>Account dauerhaft sichern</Text>
+
+          <Text style={styles.inputLabel}>E-Mail-Adresse</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: '#e0e0e0' }]}
+            value={newEmail}
+            editable={false}
+          />
+
+          <Text style={styles.inputLabel}>Neues Passwort (min. 6 Zeichen)</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Neues Passwort"
+            secureTextEntry
+            value={newPassword}
+            onChangeText={setNewPassword}
+            autoCapitalize="none"
+          />
+
+          <Text style={styles.inputLabel}>Passwort bestätigen</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Passwort bestätigen"
+            secureTextEntry
+            value={confirmNewPassword}
+            onChangeText={setConfirmNewPassword}
+            autoCapitalize="none"
+          />
+
+          {accountSettingsError ? <Text style={styles.errorTextModal}>{accountSettingsError}</Text> : null}
+
+          <View style={styles.modalActions}>
+            <TouchableOpacity
+              style={[styles.modalButton, styles.cancelButton]}
+              onPress={() => {
+                setIsMakingPermanent(false);
+                setShowAccountSettingsModal(false);
+              }}
+              disabled={isAccountSettingsLoading}
+            >
+              <Text style={styles.modalButtonText}>Abbrechen</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modalButton, styles.saveButton, isAccountSettingsLoading && styles.buttonDisabled]}
+              onPress={handleMakePermanent}
+              disabled={isAccountSettingsLoading}
+            >
+              {isAccountSettingsLoading ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.modalButtonText}>Passwort festlegen & Sichern</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  // Open About Me modal
+  const handleOpenAboutMeModal = () => {
+    setEditAboutMe(profile?.about_me || '');
+    setEditFormError('');
+    setShowAboutMeModal(true);
+  };
+
+  // Save About Me changes
+  const handleSaveAboutMe = async () => {
+    if (editAboutMe.trim() === (profile?.about_me || '')) {
+      setShowAboutMeModal(false);
+      return;
+    }
+    setIsEditLoading(true);
+    setEditFormError('');
+    try {
+      const result = await updateProfile({ about_me: editAboutMe.trim() });
+      if (result.success) {
+        Alert.alert('Erfolgreich', 'Beschreibung aktualisiert.');
+        setShowAboutMeModal(false);
+      } else {
+        setEditFormError(result.error?.message || 'Fehler beim Speichern.');
+      }
+    } catch {
+      setEditFormError('Ein unerwarteter Fehler ist aufgetreten.');
+    } finally {
+      setIsEditLoading(false);
+    }
+  };
+
+  // Modal for editing Über Mich
+  const renderAboutMeModal = () => (
+    <Modal
+      visible={showAboutMeModal}
+      animationType="slide"
+      transparent={true}
+      onRequestClose={() => setShowAboutMeModal(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <Text style={styles.modalTitle}>Über Mich bearbeiten</Text>
+          <TextInput
+            style={[styles.input, styles.textArea]}
+            value={editAboutMe}
+            onChangeText={setEditAboutMe}
+            placeholder="Erzähl etwas über dich..."
+            multiline={true}
+            numberOfLines={4}
+          />
+          {editFormError ? <Text style={styles.errorTextModal}>{editFormError}</Text> : null}
+          <View style={styles.modalActions}>
+            <TouchableOpacity
+              style={[styles.modalButton, styles.cancelButton]}
+              onPress={() => setShowAboutMeModal(false)}
+              disabled={isEditLoading}
+            >
+              <Text style={styles.modalButtonText}>Abbrechen</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modalButton, styles.saveButton, isEditLoading && styles.buttonDisabled]}
+              onPress={handleSaveAboutMe}
+              disabled={isEditLoading}
+            >
+              {isEditLoading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.modalButtonText}>Speichern</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 30 }}>
       {renderHeader()}
@@ -1836,7 +1954,8 @@ const ProfileScreen = () => {
       {/* Modals */}
       {renderCreateAccountModal()}
       {renderProfileEditModal()}
-      {renderAccountSettingsModal()}
+      {renderAboutMeModal()}
+      {isMakingPermanent ? renderMakePermanentModal() : renderAccountSettingsModal()}
       {renderOrgEditModal()}
     </ScrollView>
   );
@@ -2477,6 +2596,25 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 15,
     fontStyle: 'italic', // Optional: Style it differently
+  },
+  linkListContainer: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    marginTop: 10,
+  },
+  linkItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    backgroundColor: '#e7f0fe',
+    borderRadius: 5,
+    marginBottom: 8,
+    // full width
+    alignSelf: 'stretch',
+  },
+  linkText: {
+    color: '#4285F4',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
 

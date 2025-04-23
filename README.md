@@ -161,10 +161,9 @@ App.js              - Main application entry point
     *   Auth state changes, `AppNavigator` detects `user` and `profile`, sets `hasCompletedOnboarding` flag in AsyncStorage, and navigates to the main app.
 5.  **Using the App:** User interacts with the app using their temporary account (can edit name/prefs, react, comment, etc.).
 6.  **Making Account Permanent (Optional):**
-    *   User goes to Profile screen.
-    *   Clicks option to make account permanent (UI element needs to be added).
-    *   Provides a valid email (if they used a temp one) and a chosen password.
-    *   `upgradeToFullAccount` function updates Auth user and sets `is_temporary=false` in the profile.
+    *   User goes to Profile screen and clicks "Passwort festlegen & Sichern".
+    *   A dedicated modal appears where the password can be set; the email is prefilled and not editable.
+    *   Upon confirmation, the `updatePassword` function marks the account as permanent (`is_temporary=false`).
 
 ## Known Issues
 
