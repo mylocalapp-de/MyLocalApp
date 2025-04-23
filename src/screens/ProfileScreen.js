@@ -1013,6 +1013,24 @@ const ProfileScreen = () => {
         {/* Show loading indicator during member management actions */} 
         {memberManagementLoading && <ActivityIndicator size="small" color="#666" style={{ marginVertical: 5 }}/>}
         
+        {/* Link list to org member actions - Moved here */}
+        <View style={styles.linkListContainer}>
+          <TouchableOpacity onPress={() => navigation.navigate('CreateArticle')} style={styles.linkItem}>
+            <Text style={styles.linkText}>Neuen Artikel erstellen</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate('ManageBroadcastGroups')} style={styles.linkItem}>
+            <Text style={styles.linkText}>Chatgruppen verwalten</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate('CreateEvent')} style={styles.linkItem}>
+            <Text style={styles.linkText}>Neues Event erstellen</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate('CreatePoi')} style={styles.linkItem}>
+            <Text style={styles.linkText}>Neuen Marker auf der Karte setzen</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.separator} />
+
         {/* --- Action Buttons for Active Org --- */} 
         <TouchableOpacity 
             style={[styles.button, styles.switchButton]} 
@@ -1039,21 +1057,6 @@ const ProfileScreen = () => {
               {(isOrgContextLoading || authLoading) ? <ActivityIndicator size="small" color="#dc3545" /> : <Text style={styles.leaveButtonText}>Organisation verlassen</Text>}
           </TouchableOpacity>
         )}
-        {/* Link list to org member actions */}
-        <View style={styles.linkListContainer}>
-          <TouchableOpacity onPress={() => navigation.navigate('CreateArticle')} style={styles.linkItem}>
-            <Text style={styles.linkText}>Neuen Artikel erstellen</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => navigation.navigate('ManageBroadcastGroups')} style={styles.linkItem}>
-            <Text style={styles.linkText}>Chatgruppen verwalten</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => navigation.navigate('CreateEvent')} style={styles.linkItem}>
-            <Text style={styles.linkText}>Neues Event erstellen</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => navigation.navigate('CreatePoi')} style={styles.linkItem}>
-            <Text style={styles.linkText}>Neuen Marker auf der Karte setzen</Text>
-          </TouchableOpacity>
-        </View>
       </View>
     );
   };

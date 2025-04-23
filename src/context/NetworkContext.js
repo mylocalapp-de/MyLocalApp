@@ -24,29 +24,34 @@ export const NetworkProvider = ({ children }) => {
     // Effect to subscribe to network changes and load initial state
     useEffect(() => {
         const unsubscribe = NetInfo.addEventListener(state => {
-            const currentlyConnected = state.isConnected && state.isInternetReachable;
+            // Explicitly check for false. Null or true means potentially reachable.
+            const isDefinitelyOffline = state.isConnected === false || state.isInternetReachable === false;
+            const currentlyConnected = !isDefinitelyOffline;
+
             console.log('[NetworkContext] Network State Change:', state);
-            console.log(`[NetworkContext] Connected: ${currentlyConnected}`);
+            console.log(`[NetworkContext] isConnected: ${state.isConnected}, isInternetReachable: ${state.isInternetReachable}, Effective: ${currentlyConnected}`);
 
-            setIsConnected(currentlyConnected ?? true); // Update connection status
+            setIsConnected(currentlyConnected);
 
-            // Handle initial connection check and potential popup
             if (!initialCheckDone) {
-                if (currentlyConnected === false) { // Check for explicitly false
-                    // Prompt user only on the first launch if disconnected
+                // INITIAL CHECK: Prompt only if isConnected is explicitly false.
+                // This remains unchanged and avoids prompts from initial 'null' isInternetReachable.
+                if (state.isConnected === false && !isOfflineMode) {
+                    console.log('[NetworkContext] Initial check: No connection detected (isConnected=false). Prompting offline mode.');
                     promptOfflineMode();
+                } else {
+                    console.log('[NetworkContext] Initial check: Connection detected or already in offline mode.');
                 }
-                setInitialCheckDone(true); // Mark initial check as done
+                setInitialCheckDone(true); // Mark initial check as done regardless of prompt
             } else {
-                // After initial check, if connection DROPS and we're NOT in offline mode
-                if (currentlyConnected === false && !isOfflineMode) {
-                    promptOfflineMode();
+                // SUBSEQUENT CHECKS: Prompt if we are definitely offline (isConnected is false or isInternetReachable is false)
+                // and not currently in offline mode.
+                if (isDefinitelyOffline && !isOfflineMode) {
+                     console.log('[NetworkContext] Subsequent check: Connection lost (isDefinitelyOffline=true) and not in offline mode. Prompting offline mode.');
+                     promptOfflineMode();
                 }
-                // If connection RESTORES and we ARE in offline mode
-                if (currentlyConnected === true && isOfflineMode) {
-                    // Optionally ask user if they want to exit offline mode automatically
-                    // For now, let them exit manually via header button
-                }
+                // Note: The logic for handling connection restoration while offline remains unchanged.
+                // if (currentlyConnected === true && isOfflineMode) { ... }
             }
         });
 
