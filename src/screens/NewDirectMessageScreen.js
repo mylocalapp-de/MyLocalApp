@@ -10,13 +10,27 @@ import {
   Platform,
   SafeAreaView,
   TextInput,
-  ScrollView
+  ScrollView,
+  Image
 } from 'react-native';
 import ScreenHeader from '../components/common/ScreenHeader'; // Reuse if applicable
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useNetwork } from '../context/NetworkContext';
+
+// Helper function to transform Supabase Storage URLs
+const getTransformedImageUrl = (originalUrl) => {
+  if (!originalUrl || !originalUrl.includes('/storage/v1/object/public/')) {
+    return originalUrl; // Return original if not a valid Supabase Storage URL or already transformed
+  }
+  // Prevent double transformation
+  if (originalUrl.includes('/render/image/public/')) {
+      return originalUrl;
+  }
+  // Replace the path segment and add transform parameters
+  return originalUrl.replace('/object/public/', '/render/image/public/') + '?width=100&height=100&resize=cover&quality=60'; // Smaller size for list avatar
+};
 
 const NewDirectMessageScreen = ({ navigation }) => {
   const { user } = useAuth();
@@ -69,6 +83,42 @@ const NewDirectMessageScreen = ({ navigation }) => {
 
   }, [isOfflineMode, user]);
 
+  const fetchAvatarsForSearchResults = async (results) => {
+      if (!results || results.length === 0) {
+          return results; // No results to fetch for
+      }
+
+      const userIdsToFetch = results.map(user => user.id);
+      console.log(`[NewDM] Fetching avatars for ${userIdsToFetch.length} search results.`);
+
+      try {
+          const { data: profilesData, error: profilesError } = await supabase
+              .from('profiles')
+              .select('id, avatar_url')
+              .in('id', userIdsToFetch);
+
+          if (profilesError) {
+              console.error('[NewDM] Error fetching profiles for avatars:', profilesError);
+              return results; // Return original results on error
+          }
+
+          const avatarMap = profilesData.reduce((map, profile) => {
+              map[profile.id] = profile.avatar_url;
+              return map;
+          }, {});
+
+          // Update the results with fetched avatar URLs
+          return results.map(user => ({
+              ...user,
+              avatar_url: avatarMap[user.id] || null // Add avatar_url or null
+          }));
+
+      } catch (fetchErr) {
+          console.error('[NewDM] Unexpected error in fetchAvatarsForSearchResults:', fetchErr);
+          return results; // Return original results on unexpected error
+      }
+  };
+
   const searchUsers = async (query) => {
     if (!query || query.trim().length < 3) {
       setSearchResults([]);
@@ -103,7 +153,10 @@ const NewDirectMessageScreen = ({ navigation }) => {
         setSearchResults([]);
       } else if (data) {
         console.log('Search results from RPC:', data);
-        setSearchResults(data);
+        // --- Fetch avatars after getting results ---
+        const resultsWithAvatars = await fetchAvatarsForSearchResults(data);
+        setSearchResults(resultsWithAvatars);
+        // --- End Fetch avatars ---
       } else {
         setSearchResults([]);
       }
@@ -156,6 +209,10 @@ const NewDirectMessageScreen = ({ navigation }) => {
   };
 
   const renderUserAvatar = (item) => {
+    const transformedUrl = item.avatar_url ? getTransformedImageUrl(item.avatar_url) : null;
+    if (transformedUrl) {
+      return <Image source={{ uri: transformedUrl }} style={styles.avatarPlaceholder} />;
+    }
     return (
       <View style={[styles.avatarPlaceholder, styles.userAvatar]}>
         <Text style={styles.avatarLetter}>
@@ -166,6 +223,10 @@ const NewDirectMessageScreen = ({ navigation }) => {
   };
 
   const renderOrgAvatar = (item) => {
+      const transformedUrl = item.logo_url ? getTransformedImageUrl(item.logo_url) : null;
+      if (transformedUrl) {
+        return <Image source={{ uri: transformedUrl }} style={styles.avatarPlaceholder} />;
+      }
       return (
         <View style={[styles.avatarPlaceholder, styles.orgAvatar]}>
           <Ionicons name="business-outline" size={18} color="#fff" />

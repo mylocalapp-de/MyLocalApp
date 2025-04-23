@@ -35,6 +35,14 @@ import Constants from 'expo-constants';
 const { height } = Dimensions.get('window');
 const androidPaddingTop = height * 0.05; // 5% of screen height for better scaling
 
+// Helper function to transform Supabase Storage URLs
+const getTransformedImageUrl = (originalUrl) => {
+  if (!originalUrl || !originalUrl.includes('/storage/v1/object/public/')) {
+    return originalUrl;
+  }
+  return originalUrl.replace('/object/public/', '/render/image/public/') + '?width=400&quality=60';
+};
+
 // Configure Notification Handler (optional, but good practice)
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -914,16 +922,19 @@ const ChatDetailScreen = ({ route, navigation }) => {
 
   const renderItem = ({ item }) => {
     const isMe = user && item.user_id === user.id;
-    // Use item.sender which is pre-formatted in fetchMessages
-    const isSystemOrBroadcastAdmin = (isBroadcast() && !isMe) || item.sender === 'System'; 
-    
+    const canReact = !isBot() && !isOfflineMode && user;
+    const canComment = !isBroadcast() && !isBot() && !isOfflineMode && user;
+
+    // Transform image url
+    const transformedImageUrl = item.image_url ? getTransformedImageUrl(item.image_url) : null;
+
     return (
       <View style={styles.messageContainer}>
         <View 
           style={[
             styles.messageBubble, 
             isMe ? styles.myMessage :
-            isSystemOrBroadcastAdmin ? styles.systemMessage : styles.otherMessage
+            item.sender === 'System' ? styles.systemMessage : styles.otherMessage
           ]}
         >
           {/* Display sender name only if it's not me and not a system message */}
@@ -953,7 +964,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
               }}
             >
               <Image 
-                source={{ uri: item.image_url }} 
+                source={{ uri: transformedImageUrl }} 
                 style={styles.messageImage} 
                 resizeMode="cover"
               />
@@ -976,21 +987,30 @@ const ChatDetailScreen = ({ route, navigation }) => {
     // Log state before rendering button
     console.log(`Render Header: checking=${checkingSubscription}, toggling=${togglingSubscription}, hasToken=${!!expoPushToken}`);
 
+    // Determine if the header title should be clickable
+    const isOrgProfileLinkable = isBroadcast() && chatGroup?.organization_id && !isOfflineMode;
+
     return (
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color="#4285F4" />
         </TouchableOpacity>
         
-        <TouchableOpacity 
-          style={styles.headerTitleContainer} // Use a container for title and type
-          // onPress={handleHeaderPress} // Optional: If you want title press action
-        >
-          <Text style={styles.headerName}>{chatGroup.name}</Text>
+        <View style={styles.headerTitleContainer}> 
+           {/* Conditionally wrap the name in TouchableOpacity */}
+           {isOrgProfileLinkable ? (
+               <TouchableOpacity
+                 onPress={() => navigation.navigate('OrganizationProfileView', { organizationId: chatGroup.organization_id })}
+               >
+                  <Text style={styles.headerNameClickable}>{chatGroup.name}</Text> 
+               </TouchableOpacity>
+           ) : (
+               <Text style={styles.headerName}>{chatGroup.name}</Text>
+           )}
           <Text style={styles.headerType}>
             {isOpenChat() ? 'Offene Gruppe' : isBroadcast() ? 'Ankündigungen' : 'KI Assistent'}
           </Text>
-        </TouchableOpacity>
+        </View>
 
         {/* Notification Bell Icon */}
         {/* Only show bell for non-bot chats if token is available */}
@@ -1262,6 +1282,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     color: '#333',
+  },
+  headerNameClickable: { // Style for clickable org name
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#208e5d', // Org color, maybe add underline later if needed
   },
   headerType: {
     fontSize: 12,

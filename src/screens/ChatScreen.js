@@ -8,6 +8,19 @@ import { useNetwork } from '../context/NetworkContext';
 import { supabase } from '../lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+// Helper function to transform Supabase Storage URLs
+const getTransformedImageUrl = (originalUrl) => {
+  if (!originalUrl || !originalUrl.includes('/storage/v1/object/public/')) {
+    return originalUrl; // Return original if not a valid Supabase Storage URL or already transformed
+  }
+  // Prevent double transformation
+  if (originalUrl.includes('/render/image/public/')) {
+      return originalUrl;
+  }
+  // Replace the path segment and add transform parameters
+  return originalUrl.replace('/object/public/', '/render/image/public/') + '?width=100&height=100&resize=cover&quality=60'; // Smaller size for list avatar
+};
+
 const ChatScreen = ({ navigation, route }) => {
   const { isOrganizationActive, activeOrganizationId, activeOrganization } = useOrganization();
   const { user, displayName } = useAuth();
@@ -117,10 +130,16 @@ const ChatScreen = ({ navigation, route }) => {
             fetchDirectMessagesInternal()
         ]);
 
-        // Combine and process results
-        const combined = processAndCombineData(groupsResult, dmsResult);
-        setCombinedList(combined);
-        filterCombinedList(activeFilter, combined); // Apply filter immediately
+        // Combine and process results (initial pass without user avatars)
+        let combinedInitial = processAndCombineData(groupsResult, dmsResult);
+        setCombinedList(combinedInitial);
+
+        // --- Fetch missing user avatars --- 
+        const combinedWithAvatars = await fetchAvatarsForUserDms(combinedInitial);
+        setCombinedList(combinedWithAvatars); // Update state again with avatars
+        // --- End Fetch missing user avatars ---
+
+        filterCombinedList(activeFilter, combinedWithAvatars); // Apply filter to the final list
 
     } catch (err) {
         console.error('[ChatScreen] Error during combined fetch:', err);
@@ -217,6 +236,10 @@ const ChatScreen = ({ navigation, route }) => {
         }
 
         console.log(`[ChatScreen] Fetched ${data?.length || 0} DM conversations.`);
+        // Log the first DM data object to inspect available fields
+        if (data && data.length > 0) {
+            console.log('[ChatScreen] First DM data:', data[0]);
+        }
         setDmConversations(data || []); // Update specific state if needed
         return data || [];
 
@@ -281,7 +304,7 @@ const ChatScreen = ({ navigation, route }) => {
               time: messageTime,
               lastTimestamp: lastTimestamp,
               unread: unreadCount,
-              avatar: null, // Handled in renderAvatar
+              avatarUrl: null, // Field for avatar URL (groups might have one later)
               type: 'group', // Distinguish type
               uiType: uiType, // For potential filtering/display
               isBot: false,
@@ -312,17 +335,30 @@ const ChatScreen = ({ navigation, route }) => {
            const targetName = dm.target_name || (isOrg ? 'Organisation' : 'Unbekannter Benutzer');
            const lastTimestamp = dm.last_message_at ? new Date(dm.last_message_at).getTime() : 0;
 
+           // --- Determine Last Message Display ---
+           let displayMessage = dm.last_message_text || (dm.last_message_image_url ? 'Bild gesendet' : 'Keine Nachrichten');
+           const isMyLastMessage = dm.last_message_sender_id === user?.id;
+
+           if (isMyLastMessage) {
+               displayMessage = `Du: ${displayMessage}`;
+           } else if (isOrg && dm.last_message_sender_name) {
+               // Org DM received from someone else - show their name
+               displayMessage = `${dm.last_message_sender_name}: ${displayMessage}`;
+           }
+           // User-to-user DMs received from others - just show the message (handled by default)
+           // --- End Determine Last Message Display ---
+
           return {
               id: `dm-${dm.conversation_id}`, // Ensure unique keys
               conversationId: dm.conversation_id,
               name: targetName,
-              lastMessage: dm.last_message_text || (dm.last_message_image_url ? 'Bild gesendet' : 'Keine Nachrichten'),
+              lastMessage: displayMessage,
               lastMessageSenderId: dm.last_message_sender_id,
               lastMessageSenderName: dm.last_message_sender_name, // Use if available
               time: dm.last_message_time || '',
               lastTimestamp: lastTimestamp,
               unread: 0, // TODO: Implement unread count for DMs if needed
-              avatar: dm.logo_url, // Use logo if available (for orgs)
+              avatarUrl: isOrg ? dm.logo_url : null, // Use logo for org, leave null for users initially
               type: 'dm', // Distinguish type
               uiType: isOrg ? 'Organisations-DM' : 'Direktnachricht',
               isBot: false, // DMs are not bots
@@ -414,17 +450,21 @@ const ChatScreen = ({ navigation, route }) => {
   // --- Rendering ---
 
   const renderAvatar = (item) => {
+      const transformedUrl = item.avatarUrl ? getTransformedImageUrl(item.avatarUrl) : null;
+
       // DM Avatars
       if (item.itemType === 'dm') {
-          if (item.isOrgConversation) {
-              // Org DM Avatar
+          if (transformedUrl) {
+              return <Image source={{ uri: transformedUrl }} style={styles.avatar} />;
+          } else if (item.isOrgConversation) {
+              // Org DM Placeholder
               return (
                   <View style={[styles.avatarPlaceholder, styles.orgDmAvatar]}>
                       <Ionicons name="business-outline" size={24} color="#fff" />
                   </View>
               );
           } else {
-              // User DM Avatar
+              // User DM Placeholder (initials)
               return (
                   <View style={[styles.avatarPlaceholder, styles.userDmAvatar]}>
                       <Text style={styles.avatarLetter}>
@@ -435,9 +475,9 @@ const ChatScreen = ({ navigation, route }) => {
           }
       }
 
-      // Group Avatars (Existing Logic)
-      if (item.avatar) { // Assuming groups might have avatars eventually
-          return <Image source={{ uri: item.avatar }} style={styles.avatar} />;
+      // Group Avatars
+      if (transformedUrl) { // Use transformedUrl for groups too if available
+          return <Image source={{ uri: transformedUrl }} style={styles.avatar} />;
       }
       // Placeholder for Groups
       return (
@@ -477,24 +517,20 @@ const ChatScreen = ({ navigation, route }) => {
     if (item.itemType === 'group') {
         // Group message display logic
         if (item.lastMessage && item.lastMessageSender) {
-            if (user && item.lastMessageSender === displayName) {
-                displayMessage = `Du: ${item.lastMessage}`;
-            } else {
-                displayMessage = `${item.lastMessageSender}: ${item.lastMessage}`;
-            }
+            // Check if the logged-in user sent the last message based on display name (less reliable)
+            // It might be better to compare sender ID if available consistently for groups
+             const isMyGroupLastMessage = user && item.lastMessageSender === displayName;
+             if (isMyGroupLastMessage) {
+                 displayMessage = `Du: ${item.lastMessage}`;
+             } else {
+                 displayMessage = `${item.lastMessageSender}: ${item.lastMessage}`;
+             }
         } else if (item.lastMessage && item.dbType === 'broadcast') {
             displayMessage = item.lastMessage; // No sender prefix for broadcast
         }
     } else if (item.itemType === 'dm') {
-        // DM message display logic
-        const isMyLastMessage = item.lastMessageSenderId === user?.id;
-        if (isMyLastMessage) {
-            displayMessage = `Du: ${item.lastMessage}`;
-        } else if (item.isOrgConversation) {
-             displayMessage = `${item.name}: ${item.lastMessage}`;
-        } 
-        // User-to-user DMs received from others: show base message (no prefix needed)
-        // This case is implicitly handled if none of the above conditions are met.
+        // DM message display logic - Use pre-formatted message from processAndCombineData
+        displayMessage = item.lastMessage; // Already formatted correctly
     }
 
     const handlePress = () => {
@@ -647,6 +683,46 @@ const ChatScreen = ({ navigation, route }) => {
       } else {
           // Navigate to New Direct Message screen
           navigation.navigate('NewDirectMessage');
+      }
+  };
+
+  // <<< NEW: Fetch Avatars for User DMs >>>
+  const fetchAvatarsForUserDms = async (dmList) => {
+      const userDmsNeedingAvatars = dmList.filter(dm => dm.itemType === 'dm' && !dm.isOrgConversation && dm.otherUserId && !dm.avatarUrl);
+      if (userDmsNeedingAvatars.length === 0) {
+          return dmList; // No fetching needed
+      }
+
+      const userIdsToFetch = [...new Set(userDmsNeedingAvatars.map(dm => dm.otherUserId))];
+      console.log(`[ChatScreen] Fetching avatars for ${userIdsToFetch.length} other users.`);
+
+      try {
+          const { data: profilesData, error: profilesError } = await supabase
+              .from('profiles')
+              .select('id, avatar_url')
+              .in('id', userIdsToFetch);
+
+          if (profilesError) {
+              console.error('[ChatScreen] Error fetching profiles for avatars:', profilesError);
+              return dmList; // Return original list on error
+          }
+
+          const avatarMap = profilesData.reduce((map, profile) => {
+              map[profile.id] = profile.avatar_url;
+              return map;
+          }, {});
+
+          // Update the dmList with fetched avatar URLs
+          return dmList.map(dm => {
+              if (dm.itemType === 'dm' && !dm.isOrgConversation && dm.otherUserId && avatarMap[dm.otherUserId]) {
+                  return { ...dm, avatarUrl: avatarMap[dm.otherUserId] };
+              }
+              return dm;
+          });
+
+      } catch (fetchErr) {
+          console.error('[ChatScreen] Unexpected error in fetchAvatarsForUserDms:', fetchErr);
+          return dmList; // Return original list on unexpected error
       }
   };
 

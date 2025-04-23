@@ -29,6 +29,7 @@ import NewDirectMessageScreen from '../screens/NewDirectMessageScreen';
 import DirectMessageDetailScreen from '../screens/DirectMessageDetailScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
 import UserProfileViewScreen from '../screens/UserProfileViewScreen';
+import OrganizationProfileViewScreen from '../screens/OrganizationProfileViewScreen';
 
 const Tab = createBottomTabNavigator();
 const ChatStack = createStackNavigator();
@@ -52,7 +53,6 @@ const ChatStackNavigator = () => {
       <ChatStack.Screen name="DirectMessages" component={DirectMessagesScreen} />
       <ChatStack.Screen name="NewDirectMessage" component={NewDirectMessageScreen} />
       <ChatStack.Screen name="DirectMessageDetail" component={DirectMessageDetailScreen} />
-      <ChatStack.Screen name="UserProfileView" component={UserProfileViewScreen} />
     </ChatStack.Navigator>
   );
 };
@@ -69,7 +69,6 @@ const HomeStackNavigator = () => {
       <HomeStack.Screen name="ArticleDetail" component={ArticleDetailScreen} />
       <HomeStack.Screen name="CreateArticle" component={CreateArticleScreen} />
       <HomeStack.Screen name="EditArticle" component={EditArticleScreen} />
-      <HomeStack.Screen name="UserProfileView" component={UserProfileViewScreen} />
     </HomeStack.Navigator>
   );
 };
@@ -259,7 +258,12 @@ const AppNavigator = () => {
         <RootStack.Screen 
             name="UserProfileView" 
             component={UserProfileViewScreen} 
-            options={{ headerShown: false, presentation: 'modal' }} 
+            options={{ headerShown: false }} 
+        />
+        <RootStack.Screen 
+            name="OrganizationProfileView" 
+            component={OrganizationProfileViewScreen} 
+            options={{ headerShown: false }} 
         />
       </RootStack.Navigator>
     </NavigationContainer>

@@ -8,6 +8,14 @@ import { useNetwork } from '../context/NetworkContext';
 import { loadOfflineData } from '../utils/storageUtils';
 import { supabase } from '../lib/supabase';
 
+// Helper function to transform Supabase Storage URLs
+const getTransformedImageUrl = (originalUrl) => {
+  if (!originalUrl || !originalUrl.includes('/storage/v1/object/public/')) {
+    return originalUrl;
+  }
+  return originalUrl.replace('/object/public/', '/render/image/public/') + '?width=400&quality=60';
+};
+
 const HomeScreen = ({ navigation }) => {
   // Use the refactored organization context for active status
   const { isOrganizationActive, activeOrganizationId } = useOrganization();
@@ -367,7 +375,7 @@ const HomeScreen = ({ navigation }) => {
                 {/* Show image if available - check is already safe */}
                 {article.preview_image_url && (
                   <Image 
-                    source={{ uri: article.preview_image_url }} 
+                    source={{ uri: getTransformedImageUrl(article.preview_image_url) }} 
                     style={styles.articleImage}
                     resizeMode="cover"
                   />

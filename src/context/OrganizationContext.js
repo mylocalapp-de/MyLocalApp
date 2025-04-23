@@ -17,6 +17,7 @@ export const OrganizationProvider = ({ children }) => {
   const [activeOrganization, setActiveOrganization] = useState(null); // Store full org details
   const [isLoading, setIsLoading] = useState(true);
   const [loadingOrgLogo, setLoadingOrgLogo] = useState(false); // <-- ADDED: Loading state for logo upload
+  const [loadingOrgAboutMe, setLoadingOrgAboutMe] = useState(false); // --- ADDED: State for About Me Update ---
   const {
       user,
       userOrganizations,
@@ -132,7 +133,7 @@ export const OrganizationProvider = ({ children }) => {
         console.log(`OrgContext: [${switchTimestamp}] Fetching details for organization ID: ${organizationId}`);
         const { data, error } = await supabase
           .from('organizations')
-          .select('id, name, logo_url, invite_code, admin_id')
+          .select('id, name, logo_url, invite_code, admin_id, about_me')
           .eq('id', organizationId)
           .maybeSingle();
 
@@ -173,6 +174,7 @@ export const OrganizationProvider = ({ children }) => {
                ...data,
                invite_code: memberData.role === 'admin' ? data.invite_code : null,
                currentUserRole: memberData.role,
+               about_me: data.about_me, // <<< ADDED about_me from fetched data
            };
 
           // --- BEGIN STATE UPDATES ---
@@ -400,32 +402,48 @@ export const OrganizationProvider = ({ children }) => {
        if (!organizationId) return { success: false, error: { message: 'Organisations-ID benötigt.' } };
        // RLS Policy "Allow admin to manage their organization" should handle authz
        
+       // Dynamically build the update object
+       const updatePayload = { updated_at: new Date() };
+       if (details.hasOwnProperty('name')) {
+           updatePayload.name = details.name;
+       }
+       if (details.hasOwnProperty('about_me')) {
+           updatePayload.about_me = details.about_me;
+       }
+
+       // If no fields to update besides timestamp, return early (or decide if timestamp update is desired)
+       if (Object.keys(updatePayload).length <= 1) {
+           console.log("OrgContext: No fields to update in updateOrganizationDetails.");
+           return { success: true, data: activeOrganization }; // Nothing changed, return current data
+       }
+
        setIsLoading(true); // Use OrgContext loading state
        try {
-           const { data, error } = await supabase
-               .from('organizations')
-               .update({ 
-                   name: details.name, 
-                   // logo_url: details.logo_url, // Example of other fields
-                   updated_at: new Date() 
-               })
-               .eq('id', organizationId)
-               .select('id, name') // Return updated data
-               .single();
+            const { data, error } = await supabase
+                .from('organizations')
+                .update(updatePayload) // Use the dynamic payload
+                .eq('id', organizationId)
+                .select('id, name, about_me') // Select updated data including about_me
+                .single();
 
-           if (error) {
-               console.error("OrgContext: Error updating organization details:", error);
-               return { success: false, error: { message: error.message || 'Fehler beim Aktualisieren.' } };
-           }
-           
-           // If the active org was updated, refresh its details in state
-           if(activeOrganizationId === organizationId) {
-               setActiveOrganization(prev => prev ? { ...prev, name: data.name } : null); 
-           }
-           // Refresh user's org list in AuthContext to reflect potential name change in lists
-           await loadUserProfile(); 
+            if (error) {
+                console.error("OrgContext: Error updating organization details:", error);
+                const message = error.message.includes('duplicate key value violates unique constraint')
+                    ? 'Eine Organisation mit diesem Namen existiert bereits.'
+                    : error.message.includes('permission denied')
+                    ? 'Berechtigung verweigert. Nur Admins können die Details ändern.'
+                    : error.message || 'Fehler beim Aktualisieren der Details.';
+                return { success: false, error: { message } };
+            }
+            
+            // If the active org was updated, refresh its details in state
+            if(activeOrganizationId === organizationId) {
+                setActiveOrganization(prev => prev ? { ...prev, ...data } : null); // Update with all returned data
+            }
+            // Refresh user's org list in AuthContext to reflect potential name change in lists
+            await loadUserProfile(); 
 
-           return { success: true, data };
+            return { success: true, data };
 
        } catch (error) {
            console.error("OrgContext: Unexpected error updating org details:", error);
@@ -556,6 +574,59 @@ export const OrganizationProvider = ({ children }) => {
     }
   };
 
+  // --- NEW: Function to update Organization About Me ---
+  const updateOrganizationAboutMe = async (organizationId, newAboutMe) => {
+      if (!user) return { success: false, error: { message: 'Nicht angemeldet.' } };
+      if (!organizationId) return { success: false, error: { message: 'Organisations-ID fehlt.' } };
+      
+      // Basic check for empty string, allow empty/null to clear it
+      const aboutMeToSave = newAboutMe?.trim() ?? null; 
+
+      setLoadingOrgAboutMe(true);
+      const timestamp = Date.now();
+      console.log(`[${timestamp}] OrgContext: Starting about_me update for org ${organizationId}.`);
+
+      try {
+          // RLS policy "Allow admin to manage their organization" should handle authorization
+          const { data, error } = await supabase
+              .from('organizations')
+              .update({ about_me: aboutMeToSave, updated_at: new Date() })
+              .eq('id', organizationId)
+              .select('id, about_me') // Select updated data
+              .single(); // Expect single row
+
+          if (error) {
+              console.error(`[${timestamp}] OrgContext: Error updating organization about_me for org ${organizationId}:`, error);
+              const message = error.message.includes('permission denied')
+                  ? 'Berechtigung verweigert. Nur Admins können die Beschreibung ändern.'
+                  : error.message || 'Fehler beim Aktualisieren der Beschreibung.';
+              return { success: false, error: { message } };
+          }
+
+          console.log(`[${timestamp}] OrgContext: Successfully updated org about_me for org ${organizationId}.`);
+
+          // Update local activeOrganization state if this is the active org
+          if (activeOrganizationId === organizationId) {
+              setActiveOrganization(prev => prev ? ({ ...prev, about_me: data.about_me }) : null);
+              console.log(`[${timestamp}] OrgContext: Updated activeOrganization state with new about_me.`);
+          }
+
+          // Refresh user profile/orgs list (might not be strictly necessary for about_me, but good practice)
+          await loadUserProfile(); 
+          console.log(`[${timestamp}] OrgContext: Refreshed user profile/orgs after about_me update.`);
+
+          return { success: true, data: { aboutMe: data.about_me } };
+
+      } catch (error) {
+          console.error(`[${timestamp}] OrgContext: Unexpected error in updateOrganizationAboutMe for org ${organizationId}:`, error);
+          return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+      } finally {
+          setLoadingOrgAboutMe(false);
+          console.log(`[${timestamp}] OrgContext: Finished updateOrganizationAboutMe for org ${organizationId}. loadingOrgAboutMe set to false.`);
+      }
+  };
+  // --- END NEW FUNCTION ---
+
   return (
     <OrganizationContext.Provider
         value={{
@@ -574,6 +645,10 @@ export const OrganizationProvider = ({ children }) => {
             // Add logo update function and loading state
             updateOrganizationLogo,
             loadingOrgLogo,
+            // --- ADDED: About Me update function and state ---
+            updateOrganizationAboutMe,
+            loadingOrgAboutMe,
+            // --- END ADDED ---
         }}
     >
       {children}

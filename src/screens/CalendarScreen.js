@@ -16,6 +16,14 @@ const { width, height } = Dimensions.get('window');
 const isSmallScreen = width < 380 || height < 700;
 //const isAndroidEmulator = (width === 720 && height === 1280) || (width === 1080 && height === 2400);
 
+// Helper function to transform Supabase Storage URLs
+const getTransformedImageUrl = (originalUrl, width = 100, quality = 80) => {
+  if (!originalUrl || !originalUrl.includes('/storage/v1/object/public/')) {
+    return originalUrl;
+  }
+  return `${originalUrl.replace('/object/public/', '/render/image/public/')}?width=${width}&quality=${quality}`;
+};
+
 // Configure German locale for calendar
 LocaleConfig.locales['de'] = {
   monthNames: [
@@ -479,7 +487,7 @@ const CalendarScreen = ({ navigation }) => {
       >
         <View style={styles.eventContainer}>
           {item.image_url ? (
-             <Image source={{ uri: item.image_url }} style={styles.eventImage} />
+             <Image source={{ uri: getTransformedImageUrl(item.image_url) }} style={styles.eventImage} />
           ) : (
             <View style={styles.eventImagePlaceholder} />
           )}

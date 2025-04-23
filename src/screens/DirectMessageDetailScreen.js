@@ -28,6 +28,15 @@ import { useOrganization } from '../context/OrganizationContext';
 const { height } = Dimensions.get('window');
 const androidPaddingTop = height * 0.05;
 
+// Helper function to transform Supabase Storage URLs
+const getTransformedImageUrl = (originalUrl) => {
+  if (!originalUrl || !originalUrl.includes('/storage/v1/object/public/')) {
+    return originalUrl; // Return original if not a valid Supabase Storage URL
+  }
+  // Replace the path segment and add transform parameters
+  return originalUrl.replace('/object/public/', '/render/image/public/') + '?width=400&quality=60';
+};
+
 const DirectMessageDetailScreen = ({ route, navigation }) => {
   const { 
       conversationId, 
@@ -49,6 +58,7 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
   const [imageAsset, setImageAsset] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const flatListRef = useRef(null);
+  const [recipientImageUrl, setRecipientImageUrl] = useState(null); // State for header image
 
   // Load messages when component mounts or conversationId changes
   useEffect(() => {
@@ -78,38 +88,83 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
           const newMessage = payload.new;
 
           // Use a function to get sender name to keep it DRY
-          const getSenderName = (senderId) => {
+          const getSenderName = (senderId, senderProfile) => {
              if (senderId === user?.id) {
-                 return displayName || 'Ich'; // Current user
+                 // If I am the sender
+                 return isOrganizationActive ? (activeOrganization?.name || 'Organisation') : (displayName || 'Ich');
              } else if (isOrgConversation) {
-                 // In Org DMs, need to fetch profile of the sending member
-                 // For now, use a placeholder or try a quick fetch (less ideal)
-                 // A better approach involves joining profile in the message select or subscription
-                 return 'Mitglied'; // Placeholder - TODO: Fetch actual member name 
+                 // If it's an Org DM and I am NOT the sender
+                 // Show the actual sender's name (the Org member)
+                 return senderProfile?.display_name || 'Mitglied'; // Use fetched/provided profile
              } else {
-                 // User DM, use the recipientName passed in
-                 return recipientName || 'Unbekannt';
+                 // User-to-User DM and I am NOT the sender
+                 return recipientName || 'Unbekannt'; // Use the recipientName passed in
              }
           };
 
+          // *** REMOVE CLIENT-SIDE FILTERING for Subscription ***
+          // const isMyMessage = newMessage.sender_id === user?.id;
+          // const shouldDisplay = ... (removed)
+          // if (!shouldDisplay ...) { ... } (removed)
+          // *** END REMOVAL ***
+
+          // If the message should be displayed, proceed to add/update state
           setMessages((prevMessages) => {
              if (prevMessages.some(msg => msg.id === newMessage.id)) {
                 return prevMessages;
             }
             const formattedTime = new Date(newMessage.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            return [
-                 ...prevMessages,
-                 {
-                    id: newMessage.id,
-                    text: newMessage.text,
-                    image_url: newMessage.image_url,
-                    sender_id: newMessage.sender_id,
-                    time: formattedTime,
-                    // Use the helper function to determine sender name
-                    sender: getSenderName(newMessage.sender_id),
-                    user_id: newMessage.sender_id // Keep original user_id for isMe check
-                 }
-             ];
+
+            // Fetch sender profile for the new message if not already cached/present
+            // This might be slightly inefficient; consider a profile cache later.
+            let senderNamePromise = Promise.resolve(getSenderName(newMessage.sender_id, null)); // Default/Fallback
+
+            // Avoid re-fetching if sender is current user OR we somehow already have it
+            const existingSenderData = prevMessages.find(m => m.sender_id === newMessage.sender_id)?.sender; // Simplistic check
+
+             // Only fetch if not me and not easily found (this is a simplification)
+            if (newMessage.sender_id !== user?.id && !existingSenderData?.includes(':')) { // Avoid fetching if name seems resolved
+                senderNamePromise = supabase
+                    .from('profiles')
+                    .select('display_name')
+                    .eq('id', newMessage.sender_id)
+                    .single()
+                    .then(({ data: profileData, error: profileError }) => {
+                        if (profileError) {
+                            console.error("Error fetching sender profile for new message:", profileError);
+                            return getSenderName(newMessage.sender_id, null); // Fallback on error
+                        } else {
+                             console.log("Fetched profile for new message:", profileData);
+                            return getSenderName(newMessage.sender_id, profileData); // Use fetched data
+                        }
+                    });
+            } else if (newMessage.sender_id === user?.id) {
+                 senderNamePromise = Promise.resolve(getSenderName(user.id, null)); // Directly resolve for self
+            }
+
+
+            // Immediately add the message with a placeholder/known name
+            const newMsgObject = {
+                id: newMessage.id,
+                text: newMessage.text,
+                image_url: newMessage.image_url,
+                sender_id: newMessage.sender_id,
+                time: formattedTime,
+                 sender: newMessage.sender_id === user?.id ? getSenderName(user.id, null) : 'Lädt...', // Initial sender name
+                user_id: newMessage.sender_id
+             };
+
+             // Update state with the placeholder/known name first
+             const updatedMessages = [...prevMessages, newMsgObject];
+
+             // Then, update the specific message once the name is fetched (if fetch was needed)
+             senderNamePromise.then(resolvedSenderName => {
+                 setMessages(currentMessages => currentMessages.map(msg =>
+                    msg.id === newMessage.id ? { ...msg, sender: resolvedSenderName } : msg
+                 ));
+             });
+
+            return updatedMessages; // Return the list with the immediately added message
           });
           setTimeout(() => flatListRef.current?.scrollToEnd(), 100);
         }
@@ -128,6 +183,41 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
     // Dependencies: include isOrgConversation and recipientName for sender resolution
   }, [conversationId, isOfflineMode, user, displayName, recipientName, isOrgConversation]);
 
+  // --- NEW: Fetch header image --- 
+  useEffect(() => {
+    const fetchHeaderImage = async () => {
+        if (isOfflineMode) return;
+        let imageUrl = null;
+        try {
+            if (isOrgConversation && organizationId) {
+                const { data, error } = await supabase
+                    .from('organizations')
+                    .select('logo_url')
+                    .eq('id', organizationId)
+                    .single();
+                if (error) throw error;
+                imageUrl = data?.logo_url;
+            } else if (!isOrgConversation && recipientId) {
+                const { data, error } = await supabase
+                    .from('profiles')
+                    .select('avatar_url')
+                    .eq('id', recipientId)
+                    .single();
+                if (error) throw error;
+                imageUrl = data?.avatar_url;
+            }
+            if (imageUrl) {
+                setRecipientImageUrl(getTransformedImageUrl(imageUrl)); // Apply transformation
+            }
+        } catch (err) {
+            console.error("Error fetching header image:", err);
+            // Optionally handle the error, e.g., show a default image
+        }
+    };
+
+    fetchHeaderImage();
+  }, [isOrgConversation, organizationId, recipientId, isOfflineMode]);
+  // --- END NEW: Fetch header image ---
 
   // Fetch messages for the current conversation
   const fetchMessages = async () => {
@@ -135,8 +225,7 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
       setLoading(true);
       setError(null);
 
-      // Fetch profiles along with messages for accurate sender names
-      const { data, error: fetchError } = await supabase
+      let query = supabase
         .from('direct_messages')
         .select(`
           id,
@@ -144,53 +233,49 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
           text,
           image_url,
           created_at,
-          sender:profiles ( display_name ) 
+          sender:profiles ( display_name )
         `)
-        .eq('conversation_id', conversationId)
-        .order('created_at', { ascending: true });
+        .eq('conversation_id', conversationId); // Base condition
+
+      // The query now only filters by conversation_id. RLS MUST handle visibility.
+      query = query.order('created_at', { ascending: true });
+
+      const { data, error: fetchError } = await query;
 
       if (fetchError) {
         console.error('Error fetching direct messages:', fetchError);
         setError('Nachrichten konnten nicht geladen werden.');
       } else if (data) {
+        // Process messages AFTER filtering
         const processedMessages = data.map(msg => {
-          const messageDate = new Date(msg.created_at);
-          const formattedTime = messageDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-          const isMyMessage = msg.sender_id === user?.id;
-          
-          // Determine sender name based on context
-          let finalSenderName = 'Unbekannt'; // Default
+            const messageDate = new Date(msg.created_at);
+            const formattedTime = messageDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const isMyMessage = msg.sender_id === user?.id;
 
-          if (isOrganizationActive) { // Viewing in Org Context
-              if (isMyMessage) {
-                  // Message sent BY ME while in Org Context -> Show Org Name
-                  finalSenderName = activeOrganization?.name || 'Organisation';
-              } else {
-                  // Message sent BY ANOTHER USER TO the Org -> Show User's Name
-                  finalSenderName = msg.sender?.display_name || 'Benutzer'; 
-              }
-          } else { // Viewing in Personal Context
-              if (isMyMessage) {
-                  // Message sent BY ME -> Show My Name
-                  finalSenderName = displayName || 'Ich';
-              } else if (isOrgConversation) {
-                  // Message received FROM Org -> Show Org Name
-                  finalSenderName = recipientName || 'Organisation'; // recipientName holds Org name
-              } else {
-                  // Message received FROM another USER -> Show Other User's Name
-                  finalSenderName = msg.sender?.display_name || recipientName || 'Unbekannt';
-              }
-          }
+            // Determine sender name based on context AND the fact we've filtered
+            let finalSenderName = 'Unbekannt'; // Default
 
-          return {
-            id: msg.id,
-            text: msg.text,
-            image_url: msg.image_url,
-            sender: finalSenderName, // Use the determined name
-            time: formattedTime,
-            user_id: msg.sender_id, // Keep original field name for isMe check
-            sender_id: msg.sender_id, // Keep for consistency
-          };
+            if (isMyMessage) {
+               // If I sent the message (applies to both User & Org DMs)
+               finalSenderName = displayName || 'Ich';
+            } else if (isOrgConversation) {
+               // Org DM, message sent by someone else (who must be an org member due to filtering) -> Show THEIR name
+               finalSenderName = msg.sender?.display_name || 'Mitglied'; // Use the fetched profile name
+            } else {
+               // User-to-user DM, message sent by the other user
+               finalSenderName = msg.sender?.display_name || recipientName || 'Unbekannt'; // Use sender's profile name or passed name
+            }
+
+
+            return {
+              id: msg.id,
+              text: msg.text,
+              image_url: msg.image_url,
+              sender: finalSenderName, // Use the determined name
+              time: formattedTime,
+              user_id: msg.sender_id, // Keep original field name for isMe check
+              sender_id: msg.sender_id, // Keep for consistency
+            };
         });
         setMessages(processedMessages);
       } else {
@@ -241,8 +326,8 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
       const fileExt = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
       const fileName = `${uuidv4()}.${fileExt}`;
       // Use a dedicated bucket for DM images if preferred
-      const bucketName = 'article_images'; // Or 'dm_images'
-      const filePath = `${fileName}`; 
+      const bucketName = 'images';
+      const filePath = `${fileName}`;
 
       const { data, error: uploadError } = await supabase.storage
         .from(bucketName)
@@ -353,6 +438,9 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
     const isMe = user && item.user_id === user.id;
     const canNavigateToProfile = !isMe && !isOrgConversation && item.user_id;
 
+    // Transform the image URL if it exists
+    const transformedImageUrl = item.image_url ? getTransformedImageUrl(item.image_url) : null;
+
     return (
       <View style={styles.messageContainer}>
         {/* Display sender name ABOVE bubble only if NOT sent by current user */}
@@ -367,20 +455,22 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
             </TouchableOpacity>
         )}
 
+        {/* Determine Bubble Style: Default to otherMessage (grey) */}
+        {/* Apply myMessage (blue) only if sent by logged-in user AND NOT acting as org */}
+        {/* Apply orgSentMessage (green) only if sent by logged-in user AND acting as org */}
         <View
           style={[
             styles.messageBubble,
-            isMe ? styles.myMessage : styles.otherMessage,
-            // Add specific style if acting as org?
-            (isMe && isOrganizationActive) ? styles.orgSentMessage : {}
+            !isMe ? styles.otherMessage : // Grey if not sent by me
+              (isOrganizationActive ? styles.orgSentMessage : styles.myMessage) // Green if I sent AS org, Blue if I sent as myself
           ]}
         >
-          {item.text && <Text style={styles.messageText}>{item.text}</Text>}
+          {item.text && <Text style={[styles.messageText, isMe ? styles.myMessageText : styles.otherMessageText]}>{item.text}</Text>}
 
           {item.image_url && (
             <TouchableOpacity>
               <Image
-                source={{ uri: item.image_url }}
+                source={{ uri: transformedImageUrl }} // Use transformed URL
                 style={styles.messageImage}
                 resizeMode="cover"
               />
@@ -388,46 +478,60 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
           )}
 
           {/* Optional: Add indicator that message was sent on behalf of org? */}
+          {/* Show ONLY if isMe AND isOrganizationActive */}
           {isMe && isOrganizationActive && <Text style={styles.orgSentIndicator}>(Gesendet als {activeOrganization?.name})</Text>}
 
-          <Text style={styles.messageTime}>{item.time}</Text>
+          <Text style={[styles.messageTime, isMe ? styles.myMessageTime : styles.otherMessageTime]}>{item.time}</Text>
         </View>
       </View>
     );
   };
 
   const renderHeader = () => {
-    const canNavigateFromHeader = !isOrgConversation && recipientId;
+    // User profile navigation is only possible if it's NOT an org convo AND we have a recipientId
+    const canNavigateToUserProfile = !isOrgConversation && recipientId;
+    // Org profile navigation is only possible IF it IS an org convo AND we have an organizationId
+    const canNavigateToOrgProfile = isOrgConversation && organizationId;
+
     return (
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color="#4285F4" />
         </TouchableOpacity>
-         {/* Render correct avatar/icon */}
-         {isOrgConversation ? (
-            <View style={[styles.avatarPlaceholder, styles.orgAvatar]}>
-                <Ionicons name="business-outline" size={18} color="#fff" />
-            </View>
-         ) : (
-            // Make avatar touchable for user profile navigation
-            <TouchableOpacity 
-                disabled={isOfflineMode || !canNavigateFromHeader}
-                onPress={() => canNavigateFromHeader && navigation.navigate('UserProfileView', { userId: recipientId })}
-                style={[styles.avatarPlaceholder, styles.userAvatar]} // Wrap in TouchableOpacity
-            >
-                <Text style={styles.avatarLetter}>
-                    {recipientName?.charAt(0).toUpperCase() || 'U'}
-                </Text>
-            </TouchableOpacity>
-         )}
-        {/* Make name touchable for user profile navigation */}
-         <TouchableOpacity 
-             disabled={isOfflineMode || !canNavigateFromHeader}
-             onPress={() => canNavigateFromHeader && navigation.navigate('UserProfileView', { userId: recipientId })}
-             style={{ flex: 1 }} // Make touchable area expand
-         >
-            <Text style={styles.headerName}>{recipientName || (isOrgConversation ? 'Organisation' : 'Nachricht')}</Text>
-         </TouchableOpacity>
+
+        {/* --- Conditional Touchable Wrapper for Avatar/Name --- */}
+        <TouchableOpacity
+          style={styles.headerTouchableContent} // Use a new style for the touchable area
+          disabled={isOfflineMode || (!canNavigateToUserProfile && !canNavigateToOrgProfile)} // Disable if offline or neither navigation possible
+          onPress={() => {
+            if (canNavigateToOrgProfile) {
+              navigation.navigate('OrganizationProfileView', { organizationId: organizationId });
+            } else if (canNavigateToUserProfile) {
+              navigation.navigate('UserProfileView', { userId: recipientId });
+            }
+          }}
+        >
+          {/* Render correct avatar/icon */}
+          {recipientImageUrl ? (
+            <Image source={{ uri: recipientImageUrl }} style={styles.headerAvatarImage} />
+          ) : isOrgConversation ? (
+              <View style={[styles.avatarPlaceholder, styles.orgAvatar]}>
+                  <Ionicons name="business-outline" size={18} color="#fff" />
+              </View>
+          ) : (
+              <View style={[styles.avatarPlaceholder, styles.userAvatar]}>
+                  <Text style={styles.avatarLetter}>
+                      {recipientName?.charAt(0).toUpperCase() || 'U'}
+                  </Text>
+              </View>
+          )}
+          {/* Display Name */}
+          <Text style={styles.headerName} numberOfLines={1} ellipsizeMode="tail">
+             {recipientName || (isOrgConversation ? 'Organisation' : 'Nachricht')}
+          </Text>
+        </TouchableOpacity>
+         {/* --- End Conditional Touchable Wrapper --- */}
+
          {/* Optional: Add online status indicator? Not applicable for orgs */}
       </View>
     );
@@ -614,7 +718,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#e5e5e5',
     alignSelf: 'flex-start',
     borderBottomLeftRadius: 5,
-    color: '#000', // Ensure text is dark on light background
+    color: 'inherit', // Inherit color from bubble style
   },
    messageText: {
     fontSize: 15,
@@ -758,6 +862,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#34A853', // Use Org color (e.g., green)
     alignSelf: 'flex-end',
     borderBottomRightRadius: 5,
+    // Text color should be white for green bg
   },
   orgSentIndicator: {
     fontSize: 10,
@@ -784,6 +889,30 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  // --- ADD Text and Time color variations ---
+  myMessageText: {
+    color: '#fff',
+  },
+  otherMessageText: {
+      color: '#000',
+  },
+  myMessageTime: {
+      color: '#e0e0e0', // Lighter time text on dark bubbles
+  },
+  otherMessageTime: {
+      color: '#999', // Standard time text on light bubbles
+  },
+  // --- END ADD ---
+  headerTouchableContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerAvatarImage: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    marginRight: 10,
   },
 });
 
