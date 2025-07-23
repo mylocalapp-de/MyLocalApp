@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, StyleSheet, Text, Platform, SafeAreaView, Dimensions, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, Text, Platform, SafeAreaView, Dimensions, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useFonts, Lobster_400Regular } from '@expo-google-fonts/lobster';
 import Constants from 'expo-constants';
 import FilterButtons from './FilterButtons';
@@ -15,7 +15,13 @@ const ScreenHeader = ({
   onFilterChange, 
   initialFilter = 'Aktuell', 
   showBackButton = false, 
-  navigation 
+  navigation,
+  showFilterButton = false,
+  onFilterButtonPress,
+  showBlockButton = false,
+  onBlockToggle,
+  isBlocked = false,
+  blockLoading = false
 }) => {
   const { isOfflineMode, toggleOfflineMode } = useNetwork();
 
@@ -23,50 +29,81 @@ const ScreenHeader = ({
     Lobster_400Regular,
   });
 
-  const appName = Constants.expoConfig?.name || 'MeinHavelaue';
+  const appName = Constants.expoConfig?.name || 'MeinStrodehne';
 
   const handleExitOfflineMode = () => {
     toggleOfflineMode(false);
   };
 
+  const renderRightContent = () => {
+    if (showBlockButton && onBlockToggle) {
+      const iconName = isBlocked ? 'checkmark-circle' : 'ban-outline';
+      const buttonText = isBlocked ? 'Entsperrt' : 'Blockieren';
+      const buttonColor = isBlocked ? '#4CAF50' : '#ff3b30';
+
+      return (
+        <TouchableOpacity
+          style={[styles.blockButton, { borderColor: buttonColor, backgroundColor: 'transparent' }]}
+          onPress={onBlockToggle}
+          disabled={blockLoading}
+        >
+          {blockLoading ? (
+            <ActivityIndicator size="small" color={buttonColor} style={styles.blockLoader} />
+          ) : (
+            <Ionicons name={iconName} size={16} color={buttonColor} style={styles.blockIcon} />
+          )}
+          <Text style={[styles.blockButtonText, { color: buttonColor }]}>  
+            {blockLoading ? (isBlocked ? 'Entsperre' : 'Blockieren') : buttonText}
+          </Text>
+        </TouchableOpacity>
+      );
+    } else if (showFilterButton && onFilterButtonPress) {
+      return (
+        <TouchableOpacity onPress={onFilterButtonPress} style={styles.filterIconContainer}>
+          <Ionicons name="options-outline" size={24} color="#4285F4" />
+        </TouchableOpacity>
+      );
+    }
+    return null; // No button if neither block nor filter is shown
+  };
+
+  const rightContent = renderRightContent();
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
-        <View style={styles.titleContainer}>
-          {showBackButton && navigation && (
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-              <Ionicons name="arrow-back" size={26} color="#4285F4" />
-            </TouchableOpacity>
-          )}
-          <Text 
-            style={[
-              styles.titleText,
-              // Apply Lobster font if loaded, regardless of title source
-              fontsLoaded && { fontFamily: 'Lobster_400Regular' },
-              // Apply specific appName style only if title is not provided
-              !title && styles.appNameStyle, 
-              // Apply Lobster font unconditionally if loaded and title exists
-              // Overrides the default bold if Lobster is loaded
-              fontsLoaded && title ? { fontFamily: 'Lobster_400Regular', fontWeight: 'normal' } : {},
-              showBackButton && styles.titleWithBackButton
-            ]}
-          >
-            {title || appName}
-          </Text>
-          {isOfflineMode && (
-            <TouchableOpacity onPress={handleExitOfflineMode} style={styles.offlineButton}>
-              <Text style={styles.offlineButtonText}>Offline verlassen</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-        {filters.length > 0 && (
-          <FilterButtons 
-            filters={filters} 
-            onFilterChange={onFilterChange} 
-            initialFilter={initialFilter} 
-          />
+      <View style={styles.headerRow}>
+        {showBackButton && navigation ? (
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconButton}>
+            <Ionicons name="arrow-back" size={24} color="#4285F4" />
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.iconPlaceholder} />
+        )}
+        <Text 
+          style={[
+            styles.titleText,
+            fontsLoaded && { fontFamily: 'Lobster_400Regular' },
+            !title && styles.appNameStyle
+          ]}
+          numberOfLines={1}
+          ellipsizeMode="tail"
+        >
+          {title || appName}
+        </Text>
+        { rightContent ? (
+          <TouchableOpacity onPress={onBlockToggle} style={styles.iconButton} disabled={blockLoading}>
+            {rightContent}
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.iconPlaceholder} />
         )}
       </View>
+      {filters.length > 0 && (
+        <FilterButtons 
+          filters={filters} 
+          onFilterChange={onFilterChange} 
+          initialFilter={initialFilter} 
+        />
+      )}
     </SafeAreaView>
   );
 };
@@ -77,55 +114,54 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     paddingTop: Platform.OS === 'android' ? androidPaddingTop : 10,
   },
-  container: {
-    width: '100%',
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#ddd',
-    paddingHorizontal: 10,
-    alignItems: 'center',
-  },
-  titleContainer: {
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
     width: '100%',
-    position: 'relative',
-    minHeight: 40,
-    marginBottom: 5,
+    minHeight: 44,
+    paddingHorizontal: 10,
+    marginBottom: 4,
   },
-  backButton: {
-    position: 'absolute',
-    left: 0,
-    padding: 5,
-    zIndex: 1,
+  iconButton: {
+    padding: 8,
+  },
+  iconPlaceholder: {
+    width: 40,
+    height: 40,
   },
   titleText: {
-    fontSize: 24,
+    fontSize: 20,
     color: '#333',
     fontWeight: 'bold',
     textAlign: 'center',
     flex: 1,
   },
   appNameStyle: {
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: 'normal',
   },
-  titleWithBackButton: {
+  filterIconContainer: {
+    padding: 5,
   },
-  offlineButton: {
-    position: 'absolute',
-    right: 0,
-    backgroundColor: '#ffc107',
+  blockButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingVertical: 4,
     paddingHorizontal: 8,
-    borderRadius: 5,
-    alignSelf: 'center',
+    borderRadius: 4,
+    borderWidth: 1,
+    marginLeft: 8,
   },
-  offlineButtonText: {
-    color: '#333',
-    fontSize: 10,
-    fontWeight: 'bold',
+  blockIcon: {
+    marginRight: 4,
+  },
+  blockLoader: {
+    marginRight: 4,
+  },
+  blockButtonText: {
+    fontSize: 12,
+    fontWeight: '500',
   },
 });
 

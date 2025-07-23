@@ -10,7 +10,9 @@ import {
   Keyboard, 
   TouchableWithoutFeedback, 
   ScrollView,
-  Modal // Added Modal
+  Modal, // Added Modal
+  Platform, // Added Platform
+  Linking // Added Linking
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
@@ -18,11 +20,13 @@ import { useOrganization } from '../context/OrganizationContext'; // To switch c
 import { supabase } from '../lib/supabase'; // Import supabase client
 import Purchases, { PurchasesOffering, PurchasesPackage, LOG_LEVEL } from 'react-native-purchases';
 import Constants from 'expo-constants'; // Import Constants
-import { Platform } from 'react-native'; // Import Platform
 
 // TODO: Configure Purchases SDK with your API key, typically in App.js
 // Purchases.configure({ apiKey: "YOUR_REVENUECAT_API_KEY" });
 // Purchases.setLogLevel(LOG_LEVEL.DEBUG); // Optional: For debugging
+
+// --- Determine if iOS IAP is enabled via environment variable ---
+const isIosIapEnabled = Constants.expoConfig?.extra?.enableIosIap === true;
 
 const OrganizationSetupScreen = ({ navigation }) => {
   const [mode, setMode] = useState('select'); // 'select', 'create', 'join', 'voucher'
@@ -35,15 +39,16 @@ const OrganizationSetupScreen = ({ navigation }) => {
   const [voucherError, setVoucherError] = useState(''); // Specific error for voucher modal
   const [showVoucherModal, setShowVoucherModal] = useState(false);
   
-  const { createOrganization, joinOrganizationByInviteCode } = useAuth();
+  const { createOrganization, joinOrganizationByInviteCode, user, profile } = useAuth();
   const { switchOrganizationContext } = useOrganization();
-  const { user } = useAuth(); // Get current user ID
 
   // --- RevenueCat State ---
   const [offerings, setOfferings] = useState(null);
   const [selectedPackage, setSelectedPackage] = useState(null);
   const [isFetchingOfferings, setIsFetchingOfferings] = useState(false);
   const [purchaseError, setPurchaseError] = useState(null); // Use null consistently
+  const [hasActiveSubscription, setHasActiveSubscription] = useState(false); // New state
+  const [isRestoring, setIsRestoring] = useState(false); // State for restore loading
 
   // --- Configure RevenueCat SDK --- 
   useEffect(() => {
@@ -69,18 +74,55 @@ const OrganizationSetupScreen = ({ navigation }) => {
     }
   }, []); // Empty dependency array ensures this runs only once when the component mounts
 
-  // --- Fetch RevenueCat Offerings ---
+  // --- Listen for changes after code redemption ---
   useEffect(() => {
-    const getOfferings = async () => {
-      if (mode === 'create' && !voucherCode) { // Fetch only when needed and not using voucher
-          setIsFetchingOfferings(true);
-          setPurchaseError(null); // Clear previous purchase errors
+    const unsubscribe = Purchases.addCustomerInfoUpdateListener((customerInfo) => {
+      console.log('CustomerInfo updated after code redemption:', customerInfo);
+      // Optionally handle entitlement activation or UI update here
+    });
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, []);
+
+  // --- Fetch RevenueCat Offerings OR Check Entitlement ---
+  useEffect(() => {
+    // Define the entitlement ID locally
+    const requiredEntitlement = 'organization_admin'; 
+
+    const checkEntitlementAndFetchOfferings = async () => {
+      if (mode === 'create' && !voucherCode) { // Only run in create mode without voucher
+          setIsFetchingOfferings(true); // Use this state for initial check too
+          setPurchaseError(null);
+          setHasActiveSubscription(false); // Reset entitlement state
+          setOfferings(null); // Reset offerings
+          setSelectedPackage(null); // Reset package
+
           try {
+              // 1. Check for existing active entitlement first
+              console.log('[RevenueCat Check] Fetching customer info to check for active subscription...');
+              const customerInfo = await Purchases.getCustomerInfo();
+              console.log('[RevenueCat Check] Fetched customer info:', JSON.stringify(customerInfo.entitlements, null, 2));
+
+              if (customerInfo.entitlements?.active?.[requiredEntitlement]) {
+                  console.log(`[RevenueCat Check] Active entitlement '${requiredEntitlement}' found. Skipping purchase flow.`);
+                  setHasActiveSubscription(true);
+                  setIsFetchingOfferings(false); // No need to fetch offerings
+                  return; // Exit early
+              } else {
+                  console.log(`[RevenueCat Check] Active entitlement '${requiredEntitlement}' not found. Proceeding to fetch offerings.`);
+                  setHasActiveSubscription(false);
+              }
+
+              // 2. If no active entitlement, fetch offerings
               const fetchedOfferings = await Purchases.getOfferings();
               if (fetchedOfferings.current !== null && fetchedOfferings.current.availablePackages.length > 0) {
                   setOfferings(fetchedOfferings.current);
-                  // --- Explicitly select the target package ---
-                  const targetPackageId = '$rc_weekly'; // Match the Identifier from RevenueCat Offering Package
+                  console.log('[RevenueCat] Available packages identifiers:', fetchedOfferings.current.availablePackages.map(pkg => pkg.identifier));
+                  
+                  // Use static weekly subscription package identifier
+                  const targetPackageId = '$rc_weekly'; // KEEP this identifier
+                  console.log('[RevenueCat] Selecting package with identifier:', targetPackageId);
                   const targetPackage = fetchedOfferings.current.availablePackages.find(
                       pkg => pkg.identifier === targetPackageId
                   );
@@ -90,36 +132,68 @@ const OrganizationSetupScreen = ({ navigation }) => {
                   } else {
                       setPurchaseError("Das benötigte Abo-Paket wurde nicht gefunden.");
                       console.error(`Could not find package with ID: ${targetPackageId} in current offering.`);
-                      setSelectedPackage(null); // Ensure no package is selected
                   }
-                  // --- End explicit selection ---
               } else {
                   setPurchaseError("Keine Kaufoptionen verfügbar.");
-                  setSelectedPackage(null); // Ensure no package is selected
               }
           } catch (e) {
-              // --- Enhanced Error Logging ---
-              console.error("Error fetching RevenueCat offerings. Details:", JSON.stringify(e, null, 2));
-              // Log specific properties if they exist (common ones)
+              console.error("Error checking entitlement or fetching offerings:", JSON.stringify(e, null, 2));
               if (e.code) console.error("RevenueCat Error Code:", e.code);
               if (e.message) console.error("RevenueCat Error Message:", e.message);
               if (e.underlyingErrorMessage) console.error("RevenueCat Underlying Error:", e.underlyingErrorMessage);
-              // --- End Enhanced Error Logging ---
-
-              setPurchaseError("Fehler beim Laden der Kaufoptionen.");
-              Alert.alert("Fehler", "Kaufoptionen konnten nicht geladen werden. Bitte versuche es später erneut.");
+              setPurchaseError("Fehler beim Laden der Abo-Informationen.");
+              // Consider a more specific alert if entitlement check fails vs offering fetch
+              Alert.alert("Fehler", "Abo-Informationen konnten nicht geladen werden.");
           } finally {
               setIsFetchingOfferings(false);
           }
       } else {
-          // Clear offerings if not in create mode or if using voucher
+          // Clear states if not in create mode or if using voucher
+          setHasActiveSubscription(false);
           setOfferings(null);
           setSelectedPackage(null);
       }
     };
 
-    getOfferings();
-  }, [mode, voucherCode]); // Re-fetch if mode changes or voucherCode is set/cleared
+    checkEntitlementAndFetchOfferings();
+  }, [mode, voucherCode]); // Re-run if mode or voucherCode changes
+
+  // --- Restore Purchases Handler ---
+  const handleRestorePurchases = async () => {
+    setIsRestoring(true);
+    setError(''); // Clear previous errors
+    setPurchaseError(null);
+
+    try {
+        console.log('[Restore] Attempting to restore purchases...');
+        const customerInfo = await Purchases.restorePurchases();
+        console.log('[Restore] Restore completed. Customer Info:', JSON.stringify(customerInfo, null, 2));
+
+        const requiredEntitlement = 'organization_admin';
+
+        // Check if the entitlement is now active after restoring
+        if (customerInfo.entitlements?.active?.[requiredEntitlement]) {
+            console.log(`[Restore] Entitlement '${requiredEntitlement}' found after restore.`);
+            Alert.alert('Erfolg', 'Deine früheren Käufe wurden erfolgreich wiederhergestellt.');
+            // Update state to reflect active subscription which triggers UI update
+            setHasActiveSubscription(true);
+             // If the user is on the selection screen, switch to create mode automatically
+            if (mode === 'select') {
+                setMode('create');
+            }
+        } else {
+            console.log(`[Restore] Entitlement '${requiredEntitlement}' not found after restore.`);
+            Alert.alert('Keine Käufe gefunden', 'Es wurden keine aktiven Abonnements zum Wiederherstellen für dieses Konto gefunden.');
+        }
+
+    } catch (e) {
+        console.error('[Restore] Error restoring purchases:', JSON.stringify(e, null, 2));
+        Alert.alert('Fehler', 'Beim Wiederherstellen der Käufe ist ein Fehler aufgetreten. Bitte versuche es später erneut.');
+        // Set error state if needed, e.g., setPurchaseError(...)
+    } finally {
+        setIsRestoring(false);
+    }
+  };
 
   const handleCreateWithVoucher = async () => {
     if (!orgName.trim() || orgName.trim().length < 3) {
@@ -179,6 +253,39 @@ const OrganizationSetupScreen = ({ navigation }) => {
     }
   };
 
+  // --- New Handler for Creating Org with Active Subscription ---
+  const handleCreateWithActiveSubscription = async () => {
+    if (!orgName.trim() || orgName.trim().length < 3) {
+        setError('Organisationsname muss mind. 3 Zeichen lang sein.');
+        return;
+    }
+
+    Keyboard.dismiss();
+    setIsLoading(true);
+    setError('');
+
+    try {
+        // Directly create the organization as the user already has the entitlement
+        console.log('[handleCreateWithActiveSubscription] User has active subscription. Creating organization...');
+        const result = await createOrganization(orgName.trim());
+
+        if (result.success) {
+            Alert.alert('Erfolg', `Organisation "${result.data.name}" wurde erstellt! Dein Abo ist bereits aktiv.`);
+            navigation.goBack(); // Go back to profile screen
+        } else {
+            // Handle organization creation failure even with active subscription
+            console.error(`ERROR: Active subscription found, but org creation failed for user ${user?.id}:`, result.error);
+            setError(String(result.error?.message || 'Organisation konnte trotz aktivem Abo nicht erstellt werden. Bitte versuche es erneut oder kontaktiere den Support.'));
+            // Keep user on this screen to see the error
+        }
+    } catch (err) {
+        console.error("Unexpected error during creation with active subscription:", err);
+        setError('Ein unerwarteter Fehler ist aufgetreten.');
+    } finally {
+        setIsLoading(false);
+    }
+};
+
   // --- Handle Paid Organization Creation ---
   const handlePurchaseAndCreate = async () => {
     if (!orgName.trim() || orgName.trim().length < 3) {
@@ -198,7 +305,12 @@ const OrganizationSetupScreen = ({ navigation }) => {
 
     try {
         // 1. Initiate purchase
+        console.log('[handlePurchaseAndCreate] Attempting purchase with package:', JSON.stringify(selectedPackage, null, 2));
         const purchaseResult = await Purchases.purchasePackage(selectedPackage);
+        console.log('[handlePurchaseAndCreate] Purchase attempt finished. Result:', JSON.stringify(purchaseResult, null, 2));
+
+        // DEBUG: log entitlement state after purchase
+        console.log('[handlePurchaseAndCreate] customerInfo.entitlements after purchase:', purchaseResult.customerInfo?.entitlements);
 
         // --- Add check for valid result before destructuring ---
         if (!purchaseResult || typeof purchaseResult !== 'object') {
@@ -208,6 +320,10 @@ const OrganizationSetupScreen = ({ navigation }) => {
         // --- End Add check ---
 
         const { customerInfo, productIdentifier } = purchaseResult;
+        // DEBUG: log all entitlements objects
+        console.log('[handlePurchaseAndCreate] Full entitlements object:', JSON.stringify(customerInfo.entitlements, null, 2));
+        // DEBUG: log active entitlement keys
+        console.log('[handlePurchaseAndCreate] Active entitlement identifiers:', Object.keys(customerInfo.entitlements.active || {}));
 
         // --- Add check for customerInfo before accessing entitlements ---
         if (!customerInfo || typeof customerInfo !== 'object') {
@@ -238,23 +354,50 @@ const OrganizationSetupScreen = ({ navigation }) => {
                 console.error(`CRITICAL: Payment successful (Product: ${productIdentifier}, Entitlement: ${requiredEntitlement}) but org creation failed for user ${user?.id}:`, result.error);
                 setError(String(result.error?.message || 'Dein Abo ist aktiv, aber die Organisation konnte nicht erstellt werden. Bitte kontaktiere den Support.'));
                 // Keep user on this screen to see the error
+                console.log('[handlePurchaseAndCreate] Org creation failed after payment.');
             }
         } else {
-            // Entitlement not found after purchase - should not happen with correct setup
-            console.error(`Purchase successful for ${productIdentifier}, but required entitlement '${requiredEntitlement}' not found in active entitlements for user ${user?.id}.`, customerInfo.entitlements.active);
-            setError('Kauf erfolgreich, aber Berechtigung konnte nicht überprüft werden. Bitte kontaktiere den Support.');
+            // Entitlement missing: attempt to sync and refetch customer info before erroring
+            console.warn(`[handlePurchaseAndCreate] Entitlement '${requiredEntitlement}' missing, syncing purchases and fetching updated customer info.`);
+            try {
+                await Purchases.syncPurchases();
+                const refreshedInfo = await Purchases.getCustomerInfo();
+                if (refreshedInfo.entitlements.active?.[requiredEntitlement]) {
+                    console.log('[handlePurchaseAndCreate] Entitlement found after refresh. Proceeding to create organization.');
+                    const resultAfterRefresh = await createOrganization(orgName.trim());
+                    if (resultAfterRefresh.success) {
+                        Alert.alert('Erfolg', `Organisation "${resultAfterRefresh.data.name}" wurde erstellt und dein Abo ist aktiv!`);
+                        navigation.goBack();
+                    } else {
+                        console.error(`CRITICAL: Payment successful but org creation failed after entitlement refresh for user ${user?.id}:`, resultAfterRefresh.error);
+                        setError(String(resultAfterRefresh.error?.message || 'Dein Abo ist aktiv, aber die Organisation konnte nicht erstellt werden. Bitte kontaktiere den Support.'));
+                    }
+                    // DEBUG: log refreshed entitlements
+                    console.log('[handlePurchaseAndCreate] Refreshed full entitlements object:', JSON.stringify(refreshedInfo.entitlements, null, 2));
+                    console.log('[handlePurchaseAndCreate] Refreshed active entitlement identifiers:', Object.keys(refreshedInfo.entitlements.active || {}));
+                } else {
+                    throw new Error('Entitlement not found after refresh');
+                }
+            } catch (refreshError) {
+                console.error('[handlePurchaseAndCreate] Entitlement refresh failed:', refreshError);
+                setError('Kauf erfolgreich, aber Berechtigung konnte nicht überprüft werden. Bitte kontaktiere den Support.');
+            }
+            return; // Exit early after refresh attempt
         }
 
     } catch (e) {
-        console.log("Purchase Error:", JSON.stringify(e, null, 2));
+        console.error("[handlePurchaseAndCreate] Purchase Error Caught:", JSON.stringify(e, null, 2));
         if (!e.userCancelled) {
             setError('Kauf fehlgeschlagen. Bitte versuche es erneut.');
             Alert.alert('Kauf fehlgeschlagen', e.message);
         } else {
             setError('Kauf abgebrochen.'); // Optional: inform user about cancellation
+            console.log('[handlePurchaseAndCreate] Purchase cancelled by user.');
         }
     } finally {
+        console.log('[handlePurchaseAndCreate] Entering finally block.');
         setIsLoading(false);
+        console.log('[handlePurchaseAndCreate] setIsLoading(false) executed.');
     }
   };
 
@@ -332,6 +475,27 @@ const OrganizationSetupScreen = ({ navigation }) => {
     }
   };
 
+  // Redeem Apple Offer Code or open voucher modal
+  const handleRedeemOfferCode = async () => {
+    if (Platform.OS === 'ios') {
+      try {
+        await Purchases.presentCodeRedemptionSheet();
+        await Purchases.syncPurchases();
+      } catch (e) {
+        console.warn('Code-Einlösung fehlgeschlagen', e);
+        // Fallback: open Redeem sheet in App Store app
+        const appStoreId = Constants.expoConfig?.ios?.appStoreId || 'APP_ID';
+        const url = `https://apps.apple.com/redeem?ctx=offercodes&id=${appStoreId}`;
+        Linking.openURL(url);
+        try { await Purchases.syncPurchases(); } catch {};
+      }
+    } else {
+      setVoucherCode('');
+      setVoucherError('');
+      setShowVoucherModal(true);
+    }
+  };
+
   // --- Render Functions ---
 
   const renderCreateForm = () => (
@@ -357,33 +521,63 @@ const OrganizationSetupScreen = ({ navigation }) => {
             disabled={isLoading}
           >
             {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Organisation mit Gutschein erstellen</Text>}
-          </TouchableOpacity>
+         </TouchableOpacity>
       ) : (
-        // --- Actual Payment Button ---
+        // --- Conditional Rendering based on Active Subscription ---
         <View style={styles.paymentSection}>
-          {isFetchingOfferings ? (
-            <ActivityIndicator size="small" color="#007BFF" />
-          ) : selectedPackage ? (
-             <TouchableOpacity 
-                style={[styles.button, styles.actionButtonPaywall, isLoading && styles.buttonDisabled]} 
-                onPress={handlePurchaseAndCreate} // Use new handler
-                disabled={isLoading || !selectedPackage} // Disable if no package or loading
-             >
-                {isLoading ? <ActivityIndicator color="#fff" /> : 
-                    <Text style={styles.buttonText}>
-                        {`Erstellen (${selectedPackage.product.priceString} / ${selectedPackage.product.subscriptionPeriod || 'einmalig'})`} 
-                    </Text>
-                }
-             </TouchableOpacity>
-          ) : (
-              <Text style={styles.errorText}>{purchaseError || "Keine Kaufoptionen ladbar."}</Text>
-          )}
-          {(purchaseError && !isFetchingOfferings) && ( // Show specific purchase errors
-             <Text style={[styles.errorText, { marginTop: 5 }]}>{purchaseError}</Text>
-          )}
+            {isFetchingOfferings ? ( // Show loading indicator during initial check/fetch
+                <ActivityIndicator size="large" color="#007BFF" />
+            ) : hasActiveSubscription ? (
+                // User has active subscription - show different button
+                <>
+                   <Text style={styles.activeSubText}>Aktives Abo erkannt</Text>
+                   <TouchableOpacity 
+                      style={[styles.button, styles.actionButtonPrimary, isLoading && styles.buttonDisabled]} 
+                      onPress={handleCreateWithActiveSubscription} // Use new handler
+                      disabled={isLoading}
+                   >
+                      {isLoading ? <ActivityIndicator color="#fff" /> : 
+                          <Text style={styles.buttonText}>
+                              Organisation erstellen
+                          </Text>
+                      }
+                   </TouchableOpacity>
+                </>
+            ) : selectedPackage ? (
+                // User needs to purchase - show purchase button
+                <TouchableOpacity 
+                   style={[styles.button, styles.actionButtonPaywall, isLoading && styles.buttonDisabled]} 
+                   onPress={handlePurchaseAndCreate} // Original handler
+                   disabled={isLoading} 
+                >
+                   {isLoading ? <ActivityIndicator color="#fff" /> : 
+                       <Text style={styles.buttonText}>
+                           {`Erstellen (3,99€/Woche)`} 
+                       </Text>
+                   }
+                </TouchableOpacity>
+            ) : (
+                // No subscription, no package found (Error case)
+                <Text style={styles.errorText}>{purchaseError || "Keine Kaufoptionen verfügbar."}</Text>
+            )}
+            {/* Show specific purchase/loading errors if they occurred and not loading */}
+            {(purchaseError && !isFetchingOfferings && !hasActiveSubscription) && ( 
+               <Text style={[styles.errorText, { marginTop: 5 }]}>{purchaseError}</Text>
+            )}
         </View>
       )}
-     
+
+      {/* Legal Links */}
+      <View style={styles.legalLinksContainer}>
+        <Text style={styles.legalLinksTitle}>Rechtliches</Text>
+        <TouchableOpacity style={styles.legalLinkItem} onPress={() => Linking.openURL('https://mylocalapp.de/agb')}>
+          <Text style={styles.legalLinkText}>AGB / Terms of Use</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.legalLinkItem} onPress={() => Linking.openURL('https://mylocalapp.de/datenschutz')}>
+          <Text style={styles.legalLinkText}>Datenschutz / Privacy Policy</Text>
+        </TouchableOpacity>
+      </View>
+
       <TouchableOpacity onPress={() => { setMode('select'); setError(''); setOrgName(''); setVoucherCode(''); setPurchaseError(null); /* Clear voucher & purchase error */ }}>
         <Text style={styles.backLink}>Zurück</Text>
       </TouchableOpacity>
@@ -449,11 +643,29 @@ const OrganizationSetupScreen = ({ navigation }) => {
                 </View>
             </View>
             
-            <Text style={styles.priceText}>Nur 3,99 € pro Woche</Text>
+            {/* Conditional Price Text */}
+            {Platform.OS === 'ios' && !isIosIapEnabled ? (
+              <Text style={[styles.priceText, styles.iosVoucherOnlyText]}>
+                Auf iOS aktuell nur per Gutschein möglich
+              </Text>
+            ) : (
+              <Text style={styles.priceText}>Nur 3,99 € pro Woche</Text>
+            )}
             
              <TouchableOpacity 
                 style={[styles.button, styles.actionButtonPaywall]} 
-                onPress={() => setMode('create')} // Go to create form (payment logic TBD)
+                // Conditional onPress for iOS when IAP is disabled
+                onPress={() => {
+                    if (Platform.OS === 'ios' && !isIosIapEnabled) {
+                        Alert.alert(
+                            'Hinweis', 
+                            'Aktuell ist dies auf iOS noch nicht möglich - Bitte gucke auf unsere Webseite für mehr Informationen',
+                            [{ text: 'OK' }]
+                        );
+                    } else {
+                        setMode('create'); // Normal behavior: Go to create form
+                    }
+                }}
             >
                 <Ionicons name="add-circle-outline" size={20} color="#fff" style={styles.buttonIcon} />
                 <Text style={styles.buttonText}>Organisation kostenpflichtig erstellen</Text>
@@ -461,11 +673,58 @@ const OrganizationSetupScreen = ({ navigation }) => {
             
             <TouchableOpacity 
                 style={[styles.button, styles.voucherButton]} 
-                onPress={() => { setVoucherCode(''); setVoucherError(''); setShowVoucherModal(true); }} // Open voucher modal
+                // Conditional onPress for iOS when IAP is disabled
+                onPress={() => {
+                    if (Platform.OS === 'ios' && !isIosIapEnabled) {
+                        setVoucherCode('');
+                        setVoucherError('');
+                        setShowVoucherModal(true); // Open DB voucher modal directly
+                    } else {
+                        handleRedeemOfferCode(); // Normal behavior (Apple sheet on iOS, modal elsewhere)
+                    }
+                }}
             >
                  <Ionicons name="ticket-outline" size={20} color="#4285F4" style={styles.buttonIcon} />
                  <Text style={styles.voucherButtonText}>Gutschein-Code eingeben</Text>
             </TouchableOpacity>
+
+            {/* Inline row: Conditionally show Restore & Manage Buttons */}
+            {/* Only show if NOT (iOS AND IAP disabled) */}
+            {!(Platform.OS === 'ios' && !isIosIapEnabled) && (
+              <View style={styles.inlineButtons}>
+                {/* Restore Purchases */}
+                <TouchableOpacity 
+                  style={[styles.button, styles.inlineButton, styles.restoreButton, isRestoring && styles.buttonDisabled]} 
+                  onPress={handleRestorePurchases} 
+                  disabled={isRestoring}
+                >
+                  {isRestoring ? (
+                    <ActivityIndicator color="#007BFF" size="small" />
+                  ) : (
+                    <>
+                      <Ionicons name="refresh-outline" size={12} color="#0056b3" style={styles.buttonIcon} />
+                      <Text style={[styles.restoreButtonText, styles.inlineButtonText]}>Kauf wiederherstellen</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                {/* Manage Subscription */}
+                {Platform.OS === 'ios' && ( // Keep this check as Manage Subscriptions is iOS-only via Purchases SDK
+                  <TouchableOpacity
+                    style={[styles.button, styles.inlineButton, styles.devButton]}
+                    onPress={async () => {
+                      try { await Purchases.showManageSubscriptions(); }
+                      catch { Alert.alert('Fehler', 'Abonnements konnten nicht verwaltet werden.'); }
+                    }}
+                  >
+                    <Ionicons name="cog-outline" size={12} color="#ffc107" style={styles.buttonIcon} />
+                    <Text style={[styles.devButtonText]}>Abonnement verwalten</Text>
+                  </TouchableOpacity>
+                )}
+                 {/* Add a placeholder on Android/Web if needed to maintain spacing, or adjust justifyContent */}
+                {Platform.OS !== 'ios' && <View style={{flex: 1}} /> /* Placeholder for spacing */}
+              </View>
+            )}
         </View>
         
         {/* Separator */}
@@ -532,6 +791,16 @@ const OrganizationSetupScreen = ({ navigation }) => {
     </Modal>
   );
 
+  // New: render for temporary accounts only
+  const renderTemporaryBlocked = () => (
+    <View style={styles.tempContainer}>
+      <Text style={styles.tempErrorMessage}>Temporäre Konten können keine Organisation erstellen.</Text>
+      <TouchableOpacity style={styles.tempBackButton} onPress={() => navigation.goBack()}>
+        <Text style={styles.tempBackButtonText}>Zurück</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
   const renderContent = () => {
     switch (mode) {
       case 'create':
@@ -548,21 +817,31 @@ const OrganizationSetupScreen = ({ navigation }) => {
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
       <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
-           <TouchableOpacity onPress={() => { 
-                // setPurchaseError(null); // Temporarily commented out to test navigation
-                navigation.goBack();
-           }} style={styles.backButton}>
+           <TouchableOpacity 
+              onPress={() => { 
+                   setIsLoading(false); // Reset loading state on back press
+                   setPurchaseError(null);
+                   setError('');
+                   // Potentially reset mode as well if purchase was hanging?
+                   // setMode('select'); 
+                   navigation.goBack();
+               }} 
+              style={styles.backButton}
+           >
                 <Ionicons name="arrow-back" size={24} color="#333" />
             </TouchableOpacity>
           <Text style={styles.title}>Organisation verwalten</Text>
           <View style={{ width: 24 }} />{/* Spacer */}
         </View>
-        {/* Subtitle is now less prominent or removed */}
-        {/* <Text style={styles.subtitle}>
-          Erstelle eine neue Organisation (Verein, Gemeinde, Unternehmen) oder trete einer bestehenden mittels Einladungscode bei.
-        </Text> */}
-        {renderContent()}
-        {renderVoucherModal()} 
+        {/* check for temporary account */}
+        {profile?.is_temporary ? (
+          renderTemporaryBlocked()
+        ) : (
+          <>  
+            {renderContent()}
+            {renderVoucherModal()}
+          </>
+        )}
       </ScrollView>
     </TouchableWithoutFeedback>
   );
@@ -864,6 +1143,128 @@ const styles = StyleSheet.create({
       width: '100%',
       alignItems: 'center',
       marginVertical: 10, // Add some vertical spacing
+  },
+  // Style for the button when subscription is active
+  actionButtonPrimary: {
+     backgroundColor: '#007BFF', // Or another primary color like green '#28a745'
+  },
+  // Style for text indicating active subscription
+  activeSubText: {
+     fontSize: 16,
+     fontWeight: '600',
+     color: '#28a745', // Green color for success/active status
+     textAlign: 'center',
+     marginBottom: 15,
+  },
+  // --- Legal Links Styles ---
+  legalLinksContainer: {
+    width: '100%',
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  legalLinksTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 5,
+  },
+  legalLinkItem: {
+    padding: 5,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 5,
+  },
+  legalLinkText: {
+    color: '#007BFF',
+    fontSize: 14,
+  },
+  // temporary account block styles
+  tempContainer: {
+    flex: 1,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  tempErrorMessage: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#dc3545',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  tempBackButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 25,
+    backgroundColor: '#007BFF',
+    borderRadius: 8,
+  },
+  tempBackButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  // Restore Purchases Button
+  restoreButton: {
+    backgroundColor: '#f0f0f0',
+    borderWidth: 3,
+    borderColor: '#ddd',
+    shadowOpacity: 0.05,
+    elevation: 5,
+    marginTop: 10,
+    marginBottom: 10,
+  },
+  restoreButtonText: {
+    color: '#0056b3',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  // --- Dev Only Button ---
+  devButton: {
+    backgroundColor: '#444', // Dark background for dev button
+    borderColor: '#666',
+    borderWidth: 1,
+    marginTop: 5, // Space above
+  },
+  devButtonText: {
+    color: '#ffc107', // Warning yellow color
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginLeft: 5,
+  },
+  // --- Inline Button Styles ---
+  inlineButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginVertical: 10,
+  },
+  inlineButton: {
+    flex: 1,
+    marginHorizontal: 5,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: '#007BFF',
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inlineButtonText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#007BFF',
+    textAlign: 'center',
+  },
+  inlineButtonIcon: {
+    marginRight: 5,
+    color: '#007BFF',
+  },
+  // Style for iOS voucher only text
+  iosVoucherOnlyText: {
+    color: '#6c757d', // Use a more neutral color like gray
+    fontWeight: 'normal', // Less emphasis than price
   },
 });
 

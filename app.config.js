@@ -1,6 +1,6 @@
 module.exports = {
-  name: "MeinHavelaue",
-  slug: "meinhavelaue",
+  name: "MeinStrodehne",
+  slug: "meinstrodehne",
   version: "1.0.0",
   orientation: "portrait",
   // Square 1024x1024 icon
@@ -18,7 +18,9 @@ module.exports = {
     supportsTablet: true,
     bundleIdentifier: "com.pkienast.meinhavelaue",
     infoPlist: {
-      NSPhotoLibraryUsageDescription: "Wir benötigen Zugriff auf deine Fotos, damit du Bilder an Nachrichten anhängen kannst."
+      NSPhotoLibraryUsageDescription: "Die Foto-Mediathek wird benötigt, damit du Fotos auswählen und z.B. an Artikel oder Chat-Nachrichten anhängen kannst.",
+      TermsOfServiceURL: "https://mylocalapp.de/agb",
+      PrivacyPolicyURL: "https://mylocalapp.de/datenschutz"
     }
   },
   android: {
@@ -31,6 +33,15 @@ module.exports = {
     config: {
       googleMaps: {
         apiKey: "AIzaSyBahIjWqhGvO9_fn_e1pz4RZUQkeMprdT4"
+      }
+    },
+    manifest: {
+      usesPermissions: [],
+      application: {
+        metaData: {
+          "com.google.android.termsOfService": "https://mylocalapp.de/agb",
+          "com.google.android.privacyPolicy": "https://mylocalapp.de/datenschutz"
+        }
       }
     },
     googleServicesFile: "./google-services.json"

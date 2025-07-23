@@ -1,6 +1,6 @@
-# Supabase Setup for MeinHavelaue
+# Supabase Setup for MeinStrodehne
 
-This directory contains all the necessary files to set up and configure your Supabase instance for MeinHavelaue.
+This directory contains all the necessary files to set up and configure your Supabase instance for MeinStrodehne.
 
 ## Database Structure
 

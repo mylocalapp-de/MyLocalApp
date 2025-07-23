@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Switch, ScrollView, Modal, TextInput, Alert, ActivityIndicator, Clipboard, Platform, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Switch, ScrollView, Modal, TextInput, Alert, ActivityIndicator, Clipboard, Platform, Dimensions, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
@@ -1031,7 +1031,7 @@ const ProfileScreen = () => {
 
         <View style={styles.separator} />
 
-        {/* --- Action Buttons for Active Org --- */} 
+        {/* --- Action Buttons for Active Org --- */}
         <TouchableOpacity 
             style={[styles.button, styles.switchButton]} 
             onPress={handleSwitchToPersonal}
@@ -1246,6 +1246,16 @@ const ProfileScreen = () => {
                           Keine Internetverbindung zum Speichern vorhanden.
                       </Text>
                   )}
+              </View>
+              {/* Legal Links */}
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Rechtliches</Text>
+                <TouchableOpacity style={styles.settingItem} onPress={() => Linking.openURL('https://mylocalapp.de/agb')}>
+                  <Text style={styles.settingText}>AGB / Terms of Use</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.settingItem} onPress={() => Linking.openURL('https://mylocalapp.de/datenschutz')}>
+                  <Text style={styles.settingText}>Datenschutz / Privacy Policy</Text>
+                </TouchableOpacity>
               </View>
           </>
       );

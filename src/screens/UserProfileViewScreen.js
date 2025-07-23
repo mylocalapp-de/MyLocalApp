@@ -25,7 +25,7 @@ const androidPaddingTop = height * 0.03;
 
 const UserProfileViewScreen = ({ route, navigation }) => {
     const { userId } = route.params;
-    const { user } = useAuth(); // Get current user for comparison and DM
+    const { user, profile: currentUserProfile, updateProfile } = useAuth(); // Get current user, profile, and update function
     const { isOfflineMode } = useNetwork();
 
     const [viewedProfile, setViewedProfile] = useState(null);
@@ -34,6 +34,8 @@ const UserProfileViewScreen = ({ route, navigation }) => {
     const [loadingArticles, setLoadingArticles] = useState(false);
     const [error, setError] = useState(null);
     const [isOwnProfile, setIsOwnProfile] = useState(false);
+    const [isBlocked, setIsBlocked] = useState(false);
+    const [blockLoading, setBlockLoading] = useState(false);
 
     useEffect(() => {
         if (!userId) {
@@ -50,13 +52,20 @@ const UserProfileViewScreen = ({ route, navigation }) => {
 
         setIsOwnProfile(ownProfileCheck);
 
+        // Check if the viewed user is blocked by the current user
+        if (currentUserProfile && currentUserProfile.blocked && !ownProfileCheck) {
+            const blockedCheck = currentUserProfile.blocked.includes(userId);
+            setIsBlocked(blockedCheck);
+            console.log(`  - Is Viewed User Blocked? ${blockedCheck}`);
+        }
+
         if (isOfflineMode) {
             setError("Profilansicht ist offline nicht verfügbar.");
             setLoadingProfile(false);
         } else {
             fetchProfileData();
         }
-    }, [userId, user, isOfflineMode]);
+    }, [userId, user, currentUserProfile, isOfflineMode]);
 
     const fetchProfileData = async () => {
         setLoadingProfile(true);
@@ -104,7 +113,7 @@ const UserProfileViewScreen = ({ route, navigation }) => {
     };
 
     const handleSendMessage = async () => {
-        if (!viewedProfile || !user) return; // Need both users
+        if (!viewedProfile || !user || isBlocked) return; // Need both users, don't allow messaging blocked user
 
         try {
             // Call the RPC directly instead of using a context function
@@ -133,6 +142,52 @@ const UserProfileViewScreen = ({ route, navigation }) => {
             Alert.alert('Fehler', error.message || 'Ein Fehler ist beim Starten des Chats aufgetreten.');
         }
     };
+
+    // --- Block/Unblock Logic ---
+    const handleBlockToggle = async () => {
+        if (!user || !currentUserProfile || !viewedProfile || isOwnProfile || blockLoading) return;
+
+        setBlockLoading(true);
+        const currentlyBlocked = currentUserProfile.blocked || [];
+        const targetUserId = viewedProfile.id;
+        let updatedBlockedList;
+
+        if (isBlocked) {
+            // Unblock: Remove the user ID
+            updatedBlockedList = currentlyBlocked.filter(id => id !== targetUserId);
+            console.log(`[UserProfileViewScreen] Unblocking user ${targetUserId}`);
+        } else {
+            // Block: Add the user ID
+            updatedBlockedList = [...currentlyBlocked, targetUserId];
+            console.log(`[UserProfileViewScreen] Blocking user ${targetUserId}`);
+        }
+
+        try {
+            const { data, error: updateError } = await supabase
+                .from('profiles')
+                .update({ blocked: updatedBlockedList })
+                .eq('id', user.id)
+                .select('blocked') // Select the updated blocked array
+                .single();
+
+            if (updateError) throw updateError;
+
+            // Update local state and context
+            setIsBlocked(!isBlocked);
+            updateProfile({ ...currentUserProfile, blocked: data.blocked }); // Update context
+
+            Alert.alert(
+                isBlocked ? 'Benutzer entsperrt' : 'Benutzer blockiert',
+                `${viewedProfile.display_name} wurde ${isBlocked ? 'entsperrt' : 'blockiert'}. Du wirst keine Direktnachrichten von diesem Benutzer mehr sehen.`
+            );
+        } catch (err) {
+            console.error('Error updating block status:', err);
+            Alert.alert('Fehler', `Konnte Blockierstatus nicht ändern: ${err.message}`);
+        } finally {
+            setBlockLoading(false);
+        }
+    };
+    // --- End Block/Unblock Logic ---
 
     const renderArticle = ({ item }) => (
          <ArticleCard 
@@ -200,12 +255,16 @@ const UserProfileViewScreen = ({ route, navigation }) => {
                 navigation={navigation} 
                 // Use display name if available, otherwise a placeholder
                 title={viewedProfile.display_name || 'Benutzerprofil'} 
+                showBlockButton={!isOwnProfile} // Show block button only if not own profile
+                onBlockToggle={handleBlockToggle}
+                isBlocked={isBlocked}
+                blockLoading={blockLoading}
             />
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 <View style={styles.profileHeader}>
                     <AvatarComponent />
                     <Text style={styles.displayName}>{viewedProfile.display_name || 'Unbekannter Benutzer'}</Text>
-                    {!isOwnProfile && (
+                    {!isOwnProfile && !isBlocked && (
                         <TouchableOpacity 
                             style={styles.dmButton}
                             onPress={handleSendMessage}
@@ -213,6 +272,13 @@ const UserProfileViewScreen = ({ route, navigation }) => {
                             <Ionicons name="chatbubble-ellipses-outline" size={20} color="#fff" />
                             <Text style={styles.dmButtonText}>Nachricht schreiben</Text>
                         </TouchableOpacity>
+                    )}
+                    {/* Show message if user is blocked */}
+                    {!isOwnProfile && isBlocked && (
+                        <View style={styles.blockedMessageContainer}>
+                            <Ionicons name="ban-outline" size={18} color="#ff3b30" />
+                            <Text style={styles.blockedMessageText}>Du hast diesen Benutzer blockiert.</Text>
+                        </View>
                     )}
                 </View>
 
@@ -365,6 +431,21 @@ const styles = StyleSheet.create({
         height: 1,
         backgroundColor: '#f0f0f0',
         marginVertical: 10,
+    },
+    // Blocked message styles
+    blockedMessageContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 10,
+        paddingVertical: 8,
+        paddingHorizontal: 15,
+        backgroundColor: '#ffebee', // Light red background
+        borderRadius: 5,
+    },
+    blockedMessageText: {
+        marginLeft: 8,
+        color: '#ff3b30', // Red text
+        fontSize: 13,
     },
 });
 
