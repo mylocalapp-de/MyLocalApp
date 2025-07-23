@@ -13,6 +13,8 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  ActionSheetIOS,
+  Linking,
   Dimensions
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -605,6 +607,35 @@ const ChatDetailScreen = ({ route, navigation }) => {
     );
   };
 
+  // Add handleMessageAction to show report option on long press
+  const handleMessageAction = (messageId) => {
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Abbrechen', 'Melden'],
+          cancelButtonIndex: 0,
+          destructiveButtonIndex: 1,
+          userInterfaceStyle: 'light'
+        },
+        (buttonIndex) => {
+          if (buttonIndex === 1) {
+            Linking.openURL(`https://mylocalapp.de/report?id=${messageId}`);
+          }
+        }
+      );
+    } else {
+      Alert.alert(
+        '',
+        '',
+        [
+          { text: 'Abbrechen', style: 'cancel' },
+          { text: 'Melden', onPress: () => Linking.openURL(`https://mylocalapp.de/report?id=${messageId}`) }
+        ],
+        { cancelable: true }
+      );
+    }
+  };
+
   const sendMessage = async () => {
     if (isOfflineMode) {
       Alert.alert("Offline", "Nachrichten können offline nicht gesendet werden.");
@@ -930,12 +961,14 @@ const ChatDetailScreen = ({ route, navigation }) => {
 
     return (
       <View style={styles.messageContainer}>
-        <View 
+        <TouchableOpacity
           style={[
-            styles.messageBubble, 
+            styles.messageBubble,
             isMe ? styles.myMessage :
             item.sender === 'System' ? styles.systemMessage : styles.otherMessage
           ]}
+          activeOpacity={0.7}
+          onPress={() => handleMessageAction(item.id)}
         >
           {/* Display sender name only if it's not me and not a system message */}
           {!isMe && item.sender !== 'System' && (
@@ -972,7 +1005,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
           )}
           
           <Text style={styles.messageTime}>{item.time}</Text>
-        </View>
+        </TouchableOpacity>
         
         {/* Render reactions and comments which are now part of the item object */}
         {renderReactions(item)}

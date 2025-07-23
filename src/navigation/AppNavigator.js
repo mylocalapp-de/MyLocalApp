@@ -214,7 +214,6 @@ const AppNavigator = () => {
         <RootStack.Screen 
             name="OrganizationSetup" 
             component={OrganizationSetupScreen}
-            options={{ presentation: 'modal' }}
         />
         <RootStack.Screen name="EventDetail" component={EventDetailScreen} options={{ headerShown: false }} />
         <RootStack.Screen name="CreateEvent" component={CreateEventScreen} options={{ headerShown: false, presentation: 'modal' }} />

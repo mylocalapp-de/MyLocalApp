@@ -35,7 +35,7 @@ const getTransformedImageUrl = (originalUrl, width = 100, quality = 80) => {
 
 const OrganizationProfileViewScreen = ({ route, navigation }) => {
     const { organizationId } = route.params;
-    const { user, userOrganizations } = useAuth(); // Get current user and their orgs
+    const { user, userOrganizations, profile: currentUserProfile, updateProfile } = useAuth(); // Get user profile and update func
     const { isOfflineMode } = useNetwork();
 
     const [organizationProfile, setOrganizationProfile] = useState(null);
@@ -50,6 +50,8 @@ const OrganizationProfileViewScreen = ({ route, navigation }) => {
     const [error, setError] = useState(null);
     const [isMember, setIsMember] = useState(false); // To check if current user is part of this org
     const [loadingConversation, setLoadingConversation] = useState(false); // <-- ADDED for message button
+    const [isBlocked, setIsBlocked] = useState(false);
+    const [blockLoading, setBlockLoading] = useState(false);
 
     useEffect(() => {
         if (!organizationId) {
@@ -59,11 +61,20 @@ const OrganizationProfileViewScreen = ({ route, navigation }) => {
         }
 
         // Check if the current user is a member of the viewed organization
+        let membershipCheck = false;
         if (user && userOrganizations) {
-            const membership = userOrganizations.some(org => org.id === organizationId);
-            setIsMember(membership);
+            membershipCheck = userOrganizations.some(org => org.id === organizationId);
+            setIsMember(membershipCheck);
+            console.log(`[OrgProfileView] Is User Member? ${membershipCheck}`);
         } else {
             setIsMember(false);
+        }
+
+        // Check if the organization is blocked by the current user
+        if (currentUserProfile && currentUserProfile.blocked && !membershipCheck) {
+            const blockedCheck = currentUserProfile.blocked.includes(organizationId);
+            setIsBlocked(blockedCheck);
+            console.log(`[OrgProfileView] Is Org Blocked? ${blockedCheck}`);
         }
 
         if (isOfflineMode) {
@@ -75,7 +86,7 @@ const OrganizationProfileViewScreen = ({ route, navigation }) => {
             // fetchOrganizationMembers(); // Fetch members if needed
             // fetchOrganizationContent(); // Fetch articles/events if needed
         }
-    }, [organizationId, user, userOrganizations, isOfflineMode]);
+    }, [organizationId, user, userOrganizations, currentUserProfile, isOfflineMode]);
 
     const fetchOrganizationData = async () => {
         setLoadingProfile(true);
@@ -160,7 +171,7 @@ const OrganizationProfileViewScreen = ({ route, navigation }) => {
 
     // --- ADDED: Function to handle sending message ---
     const handleSendMessage = async () => {
-        if (!organizationProfile || !user || isOfflineMode || loadingConversation) return;
+        if (!organizationProfile || !user || isOfflineMode || loadingConversation || isBlocked) return;
 
         setLoadingConversation(true);
         try {
@@ -191,6 +202,52 @@ const OrganizationProfileViewScreen = ({ route, navigation }) => {
         }
     };
     // --- END ADDED ---
+
+    // --- Block/Unblock Logic ---
+    const handleBlockToggle = async () => {
+        if (!user || !currentUserProfile || !organizationProfile || isMember || blockLoading) return;
+
+        setBlockLoading(true);
+        const currentlyBlocked = currentUserProfile.blocked || [];
+        const targetOrgId = organizationProfile.id;
+        let updatedBlockedList;
+
+        if (isBlocked) {
+            // Unblock: Remove the org ID
+            updatedBlockedList = currentlyBlocked.filter(id => id !== targetOrgId);
+            console.log(`[OrgProfileView] Unblocking organization ${targetOrgId}`);
+        } else {
+            // Block: Add the org ID
+            updatedBlockedList = [...currentlyBlocked, targetOrgId];
+            console.log(`[OrgProfileView] Blocking organization ${targetOrgId}`);
+        }
+
+        try {
+            const { data, error: updateError } = await supabase
+                .from('profiles')
+                .update({ blocked: updatedBlockedList })
+                .eq('id', user.id)
+                .select('blocked')
+                .single();
+
+            if (updateError) throw updateError;
+
+            // Update local state and context
+            setIsBlocked(!isBlocked);
+            updateProfile({ ...currentUserProfile, blocked: data.blocked });
+
+            Alert.alert(
+                isBlocked ? 'Organisation entsperrt' : 'Organisation blockiert',
+                `${organizationProfile.name} wurde ${isBlocked ? 'entsperrt' : 'blockiert'}. Du wirst keine Direktnachrichten von dieser Organisation mehr sehen.`
+            );
+        } catch (err) {
+            console.error('Error updating org block status:', err);
+            Alert.alert('Fehler', `Konnte Blockierstatus der Organisation nicht ändern: ${err.message}`);
+        } finally {
+            setBlockLoading(false);
+        }
+    };
+    // --- End Block/Unblock Logic ---
 
     if (loadingProfile) {
         return (
@@ -250,6 +307,10 @@ const OrganizationProfileViewScreen = ({ route, navigation }) => {
                 showBackButton={true} 
                 navigation={navigation} 
                 title={organizationProfile.name || 'Organisation'} 
+                showBlockButton={!isMember && user} // Show block button only if logged in and NOT a member
+                onBlockToggle={handleBlockToggle}
+                isBlocked={isBlocked}
+                blockLoading={blockLoading}
             />
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 <View style={styles.profileHeader}>
@@ -257,7 +318,7 @@ const OrganizationProfileViewScreen = ({ route, navigation }) => {
                     <Text style={styles.orgName}>{organizationProfile.name || 'Unbekannte Organisation'}</Text>
                     {/* Add Join/Leave or other buttons based on membership status if needed */}
                      {/* --- ADDED: Message Button --- */}
-                    {!isOfflineMode && user && (
+                    {!isOfflineMode && user && !isBlocked && (
                         <TouchableOpacity 
                             style={[styles.dmButton, loadingConversation && styles.dmButtonDisabled]} // Add disabled style
                             onPress={handleSendMessage}
@@ -272,6 +333,13 @@ const OrganizationProfileViewScreen = ({ route, navigation }) => {
                                 {loadingConversation ? 'Starte...' : 'Nachricht schreiben'}
                             </Text>
                         </TouchableOpacity>
+                    )}
+                    {/* Show message if org is blocked */}
+                    {!isOfflineMode && user && !isMember && isBlocked && (
+                        <View style={styles.blockedMessageContainer}>
+                            <Ionicons name="ban-outline" size={18} color="#ff3b30" />
+                            <Text style={styles.blockedMessageText}>Du hast diese Organisation blockiert.</Text>
+                        </View>
                     )}
                     {/* --- END ADDED --- */}
                 </View>
@@ -472,6 +540,21 @@ const styles = StyleSheet.create({
        paddingHorizontal: 5, // Add slight horizontal padding if cards touch edges
     },
     // --- END ADDED ---
+    // Blocked message styles
+    blockedMessageContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 10,
+        paddingVertical: 8,
+        paddingHorizontal: 15,
+        backgroundColor: '#ffebee', // Light red background
+        borderRadius: 5,
+    },
+    blockedMessageText: {
+        marginLeft: 8,
+        color: '#ff3b30', // Red text
+        fontSize: 13,
+    },
 });
 
 export default OrganizationProfileViewScreen; 

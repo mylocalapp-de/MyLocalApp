@@ -3380,7 +3380,8 @@ CREATE TABLE public.profiles (
     created_at timestamp with time zone DEFAULT now(),
     is_temporary boolean DEFAULT false NOT NULL,
     avatar_url text,
-    about_me text
+    about_me text,
+    blocked uuid[] DEFAULT ARRAY[]::uuid[]
 );
 
 
@@ -3405,6 +3406,13 @@ COMMENT ON COLUMN public.profiles.is_temporary IS 'Indicates if the account was 
 --
 
 COMMENT ON COLUMN public.profiles.about_me IS 'A short description about the user.';
+
+
+--
+-- Name: COLUMN profiles.blocked; Type: COMMENT; Schema: public; Owner: supabase_admin
+--
+
+COMMENT ON COLUMN public.profiles.blocked IS 'Array of user or organization UUIDs blocked by this user.';
 
 
 --

@@ -1,4 +1,4 @@
-# MeinHavelaue - Village Community App
+# MeinStrodehne - Village Community App
 
 A mobile application designed to strengthen community spirit in rural villages by providing hyper-localized information and interactivity.
 
@@ -43,7 +43,12 @@ A mobile application designed to strengthen community spirit in rural villages b
   - User data (profile, preferences, temporary status) stored in Supabase.
   - AsyncStorage primarily used for the `hasCompletedOnboarding` flag and active organization ID.
 - **Organization Mode:**
-  - Requires a permanent (non-temporary) account to create/join/manage organizations.
+  - Requires a permanent (non-temporary) account to create/join/manage organizations. Temporary accounts are blocked with a full-screen notice and cannot create or join organizations.
+  - Subscriptions are per organization: configure a distinct in-app purchase subscription for each organization in App Store Connect (iOS) and Play Console (Android) following the product ID pattern:
+    ```
+    rc_weekly_{organization-slug}
+    ```
+    For example, for organization "Sportverein Musterdorf" use `rc_weekly_sportverein-musterdorf`. The app dynamically generates the slug and selects the corresponding subscription package at purchase time.
 
 ## Technology Stack
 
@@ -221,6 +226,7 @@ Below is a summary of observations and recommendations based on a code review of
 - There is no example or template `.env.example` file for environment variables. Adding one will clarify required keys and formats.
 - The README could document coding conventions, branching strategy, and commit message guidelines to onboard new contributors more smoothly.
 
----
+## Legal
 
-These findings are intended to guide improvements in code quality, maintainability, and developer experience. Please review and prioritize changes according to project goals and release timelines.
+Terms of Use (AGB): https://mylocalapp.de/agb
+Privacy Policy: https://mylocalapp.de/datenschutz

@@ -23,7 +23,7 @@ const getTransformedImageUrl = (originalUrl) => {
 
 const ChatScreen = ({ navigation, route }) => {
   const { isOrganizationActive, activeOrganizationId, activeOrganization } = useOrganization();
-  const { user, displayName } = useAuth();
+  const { user, profile: currentUserProfile, displayName } = useAuth();
   const { isOfflineMode, isConnected } = useNetwork();
 
   // State for chat groups and loading
@@ -109,7 +109,7 @@ const ChatScreen = ({ navigation, route }) => {
         setDmConversations([]);
         return;
     }
-    if (!user) {
+    if (!user || !currentUserProfile) {
         setError("Bitte melde dich an, um Chats und Nachrichten zu sehen.");
         setIsLoading(false);
         setIsLoadingDms(false);
@@ -131,10 +131,10 @@ const ChatScreen = ({ navigation, route }) => {
         ]);
 
         // Combine and process results (initial pass without user avatars)
-        let combinedInitial = processAndCombineData(groupsResult, dmsResult);
+        let combinedInitial = processAndCombineData(groupsResult, dmsResult, currentUserProfile.blocked || []);
         setCombinedList(combinedInitial);
 
-        // --- Fetch missing user avatars --- 
+        // --- Fetch missing user avatars ---
         const combinedWithAvatars = await fetchAvatarsForUserDms(combinedInitial);
         setCombinedList(combinedWithAvatars); // Update state again with avatars
         // --- End Fetch missing user avatars ---
@@ -152,7 +152,7 @@ const ChatScreen = ({ navigation, route }) => {
         setIsLoading(false); // Combined loading state
         setIsLoadingDms(false); // Also track DM loading specifically if needed
     }
-  }, [user, isOfflineMode, isOrganizationActive, activeOrganizationId, activeFilter, localUnreadCounts, localLastMessages]); // Dependencies
+  }, [user, currentUserProfile, isOfflineMode, isOrganizationActive, activeOrganizationId, activeFilter, localUnreadCounts, localLastMessages]);
 
   // Fetch data on initial load and when context/user changes
   useEffect(() => {
@@ -166,8 +166,6 @@ const ChatScreen = ({ navigation, route }) => {
           if (!isOfflineMode && user) {
               fetchData(); // Use the combined fetch function
           } else {
-              // Handle offline/logged out state on focus if needed
-              // Maybe just update based on existing state?
               filterCombinedList(activeFilter, combinedList);
           }
       });
@@ -223,7 +221,6 @@ const ChatScreen = ({ navigation, route }) => {
                          .eq('organization_id', activeOrganizationId);
         } else {
             console.log("[ChatScreen] Fetching DMs in Personal Context");
-            // In Personal context, view returns all, filtering happens client-side in processAndCombineData
         }
 
         query = query.order('last_message_at', { ascending: false });
@@ -236,11 +233,10 @@ const ChatScreen = ({ navigation, route }) => {
         }
 
         console.log(`[ChatScreen] Fetched ${data?.length || 0} DM conversations.`);
-        // Log the first DM data object to inspect available fields
         if (data && data.length > 0) {
             console.log('[ChatScreen] First DM data:', data[0]);
         }
-        setDmConversations(data || []); // Update specific state if needed
+        setDmConversations(data || []);
         return data || [];
 
     } catch (err) {
@@ -252,7 +248,7 @@ const ChatScreen = ({ navigation, route }) => {
 
   // --- Data Processing and Filtering ---
 
-  const processAndCombineData = (groups, dms) => {
+  const processAndCombineData = (groups, dms, blockedIds) => {
       console.log(`[ChatScreen] Processing ${groups.length} groups and ${dms.length} DMs for context: ${isOrganizationActive ? 'Organization' : 'Personal'}`);
       let combined = [];
 
@@ -261,19 +257,16 @@ const ChatScreen = ({ navigation, route }) => {
       if (isOrganizationActive && activeOrganizationId) {
           const initialGroupCount = groups.length;
           filteredGroupsForContext = groups.filter(group => 
-              // Keep only broadcast groups belonging to the active organization
               group.type === 'broadcast' && group.organization_id === activeOrganizationId
           );
           console.log(`[ChatScreen] Organization context group filter applied: ${initialGroupCount} -> ${filteredGroupsForContext.length}`);
       } else {
-           // Personal context: Keep all non-bot groups fetched (open and broadcast)
-           // Future enhancement: Filter based on user membership if needed.
            console.log(`[ChatScreen] Personal context, keeping all ${groups.length} fetched groups.`);
       }
       // --- End Context-Specific Group Filtering ---
 
       // Process Filtered Chat Groups
-      const processedGroups = filteredGroupsForContext.map(group => { // Use filteredGroupsForContext
+      const processedGroups = filteredGroupsForContext.map(group => {
           let uiType;
           if (group.type === 'open_group') uiType = 'Offene Gruppen';
           else if (group.type === 'broadcast') uiType = 'Ankündigungen';
@@ -296,95 +289,96 @@ const ChatScreen = ({ navigation, route }) => {
           }
 
           return {
-              id: `group-${group.id}`, // Ensure unique keys
-              groupId: group.id, // Keep original ID if needed
+              id: `group-${group.id}`,
+              groupId: group.id,
               name: group.name,
               lastMessage: lastMessage,
               lastMessageSender: senderName,
               time: messageTime,
               lastTimestamp: lastTimestamp,
               unread: unreadCount,
-              avatarUrl: null, // Field for avatar URL (groups might have one later)
-              type: 'group', // Distinguish type
-              uiType: uiType, // For potential filtering/display
+              avatarUrl: null,
+              type: 'group',
+              uiType: uiType,
               isBot: false,
               isPinned: group.is_pinned || false,
               dbType: group.type,
               organization_id: group.organization_id,
               tags: group.tags || [],
-              isOrgConversation: false, // Explicitly false for groups
-              itemType: 'group', // Add explicit item type
+              isOrgConversation: false,
+              itemType: 'group',
           };
       });
 
       // Process Direct Messages
-      // Use the original dms data here for filtering before mapping
       let filteredDmsForContext = dms;
       if (!isOrganizationActive) {
          const initialDmCount = dms.length;
-         // Filter the raw dms data first based on initiator_id
          filteredDmsForContext = dms.filter(dm => 
             !dm.is_org_conversation || (dm.is_org_conversation && dm.initiator_id === user?.id)
          );
          console.log(`[ChatScreen] Personal context DM filter applied: ${initialDmCount} -> ${filteredDmsForContext.length}`);
       }
 
-      // Now map the filtered DMs
-      const processedDms = filteredDmsForContext.map(dm => {
+      // Filter out blocked DMs
+      const blockedSet = new Set(blockedIds || []);
+      const unblockedDms = filteredDmsForContext.filter(dm => {
+          if (dm.is_org_conversation) {
+              return !blockedSet.has(dm.organization_id);
+          } else {
+              return !blockedSet.has(dm.other_user_id);
+          }
+      });
+      console.log(`[ChatScreen] Filtering blocked DMs: ${filteredDmsForContext.length} -> ${unblockedDms.length}`);
+
+      const processedDms = unblockedDms.map(dm => {
            const isOrg = dm.is_org_conversation;
            const targetName = dm.target_name || (isOrg ? 'Organisation' : 'Unbekannter Benutzer');
            const lastTimestamp = dm.last_message_at ? new Date(dm.last_message_at).getTime() : 0;
 
-           // --- Determine Last Message Display ---
            let displayMessage = dm.last_message_text || (dm.last_message_image_url ? 'Bild gesendet' : 'Keine Nachrichten');
            const isMyLastMessage = dm.last_message_sender_id === user?.id;
 
            if (isMyLastMessage) {
                displayMessage = `Du: ${displayMessage}`;
            } else if (isOrg && dm.last_message_sender_name) {
-               // Org DM received from someone else - show their name
                displayMessage = `${dm.last_message_sender_name}: ${displayMessage}`;
            }
-           // User-to-user DMs received from others - just show the message (handled by default)
-           // --- End Determine Last Message Display ---
 
           return {
-              id: `dm-${dm.conversation_id}`, // Ensure unique keys
+              id: `dm-${dm.conversation_id}`,
               conversationId: dm.conversation_id,
               name: targetName,
               lastMessage: displayMessage,
               lastMessageSenderId: dm.last_message_sender_id,
-              lastMessageSenderName: dm.last_message_sender_name, // Use if available
+              lastMessageSenderName: dm.last_message_sender_name,
               time: dm.last_message_time || '',
               lastTimestamp: lastTimestamp,
-              unread: 0, // TODO: Implement unread count for DMs if needed
-              avatarUrl: isOrg ? dm.logo_url : null, // Use logo for org, leave null for users initially
-              type: 'dm', // Distinguish type
+              unread: 0,
+              avatarUrl: isOrg ? dm.logo_url : null,
+              type: 'dm',
               uiType: isOrg ? 'Organisations-DM' : 'Direktnachricht',
-              isBot: false, // DMs are not bots
-              isPinned: false, // DMs are not pinnable currently
-              dbType: 'direct_message', // Custom type
+              isBot: false,
+              isPinned: false,
+              dbType: 'direct_message',
               organization_id: isOrg ? dm.organization_id : null,
-              tags: [], // DMs don't have tags
+              otherUserId: isOrg ? null : dm.other_user_id,
+              tags: [],
               isOrgConversation: isOrg,
-              otherUserId: isOrg ? null : dm.other_user_id, // Need this for navigation
-              itemType: 'dm', // Add explicit item type
+              itemType: 'dm',
           };
       });
 
       combined = [...processedGroups, ...processedDms];
 
-      // Sort combined list: Pinned items first, then by last message timestamp (descending)
+      // Sort combined list
       combined.sort((a, b) => {
-          // Pinned items come first
           if (a.isPinned && !b.isPinned) return -1;
           if (!a.isPinned && b.isPinned) return 1;
-
-          // If both are pinned or both are unpinned, sort by timestamp
           return (b.lastTimestamp || 0) - (a.lastTimestamp || 0);
       });
 
-      console.log(`[ChatScreen] Combined list size after sorting: ${combined.length}`);
+      console.log(`[ChatScreen] Combined list size after sorting and blocking filter: ${combined.length}`);
       return combined;
   };
 
@@ -395,7 +389,6 @@ const ChatScreen = ({ navigation, route }) => {
       setLocalUnreadCounts(updatedCounts);
       await AsyncStorage.setItem('localUnreadCounts', JSON.stringify(updatedCounts));
 
-      // Update the combined list state directly
       setCombinedList(prevList =>
         prevList.map(item =>
           item.itemType === 'group' && item.groupId === groupId
@@ -403,7 +396,6 @@ const ChatScreen = ({ navigation, route }) => {
             : item
         )
       );
-      // Also update the filtered list if necessary
       setFilteredList(prevList =>
           prevList.map(item =>
               item.itemType === 'group' && item.groupId === groupId
@@ -430,18 +422,13 @@ const ChatScreen = ({ navigation, route }) => {
       } else {
           const filtered = listToFilter.filter(item => {
               if (item.itemType === 'group') {
-                  // Group filtering logic
                   if (filter === 'Offene Gruppen') return item.dbType === 'open_group';
                   if (filter === 'Ankündigungen') return item.dbType === 'broadcast';
                   return item.tags && item.tags.includes(filter);
               } else if (item.itemType === 'dm') {
-                  // DM filtering logic (Currently DMs are always shown if filter is not 'Alle')
-                  // If specific DM filters are needed, add logic here.
-                  // For now, DMs pass through any filter except 'Alle'.
-                  // If filter is 'Offene Gruppen' or 'Ankündigungen', DMs should be excluded.
                   return filter !== 'Offene Gruppen' && filter !== 'Ankündigungen';
               }
-              return false; // Exclude unknown item types
+              return false;
           });
           setFilteredList(filtered);
       }
@@ -476,10 +463,9 @@ const ChatScreen = ({ navigation, route }) => {
       }
 
       // Group Avatars
-      if (transformedUrl) { // Use transformedUrl for groups too if available
+      if (transformedUrl) {
           return <Image source={{ uri: transformedUrl }} style={styles.avatar} />;
       }
-      // Placeholder for Groups
       return (
           <View style={[styles.avatarPlaceholder, item.isBot ? styles.botAvatar : styles.groupAvatar]}>
               <Text style={styles.avatarLetter}>
@@ -512,13 +498,9 @@ const ChatScreen = ({ navigation, route }) => {
   );
 
   const renderChatItem = ({ item }) => {
-    // Determine display message based on item type and sender
     let displayMessage = item.lastMessage;
     if (item.itemType === 'group') {
-        // Group message display logic
         if (item.lastMessage && item.lastMessageSender) {
-            // Check if the logged-in user sent the last message based on display name (less reliable)
-            // It might be better to compare sender ID if available consistently for groups
              const isMyGroupLastMessage = user && item.lastMessageSender === displayName;
              if (isMyGroupLastMessage) {
                  displayMessage = `Du: ${item.lastMessage}`;
@@ -526,25 +508,24 @@ const ChatScreen = ({ navigation, route }) => {
                  displayMessage = `${item.lastMessageSender}: ${item.lastMessage}`;
              }
         } else if (item.lastMessage && item.dbType === 'broadcast') {
-            displayMessage = item.lastMessage; // No sender prefix for broadcast
+            displayMessage = item.lastMessage;
         }
     } else if (item.itemType === 'dm') {
-        // DM message display logic - Use pre-formatted message from processAndCombineData
-        displayMessage = item.lastMessage; // Already formatted correctly
+        displayMessage = item.lastMessage;
     }
 
     const handlePress = () => {
         if (item.itemType === 'group') {
-             if (item.isBot || item.dbType === 'bot') { // Handle potential bot groups
+             if (item.isBot || item.dbType === 'bot') {
                  navigation.navigate('Dorfbot');
              } else {
                  navigation.navigate('ChatDetail', {
-                     chatGroup: { // Pass data compatible with ChatDetail
+                     chatGroup: {
                          id: item.groupId,
                          name: item.name,
-                         dbType: item.dbType, // Ensure dbType is passed correctly
+                         dbType: item.dbType,
                          organization_id: item.organization_id,
-                         isPinned: item.isPinned, // Pass isPinned status as well
+                         isPinned: item.isPinned,
                      },
                      onReturn: () => updateLocalUnreadCount(item.groupId)
                  });
@@ -556,7 +537,6 @@ const ChatScreen = ({ navigation, route }) => {
                 organizationId: item.isOrgConversation ? item.organization_id : null,
                 recipientName: item.name,
                 isOrgConversation: item.isOrgConversation,
-                // Pass timestamp or similar if unread count update is needed for DMs
             });
         }
     };
@@ -570,7 +550,7 @@ const ChatScreen = ({ navigation, route }) => {
         <View style={styles.chatInfo}>
           <View style={styles.chatTopLine}>
             <View style={styles.chatNameContainer}>
-              {item.isPinned && item.itemType === 'group' && ( // Only show pin for groups
+              {item.isPinned && item.itemType === 'group' && (
                 <Ionicons name="pin" size={16} color="#666" style={styles.pinIcon} />
               )}
               <Text style={styles.chatName}>{item.name}</Text>
@@ -581,13 +561,11 @@ const ChatScreen = ({ navigation, route }) => {
             <Text style={styles.chatMessage} numberOfLines={1}>
               {displayMessage || 'Keine Nachrichten'}
             </Text>
-            {/* Conditionally render unread badge only for groups for now */}
             {item.itemType === 'group' && item.unread > 0 && (
               <View style={styles.unreadBadge}>
                 <Text style={styles.unreadText}>{item.unread}</Text>
               </View>
             )}
-             {/* TODO: Add unread badge logic for DMs if implemented */}
              {item.itemType === 'dm' && item.unread > 0 && (
                <View style={[styles.unreadBadge, styles.dmUnreadBadge]}>
                  <Text style={styles.unreadText}>{item.unread}</Text>
@@ -600,12 +578,10 @@ const ChatScreen = ({ navigation, route }) => {
   };
 
   const renderChatList = () => {
-    // Combine loading states
     const showLoading = isLoading || isLoadingFilters || isLoadingDms;
-    // Combine error states (prioritize general error)
     const displayError = error || dmError;
 
-    if (showLoading && combinedList.length === 0) { // Show loading only if list is empty
+    if (showLoading && combinedList.length === 0) {
         return (
             <View style={styles.loadingContainer}>
                 <ActivityIndicator size="large" color="#4285F4" />
@@ -614,7 +590,7 @@ const ChatScreen = ({ navigation, route }) => {
         );
     }
 
-    if (displayError && combinedList.length === 0) { // Show error only if list is empty
+    if (displayError && combinedList.length === 0) {
         return (
             <View style={styles.errorContainer}>
                 <Ionicons name="alert-circle-outline" size={40} color="#ff3b30" />
@@ -626,7 +602,6 @@ const ChatScreen = ({ navigation, route }) => {
         );
     }
 
-    // Handle logged out state
      if (!user && !showLoading) {
         return (
              <View style={styles.centerMessageContainer}>
@@ -639,7 +614,6 @@ const ChatScreen = ({ navigation, route }) => {
         );
     }
 
-     // Handle offline state
     if (isOfflineMode && !showLoading) {
          return (
             <View style={styles.centerMessageContainer}>
@@ -661,9 +635,8 @@ const ChatScreen = ({ navigation, route }) => {
         onRefresh={fetchData}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-             {/* Show specific message if filtered list is empty */}
              {displayError ? (
-                 <Text style={styles.emptyText}>{displayError}</Text> // Show error if filtering resulted in empty but error exists
+                 <Text style={styles.emptyText}>{displayError}</Text>
              ) : (
                 <Text style={styles.emptyText}>
                   {activeFilter === 'Alle' ? 'Keine Chats oder Nachrichten gefunden.' : `Keine Einträge für Filter "${activeFilter}" gefunden.`}
@@ -675,22 +648,18 @@ const ChatScreen = ({ navigation, route }) => {
     );
   };
 
-  // Determine FAB action based on context
   const handleAddButtonPress = () => {
       if (isOrganizationActive) {
-          // Navigate to Create Broadcast Group screen
-          navigation.navigate('ManageBroadcastGroups'); // Use the renamed screen
+          navigation.navigate('ManageBroadcastGroups');
       } else {
-          // Navigate to New Direct Message screen
           navigation.navigate('NewDirectMessage');
       }
   };
 
-  // <<< NEW: Fetch Avatars for User DMs >>>
   const fetchAvatarsForUserDms = async (dmList) => {
       const userDmsNeedingAvatars = dmList.filter(dm => dm.itemType === 'dm' && !dm.isOrgConversation && dm.otherUserId && !dm.avatarUrl);
       if (userDmsNeedingAvatars.length === 0) {
-          return dmList; // No fetching needed
+          return dmList;
       }
 
       const userIdsToFetch = [...new Set(userDmsNeedingAvatars.map(dm => dm.otherUserId))];
@@ -704,7 +673,7 @@ const ChatScreen = ({ navigation, route }) => {
 
           if (profilesError) {
               console.error('[ChatScreen] Error fetching profiles for avatars:', profilesError);
-              return dmList; // Return original list on error
+              return dmList;
           }
 
           const avatarMap = profilesData.reduce((map, profile) => {
@@ -712,7 +681,6 @@ const ChatScreen = ({ navigation, route }) => {
               return map;
           }, {});
 
-          // Update the dmList with fetched avatar URLs
           return dmList.map(dm => {
               if (dm.itemType === 'dm' && !dm.isOrgConversation && dm.otherUserId && avatarMap[dm.otherUserId]) {
                   return { ...dm, avatarUrl: avatarMap[dm.otherUserId] };
@@ -722,7 +690,7 @@ const ChatScreen = ({ navigation, route }) => {
 
       } catch (fetchErr) {
           console.error('[ChatScreen] Unexpected error in fetchAvatarsForUserDms:', fetchErr);
-          return dmList; // Return original list on unexpected error
+          return dmList;
       }
   };
 
@@ -734,13 +702,10 @@ const ChatScreen = ({ navigation, route }) => {
         title={isOrganizationActive ? `Chats (${activeOrganization?.name || 'Org'})` : "Meine Chats"}
       />
 
-      {/* Dorfbot always at the top */}
       {renderDorfbotItem()}
 
-      {/* Other chat groups and DMs */}
       {renderChatList()}
 
-      {/* Show Add button based on context and user status */}
       {user && !isOfflineMode && (
         <TouchableOpacity
           style={styles.addButton}

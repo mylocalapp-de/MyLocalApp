@@ -8,7 +8,8 @@ import {
   SafeAreaView, 
   ScrollView, 
   ActivityIndicator,
-  Alert 
+  Alert,
+  Linking 
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
@@ -20,6 +21,8 @@ const OnboardingScreen = ({ navigation }) => {
   const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false); // Local loading for final submission
   const [error, setError] = useState('');
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [termsError, setTermsError] = useState('');
 
   const validateEmail = (text) => {
     // Basic email format check
@@ -49,6 +52,11 @@ const OnboardingScreen = ({ navigation }) => {
 
   const handleCompleteOnboarding = async () => {
     setError(''); // Clear previous errors
+    setTermsError('');
+    if (!termsAccepted) {
+      setTermsError('Bitte akzeptiere die AGB und die Datenschutzbestimmungen.');
+      return;
+    }
     if (!displayName.trim()) {
       // Should be caught earlier, but double-check
       setError('Der Anzeigename fehlt.');
@@ -93,9 +101,9 @@ const OnboardingScreen = ({ navigation }) => {
       case 1: // Welcome & Features
         return (
           <>
-            <Text style={styles.title}>Willkommen bei MeinHavelaue!</Text>
+            <Text style={styles.title}>Willkommen bei MeinStrodehne!</Text>
             <Text style={styles.description}>
-              Entdecke deine Gemeinde neu! Mit MeinHavelaue bleibst du informiert und kannst <Text style={styles.boldText}>aktiv teilnehmen</Text>:
+              Entdecke deine Gemeinde neu! Mit MeinStrodehne bleibst du informiert und kannst <Text style={styles.boldText}>aktiv teilnehmen</Text>:
             </Text>
             <View style={styles.featureList}>
               <View style={styles.featureItem}>
@@ -167,6 +175,15 @@ const OnboardingScreen = ({ navigation }) => {
               />
             </View>
             {error ? <Text style={styles.errorText}>{error}</Text> : null}
+            <View style={styles.termsContainer}>
+              <TouchableOpacity onPress={() => setTermsAccepted(!termsAccepted)}>
+                <Ionicons name={termsAccepted ? "checkbox" : "checkbox-outline"} size={20} color="#333" />
+              </TouchableOpacity>
+              <Text style={styles.termsText}>
+                Hiermit akzeptiere ich die <Text style={styles.link} onPress={() => Linking.openURL('https://mylocapp.de/agb')}>AGB</Text> und die <Text style={styles.link} onPress={() => Linking.openURL('https://mylocalapp.de/datenschutz')}>Datenschutzbestimmungen</Text> der App. Des Weiteren erkenne ich hiermit an keine illegalen oder unangemessenen Inhalte zu veröffentlichen.
+              </Text>
+            </View>
+            {termsError ? <Text style={styles.errorText}>{termsError}</Text> : null}
             <TouchableOpacity 
               style={[styles.actionButton, combinedLoading && styles.buttonDisabled]}
               onPress={handleCompleteOnboarding}
@@ -319,6 +336,21 @@ const styles = StyleSheet.create({
   buttonDisabled: {
     opacity: 0.6,
     backgroundColor: '#9FA8DA', // Keep disabled style specific
+  },
+  termsContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 15,
+  },
+  termsText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#555',
+    marginLeft: 8,
+  },
+  link: {
+    color: '#007BFF',
+    textDecorationLine: 'underline',
   },
 });
 
