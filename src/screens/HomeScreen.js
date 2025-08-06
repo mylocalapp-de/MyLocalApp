@@ -26,7 +26,8 @@ const HomeScreen = ({ navigation }) => {
   const [articles, setArticles] = useState([]);
   const [filteredArticles, setFilteredArticles] = useState([]);
   const [selectedFilter, setSelectedFilter] = useState('Aktuell');
-  const [availableFilters, setAvailableFilters] = useState([{ name: 'Aktuell', is_highlighted: false }]);
+  // include enable_personal on filter objects; default to false for 'Aktuell'
+  const [availableFilters, setAvailableFilters] = useState([{ name: 'Aktuell', is_highlighted: false, enable_personal: false }]);
   const [pinnedArticleIds, setPinnedArticleIds] = useState(new Set());
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingFilters, setIsLoadingFilters] = useState(true);
@@ -102,15 +103,19 @@ const HomeScreen = ({ navigation }) => {
       const offlineFilters = await loadOfflineData('article_filters');
       if (offlineFilters) {
           // Build storedFilters without duplicates
-          let storedFilters = offlineFilters.map(f => ({ name: f.name, is_highlighted: f.is_highlighted || false }));
-          storedFilters = storedFilters.filter(f => f.name !== 'Aktuell' && f.name !== 'Schwarzes Brett');
-          // Prepend
-          storedFilters.unshift({ name: 'Schwarzes Brett', is_highlighted: true });
-          storedFilters.unshift({ name: 'Aktuell', is_highlighted: false });
+          let storedFilters = offlineFilters.map(f => ({
+              name: f.name,
+              is_highlighted: f.is_highlighted || false,
+              enable_personal: !!f.enable_personal
+          }));
+
+          // Ensure single 'Aktuell' at the front
+          storedFilters = storedFilters.filter(f => f.name !== 'Aktuell');
+          storedFilters.unshift({ name: 'Aktuell', is_highlighted: false, enable_personal: false });
           setAvailableFilters(storedFilters);
           if (!storedFilters.some(f => f.name === selectedFilter)) setSelectedFilter('Aktuell');
       } else {
-          setAvailableFilters([{ name: 'Aktuell', is_highlighted: false }, { name: 'Schwarzes Brett', is_highlighted: true }]);
+          setAvailableFilters([{ name: 'Aktuell', is_highlighted: false, enable_personal: false }]);
           setSelectedFilter('Aktuell');
       }
 
@@ -122,7 +127,7 @@ const HomeScreen = ({ navigation }) => {
       console.error('[HomeScreen] Error loading data from storage:', err);
       setError('Fehler beim Laden der Offline-Daten.');
       setArticles([]);
-      setAvailableFilters([{ name: 'Aktuell', is_highlighted: false }, { name: 'Schwarzes Brett', is_highlighted: true }]);
+      setAvailableFilters([{ name: 'Aktuell', is_highlighted: false, enable_personal: false }]);
       setSelectedFilter('Aktuell');
     } finally {
       setIsLoading(false);
@@ -137,25 +142,33 @@ const HomeScreen = ({ navigation }) => {
     try {
       const { data, error } = await supabase
         .from('article_filters')
-        .select('name, is_highlighted')
+        .select('name, is_highlighted, enable_personal, is_admin_only')
         .order('display_order', { ascending: true });
 
       if (error) {
         console.error('Error fetching filters:', error);
-        setAvailableFilters([{ name: 'Aktuell', is_highlighted: false }, { name: 'Schwarzes Brett', is_highlighted: true }]);
+        // fallback to just Aktuell on error
+        setAvailableFilters([{ name: 'Aktuell', is_highlighted: false, enable_personal: false }]);
       } else {
-        // Map and remove any existing 'Aktuell' and 'Schwarzes Brett'
-        let fetched = data.map(f => ({ name: f.name, is_highlighted: f.is_highlighted || false }));
-        fetched = fetched.filter(f => f.name !== 'Aktuell' && f.name !== 'Schwarzes Brett');
-        // Prepend 'Aktuell' and then 'Schwarzes Brett'
-        fetched.unshift({ name: 'Schwarzes Brett', is_highlighted: true });
-        fetched.unshift({ name: 'Aktuell', is_highlighted: false });
+        // Filter out admin only entries
+        let fetched = data.filter(f => !f.is_admin_only);
+
+        // No additional filter; show all non-admin filters even in personal context
+        fetched = fetched.map(f => ({
+          name: f.name,
+          is_highlighted: f.is_highlighted || false,
+          enable_personal: !!f.enable_personal
+        }));
+
+        // Ensure single 'Aktuell' at the front
+        fetched = fetched.filter(f => f.name !== 'Aktuell');
+        fetched.unshift({ name: 'Aktuell', is_highlighted: false, enable_personal: false });
         setAvailableFilters(fetched);
         if (!fetched.some(f => f.name === selectedFilter)) setSelectedFilter('Aktuell');
       }
     } catch (err) {
       console.error('Unexpected error fetching filters:', err);
-      setAvailableFilters([{ name: 'Aktuell', is_highlighted: false }, { name: 'Schwarzes Brett', is_highlighted: true }]);
+      setAvailableFilters([{ name: 'Aktuell', is_highlighted: false, enable_personal: false }]);
       setSelectedFilter('Aktuell');
     } finally {
       setIsLoadingFilters(false);
@@ -226,9 +239,11 @@ const HomeScreen = ({ navigation }) => {
 
     let sortedArticles = [];
     if (filter === 'Aktuell') {
-      // Show all articles except 'Schwarzes Brett', sorted by date
+      // Determine names of personal filters to exclude in 'Aktuell'
+      const personalFilterNames = availableFilters.filter(f => f.enable_personal).map(f => f.name);
+      // Show all articles except personal-board ones, sorted by date
       sortedArticles = articles
-        .filter(article => article.type !== 'Schwarzes Brett')
+        .filter(article => !personalFilterNames.includes(article.type))
         .sort((a, b) => new Date(b.published_at) - new Date(a.published_at));
     } else {
       // Filter by the selected type, separating pinned articles
@@ -255,7 +270,7 @@ const HomeScreen = ({ navigation }) => {
       sortedArticles = [...pinned, ...notPinned];
     }
     setFilteredArticles(sortedArticles);
-  }, [articles, pinnedArticleIds, isOfflineMode]);
+  }, [articles, pinnedArticleIds, isOfflineMode, availableFilters]);
 
   // Handle filter change
   const handleFilterChange = (filter) => {
@@ -392,7 +407,7 @@ const HomeScreen = ({ navigation }) => {
       )}
       
       {/* Show Add button based on context and filter */}
-      {(isOrganizationActive || selectedFilter === 'Schwarzes Brett') && (
+      {(isOrganizationActive || (availableFilters.find(f => f.name === selectedFilter)?.enable_personal)) && (
         <TouchableOpacity 
           style={styles.addButton}
           onPress={handleCreateArticle}

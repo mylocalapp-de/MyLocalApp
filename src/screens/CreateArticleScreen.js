@@ -63,7 +63,7 @@ const CreateArticleScreen = ({ navigation, route }) => {
     try {
       const { data, error } = await supabase
         .from('article_filters')
-        .select('name, is_highlighted, is_admin_only') // Fetch all needed fields
+        .select('name, is_highlighted, is_admin_only, enable_personal') // Fetch all needed fields
         .order('display_order', { ascending: true });
 
       if (error) {
@@ -73,7 +73,7 @@ const CreateArticleScreen = ({ navigation, route }) => {
       } else {
         // Filter out admin-only types and map to structure
         const userVisibleTypes = data
-          .filter(item => !item.is_admin_only)
+          .filter(item => !item.is_admin_only && (!isPersonal || item.enable_personal))
           .map(item => ({ 
             name: item.name, 
             is_highlighted: item.is_highlighted || false 

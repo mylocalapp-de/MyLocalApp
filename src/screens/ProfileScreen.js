@@ -8,11 +8,26 @@ import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useNetwork } from '../context/NetworkContext';
 import { supabase } from '../lib/supabase';
+import Constants from 'expo-constants'; // Import Constants to access env vars
+import { useAppConfig } from '../context/AppConfigContext';
 
 const { height } = Dimensions.get('window');
 const androidPaddingTop = height * 0.05; // 3% of screen height for Android
 
+// Helper to interpret boolean-like env values
+const isTrue = (val) => val === true || val === 'true' || val === '1';
+
+// Feature toggle default fallback using env/extra (for very early render)
+const defaultDisablePreferences = isTrue(process.env.EXPO_PUBLIC_DISABLE_PREFERENCES) ||
+  isTrue(Constants?.expoConfig?.extra?.disablePreferences);
+
 const ProfileScreen = () => {
+  const { config: appConfig, loading: appConfigLoading } = useAppConfig();
+  // Prefer remote config when loaded, fallback otherwise
+  const disablePreferences = appConfigLoading
+    ? defaultDisablePreferences
+    : isTrue(appConfig.EXPO_PUBLIC_DISABLE_PREFERENCES);
+
   // DEBUG: Log component render and loading state
   // console.log(`ProfileScreen rendering - isAccountSettingsLoading: ${isAccountSettingsLoading}`);
 
@@ -1156,7 +1171,8 @@ const ProfileScreen = () => {
                 </View>
               )}
 
-              {/* Personal Preferences - Show for both local and logged-in */}
+              {/* Personal Preferences - hidden when disablePreferences flag is true */}
+              {!disablePreferences && (
               <View style={styles.card}>
                   <Text style={styles.cardTitle}>Deine Interessen</Text>
                   {/* Use context preferences directly, works for local and logged-in */}
@@ -1188,6 +1204,7 @@ const ProfileScreen = () => {
                     <Ionicons name="chevron-forward" size={16} color="#4285F4" />
                   </TouchableOpacity>
               </View>
+              )}
               
               {/* About Me Section - Show for both local and logged-in, but edit only personal */} 
               <View style={styles.card}>

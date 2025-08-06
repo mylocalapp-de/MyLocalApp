@@ -20,15 +20,26 @@ import { useOrganization } from '../context/OrganizationContext'; // To switch c
 import { supabase } from '../lib/supabase'; // Import supabase client
 import Purchases, { PurchasesOffering, PurchasesPackage, LOG_LEVEL } from 'react-native-purchases';
 import Constants from 'expo-constants'; // Import Constants
+import { useAppConfig } from '../context/AppConfigContext';
 
 // TODO: Configure Purchases SDK with your API key, typically in App.js
 // Purchases.configure({ apiKey: "YOUR_REVENUECAT_API_KEY" });
 // Purchases.setLogLevel(LOG_LEVEL.DEBUG); // Optional: For debugging
 
-// --- Determine if iOS IAP is enabled via environment variable ---
-const isIosIapEnabled = Constants.expoConfig?.extra?.enableIosIap === true;
+// Helper to interpret boolean-like env string values
+const isTrue = (val) => val === true || val === 'true' || val === '1';
+
+// Fallback flags for early render before remote config loads
+const fallbackIosIapEnabled = Constants.expoConfig?.extra?.enableIosIap === true;
+const fallbackAndroidIapEnabled = Constants.expoConfig?.extra?.enableAndroidIap === true;
 
 const OrganizationSetupScreen = ({ navigation }) => {
+  const { config: appConfig, loading: appConfigLoading } = useAppConfig();
+
+  // Determine IAP enablement dynamically
+  const isIosIapEnabled = appConfigLoading ? fallbackIosIapEnabled : isTrue(appConfig.EXPO_PUBLIC_ENABLE_IOS_IAP);
+  const isAndroidIapEnabled = appConfigLoading ? fallbackAndroidIapEnabled : isTrue(appConfig.EXPO_PUBLIC_ENABLE_ANDROID_IAP);
+
   const [mode, setMode] = useState('select'); // 'select', 'create', 'join', 'voucher'
   const [orgName, setOrgName] = useState('');
   const [inviteCode, setInviteCode] = useState('');
@@ -52,9 +63,9 @@ const OrganizationSetupScreen = ({ navigation }) => {
 
   // --- Configure RevenueCat SDK --- 
   useEffect(() => {
-    // Get the keys from app.config.js extra field
-    const revenueCatApiKeyAndroid = Constants.expoConfig?.extra?.revenueCatApiKeyAndroid;
-    const revenueCatApiKeyIos = Constants.expoConfig?.extra?.revenueCatApiKeyIos;
+    // Get RevenueCat keys from remote config (or fallback extras)
+    const revenueCatApiKeyAndroid = appConfig.REVENUECAT_API_KEY_ANDROID || Constants.expoConfig?.extra?.revenueCatApiKeyAndroid;
+    const revenueCatApiKeyIos = appConfig.REVENUECAT_API_KEY_IOS || Constants.expoConfig?.extra?.revenueCatApiKeyIos;
     
     const apiKey = Platform.OS === 'ios' ? revenueCatApiKeyIos : revenueCatApiKeyAndroid;
     
@@ -72,7 +83,7 @@ const OrganizationSetupScreen = ({ navigation }) => {
       // Display an error to the user as purchases won't work
       setPurchaseError("Kauf-Funktion nicht verfügbar. API-Schlüssel fehlt.");
     }
-  }, []); // Empty dependency array ensures this runs only once when the component mounts
+  }, [appConfigLoading, appConfig]); // Re-run when configuration availability changes
 
   // --- Listen for changes after code redemption ---
   useEffect(() => {
@@ -644,32 +655,24 @@ const OrganizationSetupScreen = ({ navigation }) => {
             </View>
             
             {/* Conditional Price Text */}
-            {Platform.OS === 'ios' && !isIosIapEnabled ? (
+            {((Platform.OS === 'ios' && !isIosIapEnabled) || (Platform.OS === 'android' && !isAndroidIapEnabled)) ? (
               <Text style={[styles.priceText, styles.iosVoucherOnlyText]}>
-                Auf iOS aktuell nur per Gutschein möglich
+                {Platform.OS === 'ios' ? 'Aktuell nur per Code vom App-Administrator möglich!' : 'Aktuell nur per Code vom App-Administrator möglich!'}
               </Text>
             ) : (
               <Text style={styles.priceText}>Nur 3,99 € pro Woche</Text>
             )}
             
-             <TouchableOpacity 
+            {/* Show “Organisation direkt erstellen” only when IAP is enabled */}
+            {!((Platform.OS === 'ios' && !isIosIapEnabled) || (Platform.OS === 'android' && !isAndroidIapEnabled)) && (
+              <TouchableOpacity 
                 style={[styles.button, styles.actionButtonPaywall]} 
-                // Conditional onPress for iOS when IAP is disabled
-                onPress={() => {
-                    if (Platform.OS === 'ios' && !isIosIapEnabled) {
-                        Alert.alert(
-                            'Hinweis', 
-                            'Aktuell ist dies auf iOS noch nicht möglich - Bitte gucke auf unsere Webseite für mehr Informationen',
-                            [{ text: 'OK' }]
-                        );
-                    } else {
-                        setMode('create'); // Normal behavior: Go to create form
-                    }
-                }}
-            >
+                onPress={() => setMode('create')}
+              >
                 <Ionicons name="add-circle-outline" size={20} color="#fff" style={styles.buttonIcon} />
-                <Text style={styles.buttonText}>Organisation kostenpflichtig erstellen</Text>
-            </TouchableOpacity>
+                <Text style={styles.buttonText}>Organisation direkt erstellen</Text>
+              </TouchableOpacity>
+            )}
             
             <TouchableOpacity 
                 style={[styles.button, styles.voucherButton]} 
@@ -685,12 +688,12 @@ const OrganizationSetupScreen = ({ navigation }) => {
                 }}
             >
                  <Ionicons name="ticket-outline" size={20} color="#4285F4" style={styles.buttonIcon} />
-                 <Text style={styles.voucherButtonText}>Gutschein-Code eingeben</Text>
+                 <Text style={styles.voucherButtonText}>Einladungs-Code eingeben</Text>
             </TouchableOpacity>
 
             {/* Inline row: Conditionally show Restore & Manage Buttons */}
-            {/* Only show if NOT (iOS AND IAP disabled) */}
-            {!(Platform.OS === 'ios' && !isIosIapEnabled) && (
+            {/* Only show if IAP is enabled on the current platform */}
+            {!((Platform.OS === 'ios' && !isIosIapEnabled) || (Platform.OS === 'android' && !isAndroidIapEnabled)) && (
               <View style={styles.inlineButtons}>
                 {/* Restore Purchases */}
                 <TouchableOpacity 

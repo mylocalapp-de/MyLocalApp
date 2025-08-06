@@ -140,10 +140,10 @@ const NewDirectMessageScreen = ({ navigation }) => {
 
     setIsSearching(true);
     setSearchError(null);
-    console.log(`Searching for users with email like: %${query}%`);
+    console.log(`Searching for users with display name like: %${query}%`);
 
     try {
-      const { data, error: rpcError } = await supabase.rpc('search_users_by_email', {
+      const { data, error: rpcError } = await supabase.rpc('search_users_by_display_name', {
         p_search_query: query.trim()
       });
 
@@ -300,7 +300,7 @@ const NewDirectMessageScreen = ({ navigation }) => {
           <Ionicons name="search-outline" size={20} color="#888" style={styles.searchIcon} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Nach E-Mail suchen (min. 3 Zeichen)..."
+            placeholder="Nach Name suchen (min. 3 Zeichen)..."
             placeholderTextColor="#888"
             value={searchQuery}
             onChangeText={(text) => {
@@ -309,7 +309,7 @@ const NewDirectMessageScreen = ({ navigation }) => {
             }}
             autoCapitalize="none"
             autoCorrect={false}
-            keyboardType="email-address"
+            keyboardType="default"
             returnKeyType="search"
           />
           {searchQuery.length > 0 && (

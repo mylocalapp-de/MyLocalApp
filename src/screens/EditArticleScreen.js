@@ -60,15 +60,16 @@ const EditArticleScreen = ({ navigation, route }) => {
     try {
       const { data, error } = await supabase
         .from('article_filters')
-        .select('name, is_highlighted, is_admin_only')
+        .select('name, is_highlighted, is_admin_only, enable_personal')
         .order('display_order', { ascending: true });
 
       if (error) {
         console.error('Error fetching article types:', error);
         setAvailableArticleTypes([]);
       } else {
+        const inPersonalContext = !activeOrganizationId;
         const userVisibleTypes = data
-          .filter(item => !item.is_admin_only)
+          .filter(item => !item.is_admin_only && (!inPersonalContext || item.enable_personal))
           .map(item => ({ 
             name: item.name, 
             is_highlighted: item.is_highlighted || false 
@@ -270,15 +271,9 @@ const EditArticleScreen = ({ navigation, route }) => {
           type: type,
       };
 
-      // Only include image URLs in update if it's an org article
-      if (isOrgArticle) {
-          updateData.image_url = finalImageUrl;
-          updateData.preview_image_url = finalPreviewUrl;
-      } else {
-          // Ensure images are nullified if it somehow became a non-org article (edge case)
-          updateData.image_url = null;
-          updateData.preview_image_url = null;
-      }
+      // Include image URLs for both personal and organization articles
+      updateData.image_url = finalImageUrl;
+      updateData.preview_image_url = finalPreviewUrl;
 
       const { error } = await supabase
         .from('articles')
@@ -474,9 +469,8 @@ const EditArticleScreen = ({ navigation, route }) => {
             textAlignVertical="top"
           />
           
-          {/* Image Upload/Edit - only shown for org articles */}
-          {isOrgArticle && (
-            <>
+          {/* Image Upload/Edit */}
+          <>
               <Text style={styles.inputLabel}>Bild (Optional)</Text>
               {currentImageUri ? (
                 <View style={styles.imagePreviewContainer}>
@@ -494,7 +488,6 @@ const EditArticleScreen = ({ navigation, route }) => {
                </TouchableOpacity>
                {isUploading && <ActivityIndicator size="small" color="#4285F4" style={{ marginTop: 10}} />}
             </>
-          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

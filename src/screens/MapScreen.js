@@ -6,6 +6,14 @@ import MapView, { Marker, Callout, PROVIDER_GOOGLE } from 'react-native-maps';
 import { supabase } from '../lib/supabase'; // Adjust path if necessary
 import { useOrganization } from '../context/OrganizationContext'; // Import Organization context
 import { useAuth } from '../context/AuthContext'; // Import Auth context
+import Constants from 'expo-constants';
+import { useAppConfig } from '../context/AppConfigContext';
+
+// Helper to interpret boolean-like env values
+const isTrue = (val) => val === true || val === 'true' || val === '1';
+
+// We will fetch map disable flag dynamically via AppConfig; keep fallback for early render
+const disableMapEnvFallback = isTrue(process.env.EXPO_PUBLIC_DISABLE_MAP) || isTrue(Constants?.expoConfig?.extra?.disableMap);
 
 const MapScreen = ({ navigation }) => {
   const { isOrganizationActive, activeOrganizationId } = useOrganization(); // Get org state
@@ -332,4 +340,34 @@ const styles = StyleSheet.create({
   },
 });
 
-export default MapScreen; 
+// Stub component shown when map is disabled
+const DisabledMapScreen = () => (
+  <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+    <Ionicons name="map-outline" size={40} color="#888" />
+    <Text style={{ marginTop: 10, color: '#666', fontSize: 16, textAlign: 'center' }}>Karte ist aktuell deaktiviert.</Text>
+  </View>
+);
+
+// --- Wrapper component selecting between enabled/disabled map based on remote config ---
+const MapScreenWrapper = (props) => {
+  const { config, loading } = useAppConfig();
+  const isMapDisabled = loading
+    ? disableMapEnvFallback
+    : isTrue(config.EXPO_PUBLIC_DISABLE_MAP);
+
+  if (loading) {
+    // Reuse centered style for loading
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color="#4285F4" />
+      </View>
+    );
+  }
+
+  if (isMapDisabled) {
+    return <DisabledMapScreen {...props} />;
+  }
+  return <MapScreen {...props} />;
+};
+
+export default MapScreenWrapper; 

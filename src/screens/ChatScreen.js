@@ -7,6 +7,8 @@ import { useAuth } from '../context/AuthContext';
 import { useNetwork } from '../context/NetworkContext';
 import { supabase } from '../lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
+import { useAppConfig } from '../context/AppConfigContext';
 
 // Helper function to transform Supabase Storage URLs
 const getTransformedImageUrl = (originalUrl) => {
@@ -21,10 +23,25 @@ const getTransformedImageUrl = (originalUrl) => {
   return originalUrl.replace('/object/public/', '/render/image/public/') + '?width=100&height=100&resize=cover&quality=60'; // Smaller size for list avatar
 };
 
+// Helper to interpret boolean-like env values
+const isTrue = (val) => val === true || val === 'true' || val === '1';
+
 const ChatScreen = ({ navigation, route }) => {
   const { isOrganizationActive, activeOrganizationId, activeOrganization } = useOrganization();
   const { user, profile: currentUserProfile, displayName } = useAuth();
   const { isOfflineMode, isConnected } = useNetwork();
+
+  // Remote configuration
+  const { config: appConfig, loading: appConfigLoading } = useAppConfig();
+
+  // Feature toggles driven by remote config with env/extra fallback
+  const disableChat = appConfigLoading
+    ? (isTrue(process.env.EXPO_PUBLIC_DISABLE_CHAT) || isTrue(Constants?.expoConfig?.extra?.disableChat))
+    : isTrue(appConfig.EXPO_PUBLIC_DISABLE_CHAT);
+
+  const disableDorfbot = appConfigLoading
+    ? (isTrue(process.env.EXPO_PUBLIC_DISABLE_DORFBOT) || isTrue(Constants?.expoConfig?.extra?.disableDorfbot))
+    : isTrue(appConfig.EXPO_PUBLIC_DISABLE_DORFBOT);
 
   // State for chat groups and loading
   const [chatGroups, setChatGroups] = useState([]);
@@ -637,6 +654,10 @@ const ChatScreen = ({ navigation, route }) => {
           <View style={styles.emptyContainer}>
              {displayError ? (
                  <Text style={styles.emptyText}>{displayError}</Text>
+             ) : disableChat ? (
+                 <Text style={styles.emptyText}>
+                   Hier kannst du anderen Nutzer:innen aus der App Direktnachrichten senden. Tippe dafür entweder auf ihren Namen unter einem Beitrag oder klicke unten rechts auf das blaue "+"-Symbol, um eine neue Unterhaltung zu starten.
+                 </Text>
              ) : (
                 <Text style={styles.emptyText}>
                   {activeFilter === 'Alle' ? 'Keine Chats oder Nachrichten gefunden.' : `Keine Einträge für Filter "${activeFilter}" gefunden.`}
@@ -697,12 +718,12 @@ const ChatScreen = ({ navigation, route }) => {
   return (
     <View style={styles.container}>
       <ScreenHeader
-        filters={chatFilters}
-        onFilterChange={setActiveFilter}
+        filters={disableChat ? [] : chatFilters}
+        onFilterChange={disableChat ? undefined : setActiveFilter}
         title={isOrganizationActive ? `Chats (${activeOrganization?.name || 'Org'})` : "Meine Chats"}
       />
 
-      {renderDorfbotItem()}
+      {!disableDorfbot && renderDorfbotItem()}
 
       {renderChatList()}
 
