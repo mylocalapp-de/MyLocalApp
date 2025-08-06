@@ -4,7 +4,9 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { Ionicons } from '@expo/vector-icons';
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 import { useAuth } from '../context/AuthContext';
+import { useAppConfig } from '../context/AppConfigContext';
 
 // Import screens
 import HomeScreen from '../screens/HomeScreen';
@@ -37,6 +39,12 @@ const HomeStack = createStackNavigator();
 const CalendarStack = createStackNavigator();
 const RootStack = createStackNavigator();
 const AuthStack = createStackNavigator();
+
+// Helper to interpret boolean-like env values
+const isTrue = (val) => val === true || val === 'true' || val === '1';
+
+// Fallback flag (used until remote config is available)
+const fallbackDisableMap = isTrue(process.env.EXPO_PUBLIC_DISABLE_MAP) || isTrue(Constants?.expoConfig?.extra?.disableMap);
 
 // Chat stack navigator
 const ChatStackNavigator = () => {
@@ -108,6 +116,9 @@ const AuthStackNavigator = () => {
 
 // Main tab navigator
 const TabNavigator = () => {
+  const { config: appConfig, loading: appConfigLoading } = useAppConfig();
+  const disableMap = appConfigLoading ? fallbackDisableMap : isTrue(appConfig.EXPO_PUBLIC_DISABLE_MAP);
+
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -166,11 +177,13 @@ const TabNavigator = () => {
         component={CalendarStackNavigator} 
         options={{ tabBarLabel: 'Kalender' }}
       />
-      <Tab.Screen 
-        name="Map" 
-        component={MapScreen} 
-        options={{ tabBarLabel: 'Karte' }}
-      />
+      {!disableMap && (
+        <Tab.Screen 
+          name="Map" 
+          component={MapScreen} 
+          options={{ tabBarLabel: 'Karte' }}
+        />
+      )}
       <Tab.Screen 
         name="Profile" 
         component={ProfileScreen} 

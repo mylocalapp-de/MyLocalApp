@@ -1,7 +1,7 @@
 module.exports = {
   name: "MeinStrodehne",
-  slug: "meinstrodehne",
-  version: "1.0.0",
+  slug: "meinhavelaue",
+  version: "1.0.2",
   orientation: "portrait",
   // Square 1024x1024 icon
   icon: "./assets/fixed/icon.png",
@@ -60,12 +60,28 @@ module.exports = {
     // Add RevenueCat keys
     revenueCatApiKeyAndroid: process.env.REVENUECAT_API_KEY_ANDROID,
     revenueCatApiKeyIos: process.env.REVENUECAT_API_KEY_IOS,
+    // Feature toggles
+    enableIosIap: process.env.ENABLE_IOS_IAP,
+    enableAndroidIap: process.env.ENABLE_ANDROID_IAP,
+    disableMap: process.env.EXPO_PUBLIC_DISABLE_MAP,
     eas: {
       projectId: "3adb5b7e-7622-44f3-9375-5f23371e77b7"
     }
   },
   owner: "pkienast",
   plugins: [
+    [
+      "expo-build-properties",
+      {
+        android: {
+          compileSdkVersion: 35,
+          targetSdkVersion: 35,
+          buildToolsVersion: "35.0.0",
+          kotlinVersion: "1.9.25",
+          composeCompilerVersion: "1.5.15"
+        }
+      }
+    ],
     "expo-font"
   ]
 }; 
