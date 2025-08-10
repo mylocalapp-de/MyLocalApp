@@ -5,12 +5,12 @@ import {
   StyleSheet, 
   TextInput, 
   TouchableOpacity, 
-  SafeAreaView, 
   ScrollView, 
   ActivityIndicator,
   Alert,
   Linking 
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 
@@ -63,11 +63,8 @@ const OnboardingScreen = ({ navigation }) => {
       setCurrentStep(2); // Go back to name step
       return;
     }
-    if (!email.trim()) {
-      setError('Bitte gib deine E-Mail-Adresse ein.');
-      return;
-    }
-    if (!validateEmail(email.trim())) {
+    // E-Mail ist optional: nur prüfen, wenn etwas eingegeben wurde
+    if (email.trim() && !validateEmail(email.trim())) {
        setError('Bitte gib eine gültige E-Mail-Adresse ein.');
        return;
     }
@@ -75,9 +72,9 @@ const OnboardingScreen = ({ navigation }) => {
     setIsLoading(true);
 
     try {
-      console.log(`Onboarding Final Step: Attempting temporary account creation. Name: ${displayName}, Email: ${email}`);
-      // Email is now mandatory, trim() is sufficient. No null check needed.
-      const result = await createTemporaryAccount(displayName.trim(), email.trim()); 
+      console.log(`Onboarding Final Step: Attempting temporary account creation. Name: ${displayName}, Email: ${email || '(leer/optional)'}`);
+      // E-Mail optional: wenn leer, null übergeben, damit Platzhalter in AuthContext genutzt wird
+      const result = await createTemporaryAccount(displayName.trim(), email.trim() || null); 
 
       if (result.success) {
         console.log('Onboarding: Temporary account created successfully via AuthContext.');
@@ -152,22 +149,22 @@ const OnboardingScreen = ({ navigation }) => {
             </TouchableOpacity>
           </>
         );
-      case 3: // Email & Submit
+      case 3: // Email (optional) & Submit
         return (
           <>
-            <Text style={styles.sectionTitle}>Account sichern</Text>
+            <Text style={styles.sectionTitle}>Account sichern (optional)</Text>
             <Text style={styles.descriptionSmall}>
-              Wir benötigen deine E-Mail-Adresse, damit du deinen Account auf <Text style={styles.boldText}>mehreren Geräten</Text> nutzen oder später <Text style={styles.boldText}>wiederherstellen</Text> kannst.
+              Mit deiner E-Mail kannst du deinen Account auf <Text style={styles.boldText}>mehreren Geräten</Text> nutzen oder später <Text style={styles.boldText}>wiederherstellen</Text>. Du kannst dieses Feld auch leer lassen – wir erstellen dann einen <Text style={styles.boldText}>temporären Account ohne E‑Mail</Text>.
             </Text>
             <Text style={[styles.descriptionSmall, styles.infoText]}>
-               <Ionicons name="information-circle-outline" size={16} color="#555" /> Keine Sorge, es wird <Text style={styles.boldText}>keine Bestätigungs-E-Mail</Text> verschickt.
+               <Ionicons name="information-circle-outline" size={16} color="#555" /> Du kannst später jederzeit eine E‑Mail in den Einstellungen hinzufügen.
             </Text>
             <View style={styles.inputContainer}>
               <TextInput
                 style={styles.textInput}
                 value={email}
                 onChangeText={setEmail}
-                placeholder="deine@email.de"
+                placeholder="Optional: deine@email.de"
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}

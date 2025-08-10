@@ -2,10 +2,20 @@ module.exports = {
   name: "MeinStrodehne",
   slug: "meinhavelaue",
   version: "1.0.4",
-  orientation: "portrait",
+  // Allow all orientations to comply with large-screen guidance (Android 16+)
   // Square 1024x1024 icon
   icon: "./assets/fixed/icon.png",
   userInterfaceStyle: "light",
+  androidStatusBar: {
+    backgroundColor: "transparent",
+    translucent: true,
+    barStyle: "dark-content"
+  },
+  androidNavigationBar: {
+    backgroundColor: "transparent",
+    barStyle: "dark-content",
+    visible: true
+  },
   splash: {
     image: "./assets/splash.png",
     resizeMode: "contain",
