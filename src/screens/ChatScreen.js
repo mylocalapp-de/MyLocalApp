@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, Platform, ActivityIndicator, Alert } from 'react-native';
 import ScreenHeader from '../components/common/ScreenHeader';
 import { Ionicons } from '@expo/vector-icons';
 import { useOrganization } from '../context/OrganizationContext';
@@ -59,6 +59,13 @@ const ChatScreen = ({ navigation, route }) => {
   const [isLoadingFilters, setIsLoadingFilters] = useState(true);
   const [isLoadingDms, setIsLoadingDms] = useState(true);
   const [dmError, setDmError] = useState(null);
+
+  // Global user search state (search by display name like NewDirectMessageScreen)
+  const [userSearchResults, setUserSearchResults] = useState([]);
+  const [isSearchingUsers, setIsSearchingUsers] = useState(false);
+  const [userSearchError, setUserSearchError] = useState(null);
+  const [loadingConversation, setLoadingConversation] = useState(false);
+  const [selectedTargetId, setSelectedTargetId] = useState(null);
 
   // Listen for navigation events to update unread counts
   useEffect(() => {
@@ -433,6 +440,134 @@ const ChatScreen = ({ navigation, route }) => {
     filterCombinedList(activeFilter, combinedList);
   }, [activeFilter, combinedList, searchQuery]); // Depend on combinedList and search query
 
+  // --- User Search (by display name) like in NewDirectMessageScreen ---
+  const fetchAvatarsForSearchResults = async (results) => {
+      if (!results || results.length === 0) {
+          return results;
+      }
+
+      const userIdsToFetch = results.map(user => user.id);
+      try {
+          const { data: profilesData, error: profilesError } = await supabase
+              .from('profiles')
+              .select('id, avatar_url')
+              .in('id', userIdsToFetch);
+
+          if (profilesError) {
+              console.error('[ChatScreen] Error fetching profiles for avatars (search results):', profilesError);
+              return results;
+          }
+
+          const avatarMap = profilesData.reduce((map, profile) => {
+              map[profile.id] = profile.avatar_url;
+              return map;
+          }, {});
+
+          return results.map(user => ({
+              ...user,
+              avatar_url: avatarMap[user.id] || null,
+          }));
+      } catch (fetchErr) {
+          console.error('[ChatScreen] Unexpected error in fetchAvatarsForSearchResults:', fetchErr);
+          return results;
+      }
+  };
+
+  const searchUsers = async (query) => {
+      const q = (query || '').trim();
+      if (!q || q.length < 3) {
+          setUserSearchResults([]);
+          setUserSearchError(null);
+          setIsSearchingUsers(false);
+          return;
+      }
+      if (!user) {
+          setUserSearchError('Bitte melde dich an, um Benutzer zu suchen.');
+          setIsSearchingUsers(false);
+          setUserSearchResults([]);
+          return;
+      }
+      if (isOfflineMode) {
+          setUserSearchError('Benutzersuche ist offline nicht verfügbar.');
+          setIsSearchingUsers(false);
+          setUserSearchResults([]);
+          return;
+      }
+
+      setIsSearchingUsers(true);
+      setUserSearchError(null);
+      try {
+          const { data, error: rpcError } = await supabase.rpc('search_users_by_display_name', {
+              p_search_query: q,
+          });
+          if (rpcError) {
+              console.error('[ChatScreen] Error searching users via RPC:', rpcError);
+              setUserSearchError('Benutzer konnten nicht gesucht werden.');
+              setUserSearchResults([]);
+          } else if (data) {
+              const resultsWithAvatars = await fetchAvatarsForSearchResults(data);
+              setUserSearchResults(resultsWithAvatars);
+          } else {
+              setUserSearchResults([]);
+          }
+      } catch (err) {
+          console.error('[ChatScreen] Unexpected error searching users:', err);
+          setUserSearchError('Ein unerwarteter Fehler ist aufgetreten.');
+          setUserSearchResults([]);
+      } finally {
+          setIsSearchingUsers(false);
+      }
+  };
+
+  const startDirectMessage = async (target) => {
+      if (loadingConversation) return;
+      setSelectedTargetId(target.id);
+      setLoadingConversation(true);
+      try {
+          if (!user) {
+              Alert.alert('Hinweis', 'Bitte melde dich an, um Nachrichten zu senden.');
+              return;
+          }
+          if (isOfflineMode) {
+              Alert.alert('Hinweis', 'Nachrichten sind offline nicht verfügbar.');
+              return;
+          }
+          const { data: conversationId, error: rpcError } = await supabase.rpc('find_or_create_user_dm_conversation', {
+              p_other_user_id: target.id,
+          });
+          if (rpcError || !conversationId) {
+              console.error('[ChatScreen] Error finding/creating user DM conversation:', rpcError);
+              Alert.alert('Fehler', 'Konversation konnte nicht gestartet werden: ' + (rpcError?.message || 'Unbekannter RPC Fehler'));
+              return;
+          }
+          navigation.navigate('DirectMessageDetail', {
+              conversationId: conversationId,
+              recipientId: target.id,
+              organizationId: null,
+              recipientName: target.display_name,
+              isOrgConversation: false,
+          });
+      } catch (err) {
+          console.error('[ChatScreen] Error handling startDirectMessage:', err);
+          Alert.alert('Fehler', 'Ein unerwarteter Fehler ist aufgetreten.');
+      } finally {
+          setLoadingConversation(false);
+          setSelectedTargetId(null);
+      }
+  };
+
+  // Trigger user search when searchQuery changes
+  useEffect(() => {
+      const q = (searchQuery || '').trim();
+      if (q.length >= 3) {
+          searchUsers(q);
+      } else {
+          setUserSearchResults([]);
+          setUserSearchError(null);
+          setIsSearchingUsers(false);
+      }
+  }, [searchQuery, user, isOfflineMode]);
+
   // Filter combined list based on selected filter
   const filterCombinedList = (filter, listToFilter) => {
       console.log(`[ChatScreen] Filtering list by: ${filter}`);
@@ -663,6 +798,35 @@ const ChatScreen = ({ navigation, route }) => {
         showsVerticalScrollIndicator={false}
         refreshing={showLoading}
         onRefresh={fetchData}
+        ListHeaderComponent={
+          searchQuery && searchQuery.trim().length >= 3 ? (
+            <View style={styles.searchResultsContainer}>
+              <Text style={styles.sectionTitle}>Benutzer</Text>
+              {isSearchingUsers ? (
+                <View style={styles.listLoadingContainer}> 
+                  <ActivityIndicator size="small" color="#4285F4" />
+                  <Text style={styles.loadingText}>Suche Benutzer...</Text>
+                </View>
+              ) : userSearchError ? (
+                <View style={styles.inlineErrorContainer}>
+                  <Ionicons name="alert-circle-outline" size={20} color="#ff3b30" />
+                  <Text style={styles.inlineErrorText}>{userSearchError}</Text>
+                </View>
+              ) : userSearchResults.length > 0 ? (
+                <FlatList
+                  data={userSearchResults}
+                  renderItem={renderUserSearchItem}
+                  keyExtractor={(item) => `user-${item.id}`}
+                  scrollEnabled={false}
+                />
+              ) : (
+                <View style={styles.emptyListContainer}>
+                  <Text style={styles.emptyText}>Keine Benutzer für "{searchQuery}" gefunden.</Text>
+                </View>
+              )}
+            </View>
+          ) : null
+        }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
              {displayError ? (
@@ -680,6 +844,38 @@ const ChatScreen = ({ navigation, route }) => {
         }
       />
     );
+  };
+
+  const renderUserSearchItem = ({ item }) => {
+      const transformedUrl = item.avatar_url ? getTransformedImageUrl(item.avatar_url) : null;
+      return (
+          <TouchableOpacity
+              style={styles.chatItem}
+              onPress={() => startDirectMessage(item)}
+              disabled={loadingConversation}
+          >
+              {transformedUrl ? (
+                  <Image source={{ uri: transformedUrl }} style={styles.avatar} />
+              ) : (
+                  <View style={[styles.avatarPlaceholder, styles.userDmAvatar]}>
+                      <Text style={styles.avatarLetter}>
+                          {item.display_name?.charAt(0).toUpperCase() || 'U'}
+                      </Text>
+                  </View>
+              )}
+              <View style={styles.chatInfo}>
+                  <View style={styles.chatTopLine}>
+                      <Text style={styles.chatName}>{item.display_name || 'Unbekannter Benutzer'}</Text>
+                  </View>
+                  <View style={styles.chatBottomLine}>
+                      <Text style={styles.chatMessage} numberOfLines={1}>{item.email || ''}</Text>
+                      {loadingConversation && selectedTargetId === item.id && (
+                          <ActivityIndicator size="small" color="#4285F4" style={styles.itemLoadingIndicator} />
+                      )}
+                  </View>
+              </View>
+          </TouchableOpacity>
+      );
   };
 
   const handleAddButtonPress = () => {
@@ -766,6 +962,19 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingBottom: Platform.OS === 'ios' ? 90 : 80,
+  },
+  searchResultsContainer: {
+    backgroundColor: '#f8f8f8',
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#555',
+    marginTop: 8,
+    marginBottom: 8,
   },
   chatItem: {
     flexDirection: 'row',
@@ -888,12 +1097,27 @@ const styles = StyleSheet.create({
     marginTop: 10,
     color: '#666',
   },
+  listLoadingContainer: {
+    paddingVertical: 10,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
     paddingVertical: 50,
+  },
+  inlineErrorContainer: {
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  inlineErrorText: {
+    marginLeft: 8,
+    color: '#ff3b30',
   },
   errorText: {
     marginTop: 10,
@@ -922,8 +1146,16 @@ const styles = StyleSheet.create({
     fontSize: 15,
     textAlign: 'center',
   },
+  emptyListContainer: {
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   pinIcon: {
     marginRight: 5,
+  },
+  itemLoadingIndicator: {
+    marginLeft: 'auto',
   },
   centerMessageContainer: {
       flex: 1,

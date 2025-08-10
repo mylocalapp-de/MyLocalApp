@@ -1,21 +1,13 @@
 module.exports = {
   name: "MeinStrodehne",
   slug: "meinhavelaue",
-  version: "1.0.4",
+  version: "1.0.5",
   // Allow all orientations to comply with large-screen guidance (Android 16+)
   // Square 1024x1024 icon
   icon: "./assets/fixed/icon.png",
   userInterfaceStyle: "light",
-  androidStatusBar: {
-    backgroundColor: "transparent",
-    translucent: true,
-    barStyle: "dark-content"
-  },
-  androidNavigationBar: {
-    backgroundColor: "transparent",
-    barStyle: "dark-content",
-    visible: true
-  },
+  // Remove androidStatusBar and androidNavigationBar configs
+  // as EdgeToEdge.enable() will handle the system bars automatically
   splash: {
     image: "./assets/splash.png",
     resizeMode: "contain",
@@ -93,6 +85,7 @@ module.exports = {
         }
       }
     ],
+    "./plugins/with-android-edge-to-edge",
     "expo-font"
   ]
 }; 
