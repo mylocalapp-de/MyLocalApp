@@ -443,7 +443,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    padding: 10,
+    // Eliminate gap directly under header/search
+    paddingHorizontal: 10,
+    paddingTop: 0,
     paddingBottom: Platform.OS === 'ios' ? 30 : 20,
   },
   loadingContainer: {

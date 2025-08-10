@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -24,6 +24,7 @@ import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
 import { decode } from 'base64-arraybuffer';
 import { LinearGradient } from 'expo-linear-gradient';
+import QuillEditor, { QuillToolbar } from 'react-native-cn-quill';
 
 const { height } = Dimensions.get('window');
 const androidPaddingTop = height * 0.03; // 3% of screen height for better scaling
@@ -35,12 +36,12 @@ const CreateArticleScreen = ({ navigation, route }) => {
   
   // Article form state
   const [title, setTitle] = useState('');
-  const [content, setContent] = useState('');
   const [type, setType] = useState('');
   const isPersonal = !activeOrganizationId && !!personalFilter;
   const [isPublishing, setIsPublishing] = useState(false);
   const [imageAsset, setImageAsset] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
+  const editorRef = useRef(null);
   
   // State for fetched article types/filters
   const [availableArticleTypes, setAvailableArticleTypes] = useState([]);
@@ -93,23 +94,30 @@ const CreateArticleScreen = ({ navigation, route }) => {
     }
   };
   
-  // Validate form before submission
-  const validateForm = () => {
+  // Validate form before submission (checks editor content text length)
+  const validateForm = async () => {
     if (!title.trim()) {
       Alert.alert('Fehler', 'Bitte gib einen Titel ein.');
       return false;
     }
-    
-    if (!content.trim()) {
-      Alert.alert('Fehler', 'Bitte gib einen Inhalt ein.');
-      return false;
-    }
-    
+
     if (!type) {
       Alert.alert('Fehler', 'Bitte wähle eine Kategorie aus.');
       return false;
     }
-    
+
+    try {
+      const plainText = (await editorRef.current?.getText()) || '';
+      if (!plainText.trim()) {
+        Alert.alert('Fehler', 'Bitte gib einen Inhalt ein.');
+        return false;
+      }
+    } catch (e) {
+      console.error('Error validating editor content:', e);
+      Alert.alert('Fehler', 'Editor-Inhalt konnte nicht überprüft werden.');
+      return false;
+    }
+
     return true;
   };
   
@@ -177,13 +185,17 @@ const CreateArticleScreen = ({ navigation, route }) => {
       Alert.alert('Fehler', 'Du musst angemeldet sein, um einen Artikel zu veröffentlichen.');
       return;
     }
-    
-    if (!validateForm()) return;
+
+    if (!(await validateForm())) return;
     
     setIsPublishing(true);
     let finalImageUrl = null;
+    let htmlContent = '';
 
     try {
+      // Read HTML from editor
+      htmlContent = (await editorRef.current?.getHtml()) || '';
+
       // Upload image if one is selected
       if (imageAsset) {
         finalImageUrl = await uploadImage(imageAsset);
@@ -198,7 +210,7 @@ const CreateArticleScreen = ({ navigation, route }) => {
         .from('articles')
         .insert({
           title: title,
-          content: content.replace(/\n/g, '<br>'),
+          content: htmlContent,
           type: type,
           author_id: user.id,
           organization_id: activeOrganizationId,
@@ -243,16 +255,22 @@ const CreateArticleScreen = ({ navigation, route }) => {
       Alert.alert('Fehler', 'Du musst angemeldet sein, um einen Entwurf zu speichern.');
       return;
     }
-    
-    if (!title.trim() && !content.trim()) {
+
+    let plainText = '';
+    try { plainText = (await editorRef.current?.getText()) || ''; } catch {}
+    if (!title.trim() && !plainText.trim()) {
       Alert.alert('Fehler', 'Bitte gib mindestens einen Titel oder Inhalt ein.');
       return;
     }
     
     setIsPublishing(true);
     let finalImageUrl = null;
+    let htmlContent = '';
 
     try {
+      // Read HTML from editor
+      htmlContent = (await editorRef.current?.getHtml()) || '';
+
       // Upload image if one is selected
       if (imageAsset) {
         finalImageUrl = await uploadImage(imageAsset);
@@ -267,7 +285,7 @@ const CreateArticleScreen = ({ navigation, route }) => {
         .from('articles')
         .insert({
           title: title || 'Unbenannter Entwurf',
-          content: (content || '').replace(/\n/g, '<br>'),
+          content: htmlContent,
           type: type || 'Vereine',
           author_id: user.id,
           organization_id: activeOrganizationId,
@@ -417,13 +435,17 @@ const CreateArticleScreen = ({ navigation, route }) => {
           />
           
           <Text style={styles.inputLabel}>Inhalt</Text>
-          <TextInput
-            style={styles.contentInput}
-            placeholder="Schreibe hier deinen Artikel..."
-            value={content}
-            onChangeText={setContent}
-            multiline
-            textAlignVertical="top"
+          <View style={styles.editorContainer}>
+            <QuillEditor
+              ref={editorRef}
+              style={styles.quill}
+              initialHtml={''}
+            />
+          </View>
+          <QuillToolbar 
+            editor={editorRef} 
+            options={['bold','italic','underline','strike','color','background','header','list','align','link','image']}
+            theme="light" 
           />
 
           {/* Image Upload - REMOVED: only shown for org articles */}
@@ -565,14 +587,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 15,
   },
-  contentInput: {
-    backgroundColor: '#f8f8f8',
-    padding: 12,
-    borderRadius: 8,
-    fontSize: 16,
+  editorContainer: {
     minHeight: 200,
-    marginBottom: 15,
-    textAlignVertical: 'top',
+    borderRadius: 8,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#eee',
+    backgroundColor: '#fff',
+  },
+  quill: {
+    minHeight: 200,
+    padding: 8,
+    backgroundColor: '#fff',
   },
   imagePickerButton: {
     flexDirection: 'row',

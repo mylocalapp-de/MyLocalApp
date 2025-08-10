@@ -1,7 +1,7 @@
 module.exports = {
   name: "MeinStrodehne",
   slug: "meinhavelaue",
-  version: "1.0.5",
+  version: "1.0.6",
   // Allow all orientations to comply with large-screen guidance (Android 16+)
   // Square 1024x1024 icon
   icon: "./assets/fixed/icon.png",

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -22,6 +22,7 @@ import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
 import { decode } from 'base64-arraybuffer';
 import { LinearGradient } from 'expo-linear-gradient';
+import QuillEditor, { QuillToolbar } from 'react-native-cn-quill';
 
 const EditArticleScreen = ({ navigation, route }) => {
   const { articleId } = route.params;
@@ -41,6 +42,8 @@ const EditArticleScreen = ({ navigation, route }) => {
   const [imageAsset, setImageAsset] = useState(null); // State for newly selected image asset
   const [isUploading, setIsUploading] = useState(false); // State for upload progress
   const [removeCurrentImage, setRemoveCurrentImage] = useState(false); // State to track image removal
+  const editorRef = useRef(null);
+  const [editorKey, setEditorKey] = useState(0);
   
   // State for fetched article types/filters
   const [availableArticleTypes, setAvailableArticleTypes] = useState([]);
@@ -154,6 +157,7 @@ const EditArticleScreen = ({ navigation, route }) => {
       setImageUrl(data.image_url || ''); // Load the existing image URL
       setImageAsset(null); // Reset selected asset
       setRemoveCurrentImage(false); // Reset removal flag
+      setEditorKey(prev => prev + 1); // force re-mount editor with new initialHtml
       
     } catch (err) {
       console.error('Unexpected error fetching article:', err);
@@ -163,23 +167,27 @@ const EditArticleScreen = ({ navigation, route }) => {
     }
   };
   
-  // Validate form before submission
-  const validateForm = () => {
+  // Validate form before submission (checks editor content)
+  const validateForm = async () => {
     if (!title.trim()) {
       Alert.alert('Fehler', 'Bitte gib einen Titel ein.');
       return false;
     }
-    
-    if (!content.trim()) {
-      Alert.alert('Fehler', 'Bitte gib einen Inhalt ein.');
-      return false;
-    }
-    
     if (!type) {
       Alert.alert('Fehler', 'Bitte wähle eine Kategorie aus.');
       return false;
     }
-    
+    try {
+      const plainText = (await editorRef.current?.getText()) || '';
+      if (!plainText.trim()) {
+        Alert.alert('Fehler', 'Bitte gib einen Inhalt ein.');
+        return false;
+      }
+    } catch (e) {
+      console.error('Error validating editor content:', e);
+      Alert.alert('Fehler', 'Editor-Inhalt konnte nicht überprüft werden.');
+      return false;
+    }
     return true;
   };
   
@@ -236,13 +244,17 @@ const EditArticleScreen = ({ navigation, route }) => {
 
   // Handle article update
   const handleUpdate = async () => {
-    if (!user || !validateForm()) return;
+    if (!user || !(await validateForm())) return;
 
     setIsSaving(true); // Covers upload + DB update
     let finalImageUrl = imageUrl; // Start with the existing URL
     let finalPreviewUrl = imageUrl; // Assume same for preview initially
+    let htmlContent = '';
 
     try {
+      // Read HTML from editor
+      htmlContent = (await editorRef.current?.getHtml()) || '';
+
       // Scenario 1: New image selected for upload
       if (imageAsset) {
         finalImageUrl = await uploadImage(imageAsset);
@@ -267,7 +279,7 @@ const EditArticleScreen = ({ navigation, route }) => {
       // Update the article in the database
       const updateData = {
           title: title,
-          content: content.replace(/\n/g, '<br>'),
+          content: htmlContent,
           type: type,
       };
 
@@ -460,13 +472,18 @@ const EditArticleScreen = ({ navigation, route }) => {
           />
           
           <Text style={styles.inputLabel}>Inhalt</Text>
-          <TextInput
-            style={styles.contentInput}
-            placeholder="Schreibe hier deinen Artikel..."
-            value={content}
-            onChangeText={setContent}
-            multiline
-            textAlignVertical="top"
+          <View style={styles.editorContainer}>
+            <QuillEditor
+              key={editorKey}
+              ref={editorRef}
+              style={styles.quill}
+              initialHtml={content || ''}
+            />
+          </View>
+          <QuillToolbar 
+            editor={editorRef} 
+            options={['bold','italic','underline','strike','color','background','header','list','align','link','image']}
+            theme="light" 
           />
           
           {/* Image Upload/Edit */}
@@ -637,13 +654,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 15,
   },
-  contentInput: {
-    backgroundColor: '#f8f8f8',
-    padding: 12,
-    borderRadius: 8,
-    fontSize: 16,
+  editorContainer: {
     minHeight: 200,
-    marginBottom: 15,
+    borderRadius: 8,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#eee',
+    backgroundColor: '#fff',
+  },
+  quill: {
+    minHeight: 200,
+    padding: 8,
+    backgroundColor: '#fff',
   },
   imagePickerButton: {
     flexDirection: 'row',

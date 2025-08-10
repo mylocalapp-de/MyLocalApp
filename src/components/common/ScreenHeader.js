@@ -74,7 +74,7 @@ const ScreenHeader = ({
 
   const rightContent = renderRightContent();
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
       <View style={styles.headerRow}>
         {showBackButton && navigation ? (
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconButton}>
@@ -130,6 +130,7 @@ const styles = StyleSheet.create({
     width: '100%',
     backgroundColor: '#fff',
     paddingTop: Platform.OS === 'android' ? androidPaddingTop : 10,
+    paddingBottom: 0,
   },
   headerRow: {
     flexDirection: 'row',
@@ -138,7 +139,7 @@ const styles = StyleSheet.create({
     width: '100%',
     minHeight: 44,
     paddingHorizontal: 10,
-    marginBottom: 4,
+    marginBottom: 0,
   },
   iconButton: {
     padding: 8,
@@ -186,7 +187,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#f1f1f1',
     marginHorizontal: 10,
-    marginBottom: 6,
+    // Remove bottom spacing to eliminate gap to content below
     borderRadius: 8,
     paddingHorizontal: 10,
     height: 36,

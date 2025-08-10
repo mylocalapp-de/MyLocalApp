@@ -69,11 +69,12 @@ const FilterButtons = ({ filters = [], onFilterChange = () => {}, initialFilter 
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
-    marginBottom: 6,
+    // Remove default bottom margin to avoid extra gap under the header
+    marginBottom: 0,
   },
   contentContainer: {
     paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingVertical: 4,
   },
   filterButton: {
     borderRadius: 20,

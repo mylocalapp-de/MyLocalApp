@@ -961,6 +961,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8f8f8',
   },
   listContent: {
+    // Avoid extra top gap under header/search
+    paddingTop: 0,
     paddingBottom: Platform.OS === 'ios' ? 90 : 80,
   },
   searchResultsContainer: {

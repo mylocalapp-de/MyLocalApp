@@ -138,6 +138,8 @@ const ProfileScreen = () => {
   const [editOrgAboutMe, setEditOrgAboutMe] = useState('');
   // Open About Me modal
   const [showAboutMeModal, setShowAboutMeModal] = useState(false);
+  // Visibility toggle loading
+  const [isUpdatingVisibility, setIsUpdatingVisibility] = useState(false);
 
 
   // Derived state: Check if user has a full Supabase account
@@ -1206,6 +1208,32 @@ const ProfileScreen = () => {
               </View>
               )}
               
+              {/* Visibility / Privacy */}
+              <View style={styles.card}>
+                  <Text style={styles.cardTitle}>Sichtbarkeit</Text>
+                  <View style={styles.settingItem}>
+                    <Ionicons name="eye-outline" size={22} style={styles.settingIcon} />
+                    <Text style={styles.settingText}>In Personenliste anzeigen</Text>
+                    <Switch
+                      value={profile?.show_in_list === true}
+                      onValueChange={async (value) => {
+                        if (isUpdatingVisibility) return;
+                        setIsUpdatingVisibility(true);
+                        try {
+                          const result = await updateProfile({ show_in_list: !!value });
+                          if (!result.success) {
+                            Alert.alert('Fehler', result.error?.message || 'Konnte Sichtbarkeit nicht ändern.');
+                          }
+                        } finally {
+                          setIsUpdatingVisibility(false);
+                        }
+                      }}
+                      disabled={isUpdatingVisibility}
+                    />
+                  </View>
+                  <Text style={styles.modalInfoText}>Wenn aktiviert, können andere dich in der Personenliste finden und direkt anschreiben.</Text>
+              </View>
+
               {/* About Me Section - Show for both local and logged-in, but edit only personal */} 
               <View style={styles.card}>
                   <Text style={styles.cardTitle}>Über Mich</Text>
