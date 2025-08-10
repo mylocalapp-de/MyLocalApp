@@ -1,4 +1,4 @@
-// Enable edge-to-edge using the recommended EdgeToEdge.enable() method from androidx.activity
+// Enable edge-to-edge using the recommended enableEdgeToEdge() function from androidx.activity
 // This ensures proper backward compatibility for Android 15 when targeting SDK 35
 
 const {
@@ -36,7 +36,7 @@ function withAndroidTransparentWindow(config) {
     const isJava = config.modResults.language === 'java';
     const LE = isJava ? ';' : '';
 
-    // Add imports for EdgeToEdge
+    // Add imports for enableEdgeToEdge
     if (isJava) {
       if (!config.modResults.contents.includes('import androidx.activity.EdgeToEdge;')) {
         config.modResults.contents = config.modResults.contents.replace(
@@ -45,18 +45,20 @@ function withAndroidTransparentWindow(config) {
         );
       }
     } else {
-      // Kotlin
-      if (!config.modResults.contents.includes('import androidx.activity.EdgeToEdge')) {
+      // Kotlin - use the enableEdgeToEdge function import
+      if (!config.modResults.contents.includes('import androidx.activity.enableEdgeToEdge')) {
         config.modResults.contents = config.modResults.contents.replace(
           /package [^\n]+\n/,
-          (m) => `${m}import androidx.activity.EdgeToEdge\n`
+          (m) => `${m}import androidx.activity.enableEdgeToEdge\n`
         );
       }
     }
 
-    // Insert EdgeToEdge.enable() before setContentView
+    // Insert enableEdgeToEdge() before setContentView
     const anchorRegex = /(^.*super\.onCreate\(.*\).*$)/m;
-    const enableSrc = `\n                EdgeToEdge.enable(this)${LE}\n            `;
+    const enableSrc = isJava 
+      ? `\n                EdgeToEdge.enable(this)${LE}\n            `
+      : `\n                enableEdgeToEdge()${LE}\n            `;
 
     if (!config.modResults.contents.includes(EDGE_TO_EDGE_ID)) {
       const lines = config.modResults.contents.split('\n');
@@ -73,7 +75,7 @@ function withAndroidTransparentWindow(config) {
         }
         
         if (setContentViewIdx !== -1) {
-          // Insert EdgeToEdge.enable() just before setContentView
+          // Insert enableEdgeToEdge() just before setContentView
           lines.splice(setContentViewIdx, 0, `// ${EDGE_TO_EDGE_ID}`, ...enableSrc.split('\n'));
           config.modResults.contents = lines.join('\n');
         } else {
@@ -89,12 +91,13 @@ function withAndroidTransparentWindow(config) {
 
   // Ensure androidx.activity dependency is included
   config = withAppBuildGradle(config, (config) => {
+    // For Kotlin, we need activity-ktx dependency
     if (!config.modResults.contents.includes("androidx.activity:activity")) {
       // Add the dependency if not already present
       config.modResults.contents = config.modResults.contents.replace(
         /dependencies\s*{/,
         `dependencies {
-    implementation 'androidx.activity:activity:1.9.0'`
+    implementation 'androidx.activity:activity-ktx:1.9.0'`
       );
     }
     return config;
