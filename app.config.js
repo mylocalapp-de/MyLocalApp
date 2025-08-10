@@ -1,7 +1,7 @@
 module.exports = {
   name: "MeinStrodehne",
   slug: "meinhavelaue",
-  version: "1.0.2",
+  version: "1.0.4",
   orientation: "portrait",
   // Square 1024x1024 icon
   icon: "./assets/fixed/icon.png",

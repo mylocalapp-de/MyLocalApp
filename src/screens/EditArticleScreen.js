@@ -267,7 +267,7 @@ const EditArticleScreen = ({ navigation, route }) => {
       // Update the article in the database
       const updateData = {
           title: title,
-          content: content,
+          content: content.replace(/\n/g, '<br>'),
           type: type,
       };
 

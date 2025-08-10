@@ -54,6 +54,8 @@ const ChatScreen = ({ navigation, route }) => {
   const [localUnreadCounts, setLocalUnreadCounts] = useState({});
   const [localLastMessages, setLocalLastMessages] = useState({});
   const [chatFilters, setChatFilters] = useState(['Alle']);
+  // Search query state
+  const [searchQuery, setSearchQuery] = useState('');
   const [isLoadingFilters, setIsLoadingFilters] = useState(true);
   const [isLoadingDms, setIsLoadingDms] = useState(true);
   const [dmError, setDmError] = useState(null);
@@ -429,15 +431,16 @@ const ChatScreen = ({ navigation, route }) => {
   // Listen for filter selection from FilterButtons component
   useEffect(() => {
     filterCombinedList(activeFilter, combinedList);
-  }, [activeFilter, combinedList]); // Depend on combinedList
+  }, [activeFilter, combinedList, searchQuery]); // Depend on combinedList and search query
 
   // Filter combined list based on selected filter
   const filterCombinedList = (filter, listToFilter) => {
       console.log(`[ChatScreen] Filtering list by: ${filter}`);
+      let resultList = [];
       if (filter === 'Alle') {
-          setFilteredList(listToFilter);
+          resultList = listToFilter;
       } else {
-          const filtered = listToFilter.filter(item => {
+          resultList = listToFilter.filter(item => {
               if (item.itemType === 'group') {
                   if (filter === 'Offene Gruppen') return item.dbType === 'open_group';
                   if (filter === 'Ankündigungen') return item.dbType === 'broadcast';
@@ -447,8 +450,18 @@ const ChatScreen = ({ navigation, route }) => {
               }
               return false;
           });
-          setFilteredList(filtered);
       }
+
+      // --- Apply search filter ---
+      if (searchQuery && searchQuery.trim() !== '') {
+          const q = searchQuery.trim().toLowerCase();
+          resultList = resultList.filter(item => {
+              return (item.name || '').toLowerCase().includes(q) ||
+                     (item.lastMessage || '').toLowerCase().includes(q);
+          });
+      }
+
+      setFilteredList(resultList);
   };
 
   // --- Rendering ---
@@ -502,12 +515,12 @@ const ChatScreen = ({ navigation, route }) => {
       </View>
       <View style={styles.chatInfo}>
         <View style={styles.chatTopLine}>
-          <Text style={styles.chatName}>Dorfbot - KI Assistent</Text>
+          <Text style={styles.chatName}>KI Assistent</Text>
           <Text style={styles.chatTime}></Text>
         </View>
         <View style={styles.chatBottomLine}>
           <Text style={styles.chatMessage} numberOfLines={1}>
-            Frag mich etwas über dein Dorf!
+            Frag mich etwas über dein Ort!
           </Text>
         </View>
       </View>
@@ -721,6 +734,9 @@ const ChatScreen = ({ navigation, route }) => {
         filters={disableChat ? [] : chatFilters}
         onFilterChange={disableChat ? undefined : setActiveFilter}
         title={isOrganizationActive ? `Chats (${activeOrganization?.name || 'Org'})` : "Meine Chats"}
+        showSearch={true}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
       />
 
       {!disableDorfbot && renderDorfbotItem()}

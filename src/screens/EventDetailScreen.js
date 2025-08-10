@@ -1008,7 +1008,12 @@ const EventDetailScreen = ({ route, navigation }) => {
                           return (
                             <View style={styles.commentItem}>
                               <View style={styles.commentHeader}>
-                                <Text style={styles.commentUser}>{userName}</Text> 
+                                <TouchableOpacity
+                                  onPress={() => navigation.navigate('UserProfileView', { userId: item.user_id })}
+                                  disabled={isOfflineMode}
+                                >
+                                  <Text style={styles.commentUser}>{userName}</Text>
+                                </TouchableOpacity>
                                 <Text style={styles.commentTime}>{`${formattedDate} ${formattedTime}`}</Text>
                               </View>
                               <Text style={styles.commentText}>{item.text}</Text>
