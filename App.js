@@ -103,7 +103,7 @@ export default function App() {
         <AuthProvider expoPushToken={expoPushToken}>
           <OrganizationProvider>
             <NetworkProvider>
-              <StatusBar style="auto" translucent backgroundColor="transparent" />
+              <StatusBar style="auto" />
               <AppNavigator />
             </NetworkProvider>
           </OrganizationProvider>
