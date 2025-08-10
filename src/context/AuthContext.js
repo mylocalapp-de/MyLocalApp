@@ -229,7 +229,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         supabase
           .from('profiles')
           // Fetch avatar_url along with other profile data
-          .select(`display_name, preferences, updated_at, is_temporary, avatar_url, about_me`)
+          .select(`display_name, preferences, updated_at, is_temporary, avatar_url, about_me, is_verified`)
           .eq('id', userId)
           .maybeSingle(),
         supabase
@@ -254,7 +254,8 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         console.log(`AuthContext: [${callTimestamp}] Profile loaded for ID ${userId}:`, profileResult.data);
         const loadedProfile = profileResult.data;
         // Set the entire profile object, including avatar_url
-        setProfile(loadedProfile);
+        // Ensure backward compatibility if column is missing: default is_verified to true
+        setProfile({ ...loadedProfile, is_verified: loadedProfile?.is_verified ?? true });
         // Use optional chaining and defaults when setting derived state/storage
         const displayNameToSet = loadedProfile.display_name ?? '';
         const preferencesToSet = loadedProfile.preferences ?? [];

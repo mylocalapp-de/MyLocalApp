@@ -74,6 +74,7 @@ module.exports = {
     enableIosIap: process.env.ENABLE_IOS_IAP,
     enableAndroidIap: process.env.ENABLE_ANDROID_IAP,
     disableMap: process.env.EXPO_PUBLIC_DISABLE_MAP,
+    disableVerify: process.env.EXPO_PUBLIC_DISABLE_VERIFY,
     eas: {
       projectId: "3adb5b7e-7622-44f3-9375-5f23371e77b7"
     }
