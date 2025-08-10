@@ -190,6 +190,7 @@ const styles = StyleSheet.create({
     // Remove bottom spacing to eliminate gap to content below
     borderRadius: 8,
     paddingHorizontal: 10,
+    marginBottom: 8,
     height: 36,
   },
   searchIcon: {
