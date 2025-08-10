@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, StyleSheet, Text, Platform, SafeAreaView, Dimensions, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, Text, Platform, SafeAreaView, Dimensions, TouchableOpacity, ActivityIndicator, TextInput } from 'react-native';
 import { useFonts, Lobster_400Regular } from '@expo-google-fonts/lobster';
 import Constants from 'expo-constants';
 import FilterButtons from './FilterButtons';
@@ -21,7 +21,11 @@ const ScreenHeader = ({
   showBlockButton = false,
   onBlockToggle,
   isBlocked = false,
-  blockLoading = false
+  blockLoading = false,
+  // Search related props
+  showSearch = false,
+  searchQuery = '',
+  onSearchChange
 }) => {
   const { isOfflineMode, toggleOfflineMode } = useNetwork();
 
@@ -104,6 +108,18 @@ const ScreenHeader = ({
           initialFilter={initialFilter} 
         />
       )}
+      {showSearch && (
+        <View style={styles.searchContainer}>
+          <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Suchen..."
+            placeholderTextColor="#999"
+            value={searchQuery}
+            onChangeText={onSearchChange}
+          />
+        </View>
+      )}
     </SafeAreaView>
   );
 };
@@ -162,6 +178,25 @@ const styles = StyleSheet.create({
   blockButtonText: {
     fontSize: 12,
     fontWeight: '500',
+  },
+  // --- Search styles ---
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f1f1f1',
+    marginHorizontal: 10,
+    marginBottom: 6,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    height: 36,
+  },
+  searchIcon: {
+    marginRight: 6,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#333',
   },
 });
 

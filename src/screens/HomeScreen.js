@@ -29,6 +29,8 @@ const HomeScreen = ({ navigation }) => {
   // include enable_personal on filter objects; default to false for 'Aktuell'
   const [availableFilters, setAvailableFilters] = useState([{ name: 'Aktuell', is_highlighted: false, enable_personal: false }]);
   const [pinnedArticleIds, setPinnedArticleIds] = useState(new Set());
+  // Search query state
+  const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingFilters, setIsLoadingFilters] = useState(true);
   const [error, setError] = useState(null);
@@ -73,10 +75,10 @@ const HomeScreen = ({ navigation }) => {
     return unsubscribe;
   }, [navigation, user, isOfflineMode]); // Add isOfflineMode dependency
 
-  // Apply filter when articles, selectedFilter, or pinned IDs change
+  // Apply filter when articles, selectedFilter, pinned IDs, or search query change
   useEffect(() => {
     applyFilter(selectedFilter);
-  }, [articles, selectedFilter, pinnedArticleIds, applyFilter]);
+  }, [articles, selectedFilter, pinnedArticleIds, searchQuery, applyFilter]);
 
   // Function to load data from AsyncStorage
   const loadDataFromStorage = async () => {
@@ -269,8 +271,18 @@ const HomeScreen = ({ navigation }) => {
       // Combine: pinned first, then non-pinned
       sortedArticles = [...pinned, ...notPinned];
     }
+
+    // --- Apply search filter ---
+    if (searchQuery && searchQuery.trim() !== '') {
+      const q = searchQuery.trim().toLowerCase();
+      sortedArticles = sortedArticles.filter(a =>
+        (a.title || '').toLowerCase().includes(q) ||
+        (a.content || '').toLowerCase().includes(q)
+      );
+    }
+
     setFilteredArticles(sortedArticles);
-  }, [articles, pinnedArticleIds, isOfflineMode, availableFilters]);
+  }, [articles, pinnedArticleIds, isOfflineMode, availableFilters, searchQuery]);
 
   // Handle filter change
   const handleFilterChange = (filter) => {
@@ -333,6 +345,9 @@ const HomeScreen = ({ navigation }) => {
         filters={availableFilters} 
         onFilterChange={handleFilterChange} 
         initialFilter={selectedFilter} 
+        showSearch={true}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
       />
       
       {isLoading ? (

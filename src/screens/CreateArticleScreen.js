@@ -198,7 +198,7 @@ const CreateArticleScreen = ({ navigation, route }) => {
         .from('articles')
         .insert({
           title: title,
-          content: content,
+          content: content.replace(/\n/g, '<br>'),
           type: type,
           author_id: user.id,
           organization_id: activeOrganizationId,
@@ -267,7 +267,7 @@ const CreateArticleScreen = ({ navigation, route }) => {
         .from('articles')
         .insert({
           title: title || 'Unbenannter Entwurf',
-          content: content || '',
+          content: (content || '').replace(/\n/g, '<br>'),
           type: type || 'Vereine',
           author_id: user.id,
           organization_id: activeOrganizationId,
