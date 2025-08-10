@@ -229,7 +229,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         supabase
           .from('profiles')
           // Fetch avatar_url along with other profile data
-          .select(`display_name, preferences, updated_at, is_temporary, avatar_url, about_me, is_verified`)
+          .select(`display_name, preferences, updated_at, is_temporary, avatar_url, about_me, is_verified, show_in_list`)
           .eq('id', userId)
           .maybeSingle(),
         supabase

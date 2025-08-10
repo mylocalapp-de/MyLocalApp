@@ -42,6 +42,9 @@ const NewDirectMessageScreen = ({ navigation }) => {
   const [organizations, setOrganizations] = useState([]);
   const [loadingOrganizations, setLoadingOrganizations] = useState(true);
   const [orgError, setOrgError] = useState(null);
+  const [publicUsers, setPublicUsers] = useState([]);
+  const [loadingPublicUsers, setLoadingPublicUsers] = useState(true);
+  const [publicUsersError, setPublicUsersError] = useState(null);
   const [loadingConversation, setLoadingConversation] = useState(false);
   const [selectedTargetId, setSelectedTargetId] = useState(null);
 
@@ -64,7 +67,9 @@ const NewDirectMessageScreen = ({ navigation }) => {
           setOrganizations([]);
         } else {
           console.log('Fetched organizations:', data);
-          setOrganizations(data || []);
+          // tag items so the DM starter knows the entity type
+          const withType = (data || []).map((o) => ({ ...o, entityType: 'org' }));
+          setOrganizations(withType);
         }
       } catch (err) {
         console.error('Unexpected error fetching organizations:', err);
@@ -75,7 +80,39 @@ const NewDirectMessageScreen = ({ navigation }) => {
       }
     };
 
+    const fetchPublicUsers = async () => {
+      if (isOfflineMode || !user) {
+        setPublicUsers([]);
+        setLoadingPublicUsers(false);
+        setPublicUsersError(isOfflineMode ? "Benutzerliste offline nicht verfügbar." : "Bitte anmelden.");
+        return;
+      }
+
+      setLoadingPublicUsers(true);
+      setPublicUsersError(null);
+      try {
+        const { data, error } = await supabase.rpc('get_public_users', {
+          p_exclude_user_id: user.id,
+        });
+        if (error) {
+          console.error('Error fetching public users:', error);
+          setPublicUsersError('Benutzer konnten nicht geladen werden.');
+          setPublicUsers([]);
+        } else {
+          const withType = (data || []).map((u) => ({ ...u, entityType: 'user' }));
+          setPublicUsers(withType);
+        }
+      } catch (err) {
+        console.error('Unexpected error fetching public users:', err);
+        setPublicUsersError('Ein unerwarteter Fehler ist aufgetreten.');
+        setPublicUsers([]);
+      } finally {
+        setLoadingPublicUsers(false);
+      }
+    };
+
     fetchOrganizations();
+    fetchPublicUsers();
 
     setSearchResults([]);
     setSearchError(null);
@@ -155,7 +192,9 @@ const NewDirectMessageScreen = ({ navigation }) => {
         console.log('Search results from RPC:', data);
         // --- Fetch avatars after getting results ---
         const resultsWithAvatars = await fetchAvatarsForSearchResults(data);
-        setSearchResults(resultsWithAvatars);
+        // ensure entity type is user
+        const withType = (resultsWithAvatars || []).map((u) => ({ ...u, entityType: 'user' }));
+        setSearchResults(withType);
         // --- End Fetch avatars ---
       } else {
         setSearchResults([]);
@@ -173,7 +212,7 @@ const NewDirectMessageScreen = ({ navigation }) => {
       if (loadingConversation) return;
       setSelectedTargetId(target.id);
       setLoadingConversation(true);
-      const isOrg = !target.email;
+      const isOrg = target?.entityType === 'org';
       const rpcName = isOrg ? 'find_or_create_org_dm_conversation' : 'find_or_create_user_dm_conversation';
       const params = isOrg ? { p_organization_id: target.id } : { p_other_user_id: target.id };
 
@@ -373,6 +412,33 @@ const NewDirectMessageScreen = ({ navigation }) => {
                 keyExtractor={item => `org-${item.id}`}
                 scrollEnabled={false}
              />
+        )}
+
+        <Text style={styles.sectionTitle}>Direktnachricht an Personen</Text>
+        {loadingPublicUsers && (
+            <View style={styles.listLoadingContainer}>
+                <ActivityIndicator size="small" color="#4285F4" />
+                <Text style={styles.loadingText}>Lade Benutzer...</Text>
+            </View>
+        )}
+        {!loadingPublicUsers && publicUsersError && (
+            <View style={styles.errorContainer}>
+                <Ionicons name="alert-circle-outline" size={24} color="#ff3b30" />
+                <Text style={styles.errorText}>{publicUsersError}</Text>
+            </View>
+        )}
+        {!loadingPublicUsers && !publicUsersError && publicUsers.length === 0 && (
+            <View style={styles.emptyListContainer}>
+                <Text style={styles.emptyText}>Noch keine Benutzer in der Liste.</Text>
+            </View>
+        )}
+        {!loadingPublicUsers && !publicUsersError && publicUsers.length > 0 && (
+            <FlatList
+               data={publicUsers}
+               renderItem={renderUserItem}
+               keyExtractor={item => `public-user-${item.id}`}
+               scrollEnabled={false}
+            />
         )}
 
       </ScrollView>

@@ -575,7 +575,7 @@ const CalendarScreen = ({ navigation }) => {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScreenHeader filters={calendarFilters} onFilterChange={setActiveFilter} />
       
       <View style={styles.content}>
@@ -614,7 +614,7 @@ const CalendarScreen = ({ navigation }) => {
                   justifyContent: 'space-between',
                   paddingLeft: 10,
                   paddingRight: 10,
-                  marginTop: 4,
+                  marginTop: 0,
                   marginBottom: 0,
                   alignItems: 'center'
                 },
@@ -737,6 +737,7 @@ const styles = StyleSheet.create({
   },
   calendarSection: {
     backgroundColor: '#fff',
+    paddingTop: 0,
   },
   calendar: {
     width: '100%',
@@ -759,6 +760,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   eventsListContent: {
+    // Ensure no extra space under header/search
     paddingTop: 0,
   },
   noEventsContainer: {

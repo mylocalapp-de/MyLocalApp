@@ -4,6 +4,8 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { Ionicons } from '@expo/vector-icons';
 import { Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { useAuth } from '../context/AuthContext';
 import { useAppConfig } from '../context/AppConfigContext';
@@ -119,6 +121,35 @@ const AuthStackNavigator = () => {
 const TabNavigator = () => {
   const { config: appConfig, loading: appConfigLoading } = useAppConfig();
   const disableMap = appConfigLoading ? fallbackDisableMap : isTrue(appConfig.EXPO_PUBLIC_DISABLE_MAP);
+  const insets = useSafeAreaInsets();
+
+  // Compute additional bottom space for Android devices where the system nav bar/gesture pill
+  // can visually overlap or push the tab bar too low (e.g., Samsung Galaxy A15, newer Android).
+  const androidApiLevel = Platform.OS === 'android' ? Number(Platform.Version) : 0;
+  const isSamsung = Platform.OS === 'android' && (
+    (Device.brand?.toLowerCase?.() === 'samsung') ||
+    (Device.manufacturer?.toLowerCase?.() === 'samsung')
+  );
+  const isGalaxyA15 = Platform.OS === 'android' && /a15/i.test(Device.modelName ?? '');
+
+  let extraAndroidBottom = 0;
+  if (Platform.OS === 'android') {
+    if (isSamsung && (isGalaxyA15 || androidApiLevel >= 31)) {
+      // Slightly more space on Samsung devices and Android 12+
+      extraAndroidBottom = 8;
+    } else if (androidApiLevel >= 29) {
+      // Small bump on Android 10+
+      extraAndroidBottom = 4;
+    }
+  }
+
+  const basePaddingBottom = Platform.OS === 'ios' ? 25 : 10;
+  const computedPaddingBottom = Math.max(
+    basePaddingBottom,
+    (insets.bottom || 0) + (Platform.OS === 'ios' ? 16 : 8) + extraAndroidBottom
+  );
+  const baseHeight = Platform.OS === 'ios' ? 85 : 65;
+  const computedHeight = baseHeight + (computedPaddingBottom - basePaddingBottom);
 
   return (
     <Tab.Navigator
@@ -143,10 +174,11 @@ const TabNavigator = () => {
         tabBarActiveTintColor: '#4285F4',
         tabBarInactiveTintColor: '#888',
         headerShown: false,
+        tabBarHideOnKeyboard: true,
         tabBarStyle: {
-          height: Platform.OS === 'ios' ? 85 : 65,
+          height: computedHeight,
           paddingTop: 5,
-          paddingBottom: Platform.OS === 'ios' ? 25 : 10,
+          paddingBottom: computedPaddingBottom,
           backgroundColor: '#fff',
           borderTopWidth: 1,
           borderTopColor: '#f1f1f1',

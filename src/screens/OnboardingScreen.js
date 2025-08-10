@@ -8,14 +8,15 @@ import {
   ScrollView, 
   ActivityIndicator,
   Alert,
-  Linking 
+  Linking,
+  Switch
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 
 const OnboardingScreen = ({ navigation }) => {
-  const { createTemporaryAccount, loading: authLoading } = useAuth();
+  const { createTemporaryAccount, updateProfile, loading: authLoading } = useAuth();
   const [currentStep, setCurrentStep] = useState(1); // 1: Welcome, 2: Name, 3: Email & Submit
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
@@ -23,6 +24,7 @@ const OnboardingScreen = ({ navigation }) => {
   const [error, setError] = useState('');
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [termsError, setTermsError] = useState('');
+  const [showInList, setShowInList] = useState(true);
 
   const validateEmail = (text) => {
     // Basic email format check
@@ -78,6 +80,10 @@ const OnboardingScreen = ({ navigation }) => {
 
       if (result.success) {
         console.log('Onboarding: Temporary account created successfully via AuthContext.');
+        // Persist the show_in_list choice on the profile after account exists
+        try {
+          await updateProfile({ show_in_list: !!showInList });
+        } catch {}
         // Navigation is handled by AppNavigator reacting to the auth state change
       } else {
         console.error('Onboarding: Failed to create temporary account:', result.error);
@@ -179,6 +185,11 @@ const OnboardingScreen = ({ navigation }) => {
               <Text style={styles.termsText}>
                 Hiermit akzeptiere ich die <Text style={styles.link} onPress={() => Linking.openURL('https://mylocapp.de/agb')}>AGB</Text> und die <Text style={styles.link} onPress={() => Linking.openURL('https://mylocalapp.de/datenschutz')}>Datenschutzbestimmungen</Text> der App. Des Weiteren erkenne ich hiermit an keine illegalen oder unangemessenen Inhalte zu veröffentlichen.
               </Text>
+            </View>
+            {/* Public directory opt-in */}
+            <View style={styles.termsContainer}>
+              <Switch value={showInList} onValueChange={setShowInList} />
+              <Text style={[styles.termsText, { marginLeft: 8 }]}>In Personenliste anzeigen (für Direktnachrichten auffindbar)</Text>
             </View>
             {termsError ? <Text style={styles.errorText}>{termsError}</Text> : null}
             <TouchableOpacity 

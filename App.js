@@ -1,5 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import React, { useState, useEffect, useRef } from 'react';
+import { LogBox } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AppNavigator from './src/navigation/AppNavigator';
 import { AppConfigProvider } from './src/context/AppConfigContext';
@@ -65,6 +66,11 @@ async function registerForPushNotificationsAsync() {
 }
 
 export default function App() {
+  // Suppress non-actionable library warnings from third-party toolbar
+  LogBox.ignoreLogs([
+    'ToggleIconButton: Support for defaultProps',
+    'Warning: ToggleIconButton: Support for defaultProps',
+  ]);
   const [expoPushToken, setExpoPushToken] = useState(null);
   const [notification, setNotification] = useState(false);
   const notificationListener = useRef();
