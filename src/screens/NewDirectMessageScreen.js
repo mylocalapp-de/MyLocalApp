@@ -446,7 +446,7 @@ const NewDirectMessageScreen = ({ navigation }) => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
       <ScreenHeader title="Neue Nachricht" showBackButton={true} navigation={navigation}/>
       {renderContent()}
     </SafeAreaView>
