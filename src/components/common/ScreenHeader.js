@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, StyleSheet, Text, Platform, SafeAreaView, Dimensions, TouchableOpacity, ActivityIndicator, TextInput } from 'react-native';
+import { View, StyleSheet, Text, Platform, Dimensions, TouchableOpacity, ActivityIndicator, TextInput } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFonts, Lobster_400Regular } from '@expo-google-fonts/lobster';
 import Constants from 'expo-constants';
 import FilterButtons from './FilterButtons';

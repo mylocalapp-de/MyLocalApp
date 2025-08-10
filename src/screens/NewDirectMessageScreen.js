@@ -8,11 +8,11 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
-  SafeAreaView,
   TextInput,
   ScrollView,
   Image
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import ScreenHeader from '../components/common/ScreenHeader'; // Reuse if applicable
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';

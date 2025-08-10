@@ -52,7 +52,7 @@ A mobile application designed to strengthen community spirit in rural villages b
 
 ## Technology Stack
 
-- React Native 0.76.7
+- React Native 0.76.9
 - Expo SDK 52
 - React Navigation (Stack and Tab Navigators)
 - React Native Maps
@@ -131,6 +131,8 @@ App.js              - Main application entry point
 ## Important Notes
 
 - Expo SDK 52 requires Hermes JavaScript engine (default in Expo Go)
+- Edge-to-edge is enabled on Android 15+ with transparent system bars and proper inset handling via `react-native-safe-area-context`.
+- Navigation bar styling uses Expo’s `expo-navigation-bar` to avoid deprecated Android APIs.
 - This project uses TypeScript for improved developer experience
 - **Maps Implementation**: 
   - Apple Maps is used on iOS and Google Maps on Android due to Expo Go limitations
@@ -195,6 +197,24 @@ Just use
 npx expo prebuild
  npx expo run:android --variant release   
   npx expo run:ios
+ 
+## Android edge-to-edge and large screen compliance
+
+- Android 15+ requires edge-to-edge and inset-aware layouts. This app:
+  - Uses `SafeAreaProvider` and `SafeAreaView` from `react-native-safe-area-context` across screens to consume system bar insets.
+  - Sets transparent status/navigation bars and button contrast using `expo-navigation-bar` without calling deprecated methods.
+  - Removes orientation restriction in config to prepare for Android 16 large-screen changes.
+
+### Test checklist
+- Test on a physical device with Android 15 and 16 preview if available:
+  - Status and navigation bars overlay content, with content padded via safe area.
+  - Scrolling lists and inputs remain visible above the navigation bar/IME.
+  - Icon contrast adapts in light/dark mode.
+  - Rotate on tablets/foldables and verify layouts remain usable.
+
+References:
+- Android edge-to-edge codelab: https://developer.android.com/codelabs/edge-to-edge
+- Practical guide for legacy views Android 14→15: https://medium.com/@mickcolai/from-android-14-to-15-a-practical-guide-to-adapting-the-legacy-view-system-for-edge-to-edge-a0232d7aea30
  
 ## Code Review Findings
 
