@@ -25,16 +25,16 @@ function with16KBPages(config) {
     return config;
   });
 
-  // Add packagingOptions to app/build.gradle
+  // Add packaging options to app/build.gradle (AGP 8.0+ syntax)
   config = withAppBuildGradle(config, (config) => {
-    if (config.modResults.contents.includes('jniLibs.useLegacyPackaging')) {
+    if (config.modResults.contents.includes('useLegacyPackaging')) {
       return config;
     }
 
-    // Find the android { } block and add packagingOptions
+    // Find the android { } block and add packaging config
     const androidBlockRegex = /(android\s*\{)/;
-    const packagingOptions = `$1
-    packagingOptions {
+    const packagingConfig = `$1
+    packaging {
         jniLibs {
             useLegacyPackaging = false
         }
@@ -42,7 +42,7 @@ function with16KBPages(config) {
 
     config.modResults.contents = config.modResults.contents.replace(
       androidBlockRegex,
-      packagingOptions
+      packagingConfig
     );
 
     return config;
