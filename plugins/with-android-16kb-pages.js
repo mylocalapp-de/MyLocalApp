@@ -1,17 +1,22 @@
-const { withAppBuildGradle } = require('@expo/config-plugins');
+const { withAppBuildGradle, withAndroidManifest } = require('@expo/config-plugins');
 
 /**
  * Config plugin to enable 16KB page size compatibility for Android 15+
  * Required by Google Play as of November 2025
  * 
  * Since React Native and third-party libraries may not be 16KB-aligned,
- * we use useLegacyPackaging = true to compress native libs.
- * This extracts libs at install time, bypassing alignment requirements.
+ * we use TWO approaches:
+ * 1. Set useLegacyPackaging = true in build.gradle
+ * 2. Set android:extractNativeLibs="true" in AndroidManifest.xml
+ * 
+ * This compresses native libs and extracts them at install time,
+ * bypassing the 16KB alignment requirements.
  * 
  * Reference: https://developer.android.com/guide/practices/page-sizes
  */
 function with16KBPages(config) {
-  return withAppBuildGradle(config, (config) => {
+  // 1. Modify build.gradle
+  config = withAppBuildGradle(config, (config) => {
     if (config.modResults.contents.includes('useLegacyPackaging')) {
       return config;
     }
@@ -32,6 +37,19 @@ function with16KBPages(config) {
 
     return config;
   });
+
+  // 2. Modify AndroidManifest.xml
+  config = withAndroidManifest(config, (config) => {
+    const mainApplication = config.modResults.manifest.application[0];
+    
+    // Set extractNativeLibs to true - this ensures native libs are extracted
+    // at install time, which bypasses 16KB alignment requirements
+    mainApplication.$['android:extractNativeLibs'] = 'true';
+    
+    return config;
+  });
+
+  return config;
 }
 
 module.exports = with16KBPages;
