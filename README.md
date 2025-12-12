@@ -52,8 +52,9 @@ A mobile application designed to strengthen community spirit in rural villages b
 
 ## Technology Stack
 
-- React Native 0.76.9
-- Expo SDK 52
+- React Native 0.79.6
+- Expo SDK 53
+- React 19
 - React Navigation (Stack and Tab Navigators)
 - React Native Maps
 - Context API for state management
@@ -68,7 +69,7 @@ A mobile application designed to strengthen community spirit in rural villages b
 
 - Node.js (v18 or newer)
 - npm or yarn
-- Expo Go app (SDK 52 compatible)
+- Expo Go app (SDK 53 compatible)
 - Supabase account (self-hosted or cloud service)
 
 ### Installation

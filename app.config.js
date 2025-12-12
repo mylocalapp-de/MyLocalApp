@@ -80,8 +80,7 @@ module.exports = {
           compileSdkVersion: 35,
           targetSdkVersion: 35,
           buildToolsVersion: "35.0.0",
-          kotlinVersion: "1.9.25",
-          composeCompilerVersion: "1.5.15",
+          kotlinVersion: "2.0.21",
           ndkVersion: "27.0.12077973"
         }
       }
