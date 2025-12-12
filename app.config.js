@@ -86,7 +86,6 @@ module.exports = {
         }
       }
     ],
-    "./plugins/with-android-16kb-pages",
     "./plugins/with-android-edge-to-edge",
     "expo-font"
   ]
