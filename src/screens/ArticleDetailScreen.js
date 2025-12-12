@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -15,7 +15,9 @@ import {
   Dimensions,
   Image,
   useWindowDimensions,
-  Linking
+  Linking,
+  NativeScrollEvent,
+  NativeSyntheticEvent
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -53,6 +55,14 @@ const ArticleDetailScreen = ({ route, navigation }) => {
   const [authorName, setAuthorName] = useState('Redaktion');
   const [isAuthor, setIsAuthor] = useState(false);
   const [canEditDelete, setCanEditDelete] = useState(false);
+  
+  // State for multiple article images
+  const [articleImages, setArticleImages] = useState([]);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const imageSliderRef = useRef(null);
+  
+  // State for file attachments
+  const [articleAttachments, setArticleAttachments] = useState([]);
   
   // State for comments and reactions
   const [comment, setComment] = useState('');
@@ -178,6 +188,12 @@ const ArticleDetailScreen = ({ route, navigation }) => {
       // Determine if the current user can edit/delete this article
       await checkEditDeletePermission(articleData);
       
+      // Fetch article images from article_images table
+      await fetchArticleImages(articleId, articleData.image_url);
+      
+      // Fetch article attachments
+      await fetchArticleAttachments(articleId);
+      
       // Fetch comments
       fetchComments();
       
@@ -234,6 +250,96 @@ const ArticleDetailScreen = ({ route, navigation }) => {
         }
     }
   };
+
+  // Fetch article images from article_images table
+  const fetchArticleImages = async (artId, legacyImageUrl) => {
+    try {
+      const { data: imagesData, error: imagesError } = await supabase
+        .from('article_images')
+        .select('id, image_url, display_order')
+        .eq('article_id', artId)
+        .order('display_order', { ascending: true });
+
+      if (imagesError) {
+        console.error('Error fetching article images:', imagesError);
+        // Fallback to legacy image
+        if (legacyImageUrl) {
+          setArticleImages([legacyImageUrl]);
+        }
+        return;
+      }
+
+      if (imagesData && imagesData.length > 0) {
+        setArticleImages(imagesData.map(img => img.image_url));
+      } else if (legacyImageUrl) {
+        // No images in new table, use legacy image_url
+        setArticleImages([legacyImageUrl]);
+      } else {
+        setArticleImages([]);
+      }
+    } catch (err) {
+      console.error('Error fetching article images:', err);
+      if (legacyImageUrl) {
+        setArticleImages([legacyImageUrl]);
+      }
+    }
+  };
+
+  // Fetch article attachments from article_attachments table
+  const fetchArticleAttachments = async (artId) => {
+    try {
+      const { data: attachmentsData, error: attachmentsError } = await supabase
+        .from('article_attachments')
+        .select('id, file_url, file_name, file_size, mime_type, display_order')
+        .eq('article_id', artId)
+        .order('display_order', { ascending: true });
+
+      if (attachmentsError) {
+        console.error('Error fetching article attachments:', attachmentsError);
+        setArticleAttachments([]);
+        return;
+      }
+
+      setArticleAttachments(attachmentsData || []);
+    } catch (err) {
+      console.error('Error fetching article attachments:', err);
+      setArticleAttachments([]);
+    }
+  };
+
+  // Helper to get file icon based on mime type
+  const getFileIcon = (mimeType) => {
+    if (!mimeType) return 'document-outline';
+    if (mimeType.includes('pdf')) return 'document-text-outline';
+    if (mimeType.includes('word') || mimeType.includes('document')) return 'document-outline';
+    if (mimeType.includes('sheet') || mimeType.includes('excel')) return 'grid-outline';
+    if (mimeType.includes('presentation') || mimeType.includes('powerpoint')) return 'easel-outline';
+    if (mimeType.includes('zip') || mimeType.includes('archive')) return 'archive-outline';
+    if (mimeType.includes('audio')) return 'musical-notes-outline';
+    if (mimeType.includes('video')) return 'videocam-outline';
+    return 'document-outline';
+  };
+
+  // Helper to format file size
+  const formatFileSize = (bytes) => {
+    if (!bytes) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  // Handle file download
+  const handleDownloadFile = (fileUrl) => {
+    Linking.openURL(fileUrl);
+  };
+
+  // Handle scroll event for image slider pagination
+  const handleImageScroll = useCallback((event) => {
+    const slideWidth = width - 30; // Account for padding
+    const offset = event.nativeEvent.contentOffset.x;
+    const index = Math.round(offset / slideWidth);
+    setCurrentImageIndex(index);
+  }, [width]);
   
   // Fetch comments for the article
   const fetchComments = async () => {
@@ -252,7 +358,7 @@ const ArticleDetailScreen = ({ route, navigation }) => {
           )
         `) // Explicitly select display_name from joined profiles table
         .eq('article_id', articleId)
-        .order('created_at', { ascending: true });
+        .order('created_at', { ascending: false });
       
       if (error) {
         console.error('Error fetching comments:', error);
@@ -670,13 +776,44 @@ const ArticleDetailScreen = ({ route, navigation }) => {
         >
           <Text style={styles.title}>{article?.title || 'Titel wird geladen...'}</Text>
           
-          {/* Display article image if available */}
-          {article?.image_url && (
-            <Image 
-              source={{ uri: getTransformedImageUrl(article.image_url) }} 
-              style={styles.articleImage}
-              resizeMode="cover"
-            />
+          {/* Display article images with slider */}
+          {articleImages.length > 0 && (
+            <View style={styles.imageSliderContainer}>
+              <ScrollView
+                ref={imageSliderRef}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                onScroll={handleImageScroll}
+                scrollEventThrottle={16}
+                decelerationRate="fast"
+                snapToInterval={width - 30}
+                snapToAlignment="center"
+                contentContainerStyle={styles.imageSliderContent}
+              >
+                {articleImages.map((imageUrl, index) => (
+                  <Image
+                    key={index}
+                    source={{ uri: getTransformedImageUrl(imageUrl) }}
+                    style={[styles.articleImage, { width: width - 30 }]}
+                    resizeMode="cover"
+                  />
+                ))}
+              </ScrollView>
+              {articleImages.length > 1 && (
+                <View style={styles.paginationContainer}>
+                  {articleImages.map((_, index) => (
+                    <View
+                      key={index}
+                      style={[
+                        styles.paginationDot,
+                        index === currentImageIndex && styles.paginationDotActive
+                      ]}
+                    />
+                  ))}
+                </View>
+              )}
+            </View>
           )}
           
           <View style={styles.articleMeta}>
@@ -733,6 +870,33 @@ const ArticleDetailScreen = ({ route, navigation }) => {
                       Vollständiger Artikelinhalt ist im Offline-Modus nicht verfügbar.
                   </Text>
               </View>
+          )}
+
+          {/* File Attachments Section */}
+          {articleAttachments.length > 0 && (
+            <View style={styles.attachmentsSection}>
+              <Text style={styles.attachmentsHeader}>
+                <Ionicons name="attach" size={16} color="#333" /> Anhänge ({articleAttachments.length})
+              </Text>
+              {articleAttachments.map((attachment) => (
+                <TouchableOpacity
+                  key={attachment.id}
+                  style={styles.attachmentItem}
+                  onPress={() => handleDownloadFile(attachment.file_url)}
+                >
+                  <Ionicons name={getFileIcon(attachment.mime_type)} size={24} color="#4285F4" />
+                  <View style={styles.attachmentInfo}>
+                    <Text style={styles.attachmentName} numberOfLines={1}>{attachment.file_name}</Text>
+                    {attachment.file_size > 0 && (
+                      <Text style={styles.attachmentSize}>{formatFileSize(attachment.file_size)}</Text>
+                    )}
+                  </View>
+                  <View style={styles.downloadButton}>
+                    <Ionicons name="download-outline" size={20} color="#fff" />
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
           )}
           
           <View style={styles.divider} />
@@ -1070,11 +1234,34 @@ const styles = StyleSheet.create({
     elevation: 4,
     borderRadius: 4,
   },
-  articleImage: {
-    width: '100%',
-    height: 200,
-    borderRadius: 8,
+  imageSliderContainer: {
     marginVertical: 10,
+  },
+  imageSliderContent: {
+    alignItems: 'center',
+  },
+  articleImage: {
+    height: 220,
+    borderRadius: 8,
+  },
+  paginationContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  paginationDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#ccc',
+    marginHorizontal: 4,
+  },
+  paginationDotActive: {
+    backgroundColor: '#4285F4',
+    width: 10,
+    height: 10,
+    borderRadius: 5,
   },
   offlineContentWarning: {
     flexDirection: 'row',
@@ -1091,6 +1278,48 @@ const styles = StyleSheet.create({
     color: '#e65100',
     fontSize: 14,
     flex: 1,
+  },
+  attachmentsSection: {
+    marginTop: 20,
+    marginBottom: 10,
+  },
+  attachmentsHeader: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 12,
+  },
+  attachmentItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  attachmentInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  attachmentName: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
+  },
+  attachmentSize: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 2,
+  },
+  downloadButton: {
+    backgroundColor: '#4285F4',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
 

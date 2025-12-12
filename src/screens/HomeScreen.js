@@ -29,6 +29,7 @@ const HomeScreen = ({ navigation }) => {
   // include enable_personal on filter objects; default to false for 'Aktuell'
   const [availableFilters, setAvailableFilters] = useState([{ name: 'Aktuell', is_highlighted: false, enable_personal: false }]);
   const [pinnedArticleIds, setPinnedArticleIds] = useState(new Set());
+  const [vereinOrganizations, setVereinOrganizations] = useState([]); // Organizations flagged as Vereine
   // Search query state
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -45,7 +46,7 @@ const HomeScreen = ({ navigation }) => {
     }
   }, [isOfflineMode]);
 
-  // Refresh articles when screen comes into focus
+  // Refresh articles/vereine when screen comes into focus
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       // Add a small delay to ensure component is mounted before fetching
@@ -55,9 +56,12 @@ const HomeScreen = ({ navigation }) => {
           // Check if user context is available (important if RLS depends on it)
           console.log('HomeScreen Focus Listener: Current user state before fetch:', user ? `ID: ${user.id}` : 'null'); 
           
-          // --- Wrap fetchArticles in try...catch ---
-          fetchArticles(); 
-          // --- End wrap ---
+          // Fetch based on active filter
+          if (selectedFilter === 'Vereine') {
+            fetchVereinOrganizations();
+          } else {
+            fetchArticles(); 
+          }
 
         } catch (error) {
           // --- Added Error Logging ---
@@ -73,7 +77,7 @@ const HomeScreen = ({ navigation }) => {
     
     // Cleanup listener on unmount
     return unsubscribe;
-  }, [navigation, user, isOfflineMode]); // Add isOfflineMode dependency
+  }, [navigation, user, isOfflineMode, selectedFilter]); // Include selectedFilter
 
   // Apply filter when articles, selectedFilter, pinned IDs, or search query change
   useEffect(() => {
@@ -111,9 +115,10 @@ const HomeScreen = ({ navigation }) => {
               enable_personal: !!f.enable_personal
           }));
 
-          // Ensure single 'Aktuell' at the front
+          // Ensure single 'Aktuell' at the front (preserve enable_personal from storage)
+          const aktuellFilter = storedFilters.find(f => f.name === 'Aktuell');
           storedFilters = storedFilters.filter(f => f.name !== 'Aktuell');
-          storedFilters.unshift({ name: 'Aktuell', is_highlighted: false, enable_personal: false });
+          storedFilters.unshift(aktuellFilter || { name: 'Aktuell', is_highlighted: false, enable_personal: false });
           setAvailableFilters(storedFilters);
           if (!storedFilters.some(f => f.name === selectedFilter)) setSelectedFilter('Aktuell');
       } else {
@@ -162,9 +167,10 @@ const HomeScreen = ({ navigation }) => {
           enable_personal: !!f.enable_personal
         }));
 
-        // Ensure single 'Aktuell' at the front
+        // Ensure single 'Aktuell' at the front (preserve enable_personal from DB)
+        const aktuellFilter = fetched.find(f => f.name === 'Aktuell');
         fetched = fetched.filter(f => f.name !== 'Aktuell');
-        fetched.unshift({ name: 'Aktuell', is_highlighted: false, enable_personal: false });
+        fetched.unshift(aktuellFilter || { name: 'Aktuell', is_highlighted: false, enable_personal: false });
         setAvailableFilters(fetched);
         if (!fetched.some(f => f.name === selectedFilter)) setSelectedFilter('Aktuell');
       }
@@ -207,6 +213,36 @@ const HomeScreen = ({ navigation }) => {
     }
   };
   
+  // Fetch organizations flagged as "Verein" for Vereine grid
+  const fetchVereinOrganizations = async () => {
+    if (isOfflineMode) return;
+
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      const { data, error } = await supabase
+        .from('organizations')
+        .select('id, name, logo_url')
+        .eq('is_verein', true)
+        .order('name', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching Verein organizations:', error);
+        setError('Vereine konnten nicht geladen werden. Bitte versuche es später erneut.');
+        setVereinOrganizations([]);
+      } else {
+        setVereinOrganizations(data || []);
+      }
+    } catch (err) {
+      console.error('Unexpected error fetching Verein organizations:', err);
+      setError('Ein unerwarteter Fehler ist aufgetreten.');
+      setVereinOrganizations([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
   // Fetch pinned article IDs for the selected filter
   const fetchPinnedArticles = async (filter) => {
     // Added check: Don't fetch if offline
@@ -241,9 +277,11 @@ const HomeScreen = ({ navigation }) => {
 
     let sortedArticles = [];
     if (filter === 'Aktuell') {
-      // Determine names of personal filters to exclude in 'Aktuell'
-      const personalFilterNames = availableFilters.filter(f => f.enable_personal).map(f => f.name);
-      // Show all articles except personal-board ones, sorted by date
+      // Determine names of personal filters to exclude in 'Aktuell' (but NOT 'Aktuell' itself)
+      const personalFilterNames = availableFilters
+        .filter(f => f.enable_personal && f.name !== 'Aktuell')
+        .map(f => f.name);
+      // Show all articles except personal-board ones from OTHER categories, sorted by date
       sortedArticles = articles
         .filter(article => !personalFilterNames.includes(article.type))
         .sort((a, b) => new Date(b.published_at) - new Date(a.published_at));
@@ -289,7 +327,11 @@ const HomeScreen = ({ navigation }) => {
     setSelectedFilter(filter);
     // Fetch pinned articles only if online
     if (!isOfflineMode) {
-        fetchPinnedArticles(filter);
+        if (filter === 'Vereine') {
+          fetchVereinOrganizations();
+        } else {
+          fetchPinnedArticles(filter);
+        }
     }
   };
   
@@ -302,7 +344,12 @@ const HomeScreen = ({ navigation }) => {
       );
       return;
     }
-    navigation.navigate('CreateArticle', { filter: selectedFilter });
+    // Navigate to CreateEventArticle for "Veranstaltungen" filter
+    if (selectedFilter === 'Veranstaltungen') {
+      navigation.navigate('CreateEventArticle', { filter: selectedFilter });
+    } else {
+      navigation.navigate('CreateArticle', { filter: selectedFilter });
+    }
   };
 
   // Helper function to format article data (extracted from fetchArticles)
@@ -334,7 +381,8 @@ const HomeScreen = ({ navigation }) => {
             author_name: article?.author_name ?? 'Unbekannter Autor', // Default author name
             is_organization_post: article?.is_organization_post ?? false,
             image_url: article?.image_url ?? null, // Keep null if not present
-            preview_image_url: article?.preview_image_url ?? null // Keep null if not present
+            preview_image_url: article?.preview_image_url ?? null, // Keep null if not present
+            linked_event_id: article?.linked_event_id ?? null // For Event-Articles
         };
     });
   };
@@ -353,7 +401,7 @@ const HomeScreen = ({ navigation }) => {
       {isLoading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#4285F4" />
-          <Text style={styles.loadingText}>Artikel werden geladen...</Text>
+          <Text style={styles.loadingText}>{selectedFilter === 'Vereine' ? 'Vereine werden geladen...' : 'Artikel werden geladen...'}</Text>
         </View>
       ) : isLoadingFilters ? (
         <View style={styles.loadingContainer}>
@@ -364,7 +412,7 @@ const HomeScreen = ({ navigation }) => {
         <View style={styles.errorContainer}>
           <Ionicons name="alert-circle-outline" size={40} color="#ff3b30" />
           <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={fetchArticles}>
+          <TouchableOpacity style={styles.retryButton} onPress={() => (selectedFilter === 'Vereine' ? fetchVereinOrganizations() : fetchArticles())}>
             <Text style={styles.retryButtonText}>Erneut versuchen</Text>
           </TouchableOpacity>
         </View>
@@ -374,48 +422,86 @@ const HomeScreen = ({ navigation }) => {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          {filteredArticles.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>Keine Artikel verfügbar.</Text>
-            </View>
-          ) : (
-            filteredArticles.map(article => (
-              <TouchableOpacity 
-                key={article.id} 
-                style={styles.articleCard}
-                onPress={() => navigation.navigate('ArticleDetail', { articleId: article.id })}
-              >
-                <View style={styles.articleHeader}>
-                  <View style={styles.articleInfo}>
-                    <Text style={styles.articleType}>{article.type}</Text>
-                    <Text style={styles.articleDate}>{article.date}</Text>
-                  </View>
-                  {/* Add Pin Icon if article is pinned and filter is not 'Aktuell' AND online */}
-                  {selectedFilter !== 'Aktuell' && !isOfflineMode && pinnedArticleIds.has(article.id) && (
-                    <Ionicons name="pin" size={16} color="#666" style={styles.pinIcon} />
-                  )}
-                  <Text 
-                    style={article.is_organization_post ? styles.organizationAuthor : (article.author_name === 'Redaktion' ? styles.redaktionAuthor : styles.articleAuthor)}
+          {selectedFilter === 'Vereine' ? (
+            vereinOrganizations.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>Keine Vereine gefunden.</Text>
+              </View>
+            ) : (
+              <View style={styles.gridContainer}>
+                {vereinOrganizations.map(org => (
+                  <TouchableOpacity
+                    key={org.id}
+                    style={styles.gridCard}
+                    onPress={() => navigation.navigate('OrganizationProfileView', { organizationId: org.id })}
                   >
-                    {/* Default author name if somehow still null/undefined */}
-                    {article.author_name ?? 'Unbekannter Autor'}
+                    <View style={styles.gridImageWrapper}>
+                      {org.logo_url ? (
+                        <Image
+                          source={{ uri: getTransformedImageUrl(org.logo_url) }}
+                          style={styles.gridImage}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View style={[styles.gridImage, styles.gridPlaceholder]}>
+                          <Ionicons name="business-outline" size={24} color="#fff" />
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.gridTitle} numberOfLines={2}>
+                      {org.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )
+          ) : (
+            filteredArticles.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>Keine Artikel verfügbar.</Text>
+              </View>
+            ) : (
+              filteredArticles.map(article => (
+                <TouchableOpacity 
+                  key={article.id} 
+                  style={styles.articleCard}
+                  onPress={() => {
+                    // Navigate to EventDetail if this is an Event-Article
+                    if (article.linked_event_id) {
+                      navigation.navigate('EventDetail', { eventId: article.linked_event_id });
+                    } else {
+                      navigation.navigate('ArticleDetail', { articleId: article.id });
+                    }
+                  }}
+                >
+                  <View style={styles.articleHeader}>
+                    <View style={styles.articleInfo}>
+                      <Text style={styles.articleType}>{article.type}</Text>
+                      <Text style={styles.articleDate}>{article.date}</Text>
+                    </View>
+                    {selectedFilter !== 'Aktuell' && !isOfflineMode && pinnedArticleIds.has(article.id) && (
+                      <Ionicons name="pin" size={16} color="#666" style={styles.pinIcon} />
+                    )}
+                    <Text 
+                      style={article.is_organization_post ? styles.organizationAuthor : (article.author_name === 'Redaktion' ? styles.redaktionAuthor : styles.articleAuthor)}
+                    >
+                      {article.author_name ?? 'Unbekannter Autor'}
+                    </Text>
+                  </View>
+                  <Text style={styles.articleTitle}>{article.title ?? 'Unbenannter Artikel'}</Text>
+                  {article.preview_image_url && (
+                    <Image 
+                      source={{ uri: getTransformedImageUrl(article.preview_image_url) }} 
+                      style={styles.articleImage}
+                      resizeMode="cover"
+                    />
+                  )}
+                  <Text style={styles.articleContent} numberOfLines={3}>
+                    {article.content ?? ''} 
                   </Text>
-                </View>
-                <Text style={styles.articleTitle}>{article.title ?? 'Unbenannter Artikel'}</Text>
-                {/* Show image if available - check is already safe */}
-                {article.preview_image_url && (
-                  <Image 
-                    source={{ uri: getTransformedImageUrl(article.preview_image_url) }} 
-                    style={styles.articleImage}
-                    resizeMode="cover"
-                  />
-                )}
-                <Text style={styles.articleContent} numberOfLines={3}>
-                  {/* Default content if somehow still null/undefined */}
-                  {article.content ?? ''} 
-                </Text>
-              </TouchableOpacity>
-            ))
+                </TouchableOpacity>
+              ))
+            )
           )}
           <View style={styles.bottomPadding} />
         </ScrollView>
@@ -577,6 +663,65 @@ const styles = StyleSheet.create({
   pinIcon: {
     // Style the pin icon (e.g., position it top-right within the header)
     marginLeft: 8, // Add some space from the author name
+  },
+  // --- Grid styles for 'Vereine' ---
+  gridContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  gridCard: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    width: '48%',
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+    overflow: 'hidden',
+  },
+  gridImageWrapper: {
+    position: 'relative',
+    width: '100%',
+  },
+  gridImage: {
+    width: '100%',
+    height: 120,
+  },
+  gridPlaceholder: {
+    backgroundColor: '#208e5d',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  gridTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    paddingHorizontal: 12,
+    paddingTop: 10,
+  },
+  gridSubtitle: {
+    fontSize: 13,
+    color: '#666',
+    paddingHorizontal: 12,
+    paddingTop: 4,
+    paddingBottom: 12,
+  },
+  redaktionBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: '#2db06c',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  redaktionBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '600',
   },
 });
 

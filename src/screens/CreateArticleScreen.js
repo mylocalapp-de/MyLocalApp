@@ -17,6 +17,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
@@ -24,9 +25,9 @@ import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
 import { decode } from 'base64-arraybuffer';
 import { LinearGradient } from 'expo-linear-gradient';
-import QuillEditor, { QuillToolbar } from 'react-native-cn-quill';
+import { RichEditor, RichToolbar, actions } from 'react-native-pell-rich-editor';
 
-const { height } = Dimensions.get('window');
+const { height, width } = Dimensions.get('window');
 const androidPaddingTop = height * 0.03; // 3% of screen height for better scaling
 
 const CreateArticleScreen = ({ navigation, route }) => {
@@ -39,9 +40,17 @@ const CreateArticleScreen = ({ navigation, route }) => {
   const [type, setType] = useState('');
   const isPersonal = !activeOrganizationId && !!personalFilter;
   const [isPublishing, setIsPublishing] = useState(false);
-  const [imageAsset, setImageAsset] = useState(null);
+  const [imageAssets, setImageAssets] = useState([]); // Changed to array for multiple images
+  const [fileAssets, setFileAssets] = useState([]); // Array for file attachments
   const [isUploading, setIsUploading] = useState(false);
   const editorRef = useRef(null);
+  const contentRef = useRef(''); // Source of truth for editor HTML (avoids rerendering on every keystroke)
+  const [content, setContent] = useState('');
+  const [isHtmlMode, setIsHtmlMode] = useState(false);
+  
+  // Tags state
+  const [tags, setTags] = useState([]);
+  const [tagInput, setTagInput] = useState('');
   
   // State for fetched article types/filters
   const [availableArticleTypes, setAvailableArticleTypes] = useState([]);
@@ -106,22 +115,51 @@ const CreateArticleScreen = ({ navigation, route }) => {
       return false;
     }
 
-    try {
-      const plainText = (await editorRef.current?.getText()) || '';
-      if (!plainText.trim()) {
-        Alert.alert('Fehler', 'Bitte gib einen Inhalt ein.');
-        return false;
-      }
-    } catch (e) {
-      console.error('Error validating editor content:', e);
-      Alert.alert('Fehler', 'Editor-Inhalt konnte nicht überprüft werden.');
+    const plainText = (contentRef.current || '')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .trim();
+    if (!plainText) {
+      Alert.alert('Fehler', 'Bitte gib einen Inhalt ein.');
       return false;
     }
 
     return true;
   };
+
+  const handleRichEditorChange = (html) => {
+    // RichEditor manages its own UI; avoid setState per keystroke to prevent heavy rerenders / reloads.
+    contentRef.current = html ?? '';
+  };
+
+  const handleHtmlChange = (html) => {
+    const next = html ?? '';
+    setContent(next);
+    contentRef.current = next;
+  };
+
+  const toggleContentMode = () => {
+    // When switching to HTML mode, snapshot latest rich content into controlled TextInput state.
+    if (!isHtmlMode) {
+      setContent(contentRef.current || '');
+    }
+    setIsHtmlMode(prev => !prev);
+  };
   
-  // Function to pick an image
+  // Tag management functions
+  const addTag = () => {
+    const trimmedTag = tagInput.trim();
+    if (trimmedTag && !tags.includes(trimmedTag)) {
+      setTags(prev => [...prev, trimmedTag]);
+      setTagInput('');
+    }
+  };
+
+  const removeTag = (index) => {
+    setTags(prev => prev.filter((_, i) => i !== index));
+  };
+  
+  // Function to pick multiple images
   const pickImage = async () => {
     // Request permission
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -131,52 +169,165 @@ const CreateArticleScreen = ({ navigation, route }) => {
     }
 
     let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 0.8, // Reduce quality slightly for faster uploads
-      base64: true, // Request base64 data
+      mediaTypes: ['images'],
+      allowsMultipleSelection: true,
+      selectionLimit: 10,
+      quality: 0.8,
+      base64: true,
     });
 
-    if (!result.canceled) {
-      setImageAsset(result.assets[0]);
+    if (!result.canceled && result.assets) {
+      // Append new images to existing selection
+      setImageAssets(prev => [...prev, ...result.assets]);
     }
   };
 
-  // Function to upload image and return URL
-  const uploadImage = async (asset) => {
-    if (!asset || !asset.base64) return null; // Check if asset and base64 data exist
+  // Function to remove an image from selection
+  const removeImage = (index) => {
+    setImageAssets(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // Function to upload a single image and return URL
+  const uploadSingleImage = async (asset) => {
+    if (!asset || !asset.base64) return null;
+
+    const fileExt = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
+    const fileName = `${uuidv4()}.${fileExt}`;
+    const filePath = `${fileName}`;
+
+    const { data, error: uploadError } = await supabase.storage
+        .from('article_images')
+        .upload(filePath, decode(asset.base64), {
+            contentType: asset.mimeType ?? `image/${fileExt}`
+        });
+
+    if (uploadError) {
+        throw uploadError;
+    }
+
+    const { data: urlData } = supabase.storage
+        .from('article_images')
+        .getPublicUrl(filePath);
+
+    return urlData?.publicUrl;
+  };
+
+  // Function to upload multiple images and return array of URLs
+  const uploadImages = async (assets) => {
+    if (!assets || assets.length === 0) return [];
 
     setIsUploading(true);
     try {
-        const fileExt = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
-        const fileName = `${uuidv4()}.${fileExt}`;
-        const filePath = `${fileName}`; // Store directly in the root for simplicity, or use orgId/fileName
-
-        const { data, error: uploadError } = await supabase.storage
-            .from('article_images')
-            .upload(filePath, decode(asset.base64), { // Use decode here
-                contentType: asset.mimeType ?? `image/${fileExt}`
-            });
-
-        if (uploadError) {
-            throw uploadError;
-        }
-
-        // Get public URL
-        const { data: urlData } = supabase.storage
-            .from('article_images')
-            .getPublicUrl(filePath);
-
-        return urlData?.publicUrl;
-
+      const uploadPromises = assets.map(asset => uploadSingleImage(asset));
+      const urls = await Promise.all(uploadPromises);
+      // Filter out any null values from failed uploads
+      return urls.filter(url => url !== null);
     } catch (error) {
-        console.error('Error uploading image:', error);
-        Alert.alert('Upload Fehler', 'Das Bild konnte nicht hochgeladen werden.');
-        return null;
+      console.error('Error uploading images:', error);
+      Alert.alert('Upload Fehler', 'Ein oder mehrere Bilder konnten nicht hochgeladen werden.');
+      return [];
     } finally {
-        setIsUploading(false);
+      setIsUploading(false);
     }
+  };
+
+  // Function to pick files
+  const pickFile = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        multiple: true,
+        copyToCacheDirectory: true,
+      });
+
+      if (!result.canceled && result.assets) {
+        setFileAssets(prev => [...prev, ...result.assets]);
+      }
+    } catch (error) {
+      console.error('Error picking file:', error);
+      Alert.alert('Fehler', 'Datei konnte nicht ausgewählt werden.');
+    }
+  };
+
+  // Function to remove a file from selection
+  const removeFile = (index) => {
+    setFileAssets(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // Function to upload a single file and return URL + metadata
+  const uploadSingleFile = async (asset) => {
+    if (!asset || !asset.uri) return null;
+
+    try {
+      const fileExt = asset.name?.split('.').pop()?.toLowerCase() ?? 'bin';
+      const fileName = `${uuidv4()}.${fileExt}`;
+      const filePath = `attachments/${fileName}`;
+
+      // Fetch the file as blob
+      const response = await fetch(asset.uri);
+      const blob = await response.blob();
+
+      // Convert blob to array buffer
+      const arrayBuffer = await new Response(blob).arrayBuffer();
+
+      const { data, error: uploadError } = await supabase.storage
+        .from('article_images')
+        .upload(filePath, arrayBuffer, {
+          contentType: asset.mimeType ?? 'application/octet-stream'
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { data: urlData } = supabase.storage
+        .from('article_images')
+        .getPublicUrl(filePath);
+
+      return {
+        url: urlData?.publicUrl,
+        name: asset.name || fileName,
+        size: asset.size || 0,
+        mimeType: asset.mimeType || 'application/octet-stream'
+      };
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      return null;
+    }
+  };
+
+  // Function to upload multiple files and return array of metadata
+  const uploadFiles = async (assets) => {
+    if (!assets || assets.length === 0) return [];
+
+    try {
+      const uploadPromises = assets.map(asset => uploadSingleFile(asset));
+      const results = await Promise.all(uploadPromises);
+      return results.filter(result => result !== null);
+    } catch (error) {
+      console.error('Error uploading files:', error);
+      Alert.alert('Upload Fehler', 'Ein oder mehrere Dateien konnten nicht hochgeladen werden.');
+      return [];
+    }
+  };
+
+  // Helper to get file icon based on mime type
+  const getFileIcon = (mimeType) => {
+    if (!mimeType) return 'document-outline';
+    if (mimeType.includes('pdf')) return 'document-text-outline';
+    if (mimeType.includes('word') || mimeType.includes('document')) return 'document-outline';
+    if (mimeType.includes('sheet') || mimeType.includes('excel')) return 'grid-outline';
+    if (mimeType.includes('presentation') || mimeType.includes('powerpoint')) return 'easel-outline';
+    if (mimeType.includes('zip') || mimeType.includes('archive')) return 'archive-outline';
+    if (mimeType.includes('audio')) return 'musical-notes-outline';
+    if (mimeType.includes('video')) return 'videocam-outline';
+    return 'document-outline';
+  };
+
+  // Helper to format file size
+  const formatFileSize = (bytes) => {
+    if (!bytes) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
   // Handle article publishing
@@ -189,21 +340,28 @@ const CreateArticleScreen = ({ navigation, route }) => {
     if (!(await validateForm())) return;
     
     setIsPublishing(true);
-    let finalImageUrl = null;
-    let htmlContent = '';
+    let imageUrls = [];
+    let uploadedFiles = [];
+    let htmlContent = contentRef.current || '';
 
     try {
-      // Read HTML from editor
-      htmlContent = (await editorRef.current?.getHtml()) || '';
-
-      // Upload image if one is selected
-      if (imageAsset) {
-        finalImageUrl = await uploadImage(imageAsset);
-        if (!finalImageUrl) {
+      // Upload all selected images
+      if (imageAssets.length > 0) {
+        imageUrls = await uploadImages(imageAssets);
+        if (imageUrls.length === 0 && imageAssets.length > 0) {
+          // All uploads failed
           setIsPublishing(false);
           return;
         }
       }
+
+      // Upload all selected files
+      if (fileAssets.length > 0) {
+        uploadedFiles = await uploadFiles(fileAssets);
+      }
+
+      // First image is the cover image
+      const coverImageUrl = imageUrls.length > 0 ? imageUrls[0] : null;
 
       // Insert new article
       const { data, error } = await supabase
@@ -215,8 +373,9 @@ const CreateArticleScreen = ({ navigation, route }) => {
           author_id: user.id,
           organization_id: activeOrganizationId,
           is_published: true,
-          image_url: finalImageUrl,
-          preview_image_url: finalImageUrl
+          image_url: coverImageUrl,
+          preview_image_url: coverImageUrl,
+          tags: tags
         })
         .select()
         .single();
@@ -226,6 +385,45 @@ const CreateArticleScreen = ({ navigation, route }) => {
         Alert.alert('Fehler', 'Artikel konnte nicht veröffentlicht werden.');
         return;
       }
+
+      // Insert all images into article_images table
+      if (imageUrls.length > 0 && data?.id) {
+        const imageRecords = imageUrls.map((url, index) => ({
+          article_id: data.id,
+          image_url: url,
+          display_order: index
+        }));
+
+        const { error: imagesError } = await supabase
+          .from('article_images')
+          .insert(imageRecords);
+
+        if (imagesError) {
+          console.error('Error saving article images:', imagesError);
+          // Don't fail the whole operation, article is already created
+        }
+      }
+
+      // Insert all files into article_attachments table
+      if (uploadedFiles.length > 0 && data?.id) {
+        const attachmentRecords = uploadedFiles.map((file, index) => ({
+          article_id: data.id,
+          file_url: file.url,
+          file_name: file.name,
+          file_size: file.size,
+          mime_type: file.mimeType,
+          display_order: index
+        }));
+
+        const { error: attachmentsError } = await supabase
+          .from('article_attachments')
+          .insert(attachmentRecords);
+
+        if (attachmentsError) {
+          console.error('Error saving article attachments:', attachmentsError);
+          // Don't fail the whole operation, article is already created
+        }
+      }
       
       Alert.alert(
         'Erfolg',
@@ -234,7 +432,6 @@ const CreateArticleScreen = ({ navigation, route }) => {
           { 
             text: 'OK', 
             onPress: () => {
-              // Use goBack to return to previous screen
               navigation.goBack();
             }
           }
@@ -256,29 +453,36 @@ const CreateArticleScreen = ({ navigation, route }) => {
       return;
     }
 
-    let plainText = '';
-    try { plainText = (await editorRef.current?.getText()) || ''; } catch {}
+    let plainText = (contentRef.current || '')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .trim();
     if (!title.trim() && !plainText.trim()) {
       Alert.alert('Fehler', 'Bitte gib mindestens einen Titel oder Inhalt ein.');
       return;
     }
     
     setIsPublishing(true);
-    let finalImageUrl = null;
-    let htmlContent = '';
+    let imageUrls = [];
+    let uploadedFiles = [];
+    let htmlContent = contentRef.current || '';
 
     try {
-      // Read HTML from editor
-      htmlContent = (await editorRef.current?.getHtml()) || '';
-
-      // Upload image if one is selected
-      if (imageAsset) {
-        finalImageUrl = await uploadImage(imageAsset);
-        if (!finalImageUrl) {
+      // Upload all selected images
+      if (imageAssets.length > 0) {
+        imageUrls = await uploadImages(imageAssets);
+        if (imageUrls.length === 0 && imageAssets.length > 0) {
           setIsPublishing(false);
           return;
         }
       }
+
+      // Upload all selected files
+      if (fileAssets.length > 0) {
+        uploadedFiles = await uploadFiles(fileAssets);
+      }
+
+      const coverImageUrl = imageUrls.length > 0 ? imageUrls[0] : null;
 
       // Insert new draft article
       const { data, error } = await supabase
@@ -290,14 +494,54 @@ const CreateArticleScreen = ({ navigation, route }) => {
           author_id: user.id,
           organization_id: activeOrganizationId,
           is_published: false,
-          image_url: finalImageUrl,
-          preview_image_url: finalImageUrl
-        });
+          image_url: coverImageUrl,
+          preview_image_url: coverImageUrl,
+          tags: tags
+        })
+        .select()
+        .single();
       
       if (error) {
         console.error('Error saving draft:', error);
         Alert.alert('Fehler', 'Entwurf konnte nicht gespeichert werden.');
         return;
+      }
+
+      // Insert all images into article_images table
+      if (imageUrls.length > 0 && data?.id) {
+        const imageRecords = imageUrls.map((url, index) => ({
+          article_id: data.id,
+          image_url: url,
+          display_order: index
+        }));
+
+        const { error: imagesError } = await supabase
+          .from('article_images')
+          .insert(imageRecords);
+
+        if (imagesError) {
+          console.error('Error saving article images:', imagesError);
+        }
+      }
+
+      // Insert all files into article_attachments table
+      if (uploadedFiles.length > 0 && data?.id) {
+        const attachmentRecords = uploadedFiles.map((file, index) => ({
+          article_id: data.id,
+          file_url: file.url,
+          file_name: file.name,
+          file_size: file.size,
+          mime_type: file.mimeType,
+          display_order: index
+        }));
+
+        const { error: attachmentsError } = await supabase
+          .from('article_attachments')
+          .insert(attachmentRecords);
+
+        if (attachmentsError) {
+          console.error('Error saving article attachments:', attachmentsError);
+        }
       }
       
       Alert.alert(
@@ -424,6 +668,36 @@ const CreateArticleScreen = ({ navigation, route }) => {
         >
           <Text style={styles.inputLabel}>Kategorie</Text>
           {renderTypeButtons()}
+
+          <Text style={styles.inputLabel}>Schlagwörter (Optional)</Text>
+          {tags.length > 0 && (
+            <View style={styles.tagsContainer}>
+              {tags.map((tag, index) => (
+                <TouchableOpacity 
+                  key={index} 
+                  style={styles.tagChip}
+                  onPress={() => removeTag(index)}
+                >
+                  <Text style={styles.tagChipText}>{tag}</Text>
+                  <Ionicons name="close-circle" size={16} color="#666" style={styles.tagRemoveIcon} />
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+          <View style={styles.tagInputContainer}>
+            <TextInput
+              style={styles.tagInput}
+              placeholder="Schlagwort eingeben und Enter drücken..."
+              value={tagInput}
+              onChangeText={setTagInput}
+              onSubmitEditing={addTag}
+              returnKeyType="done"
+              blurOnSubmit={false}
+            />
+            <TouchableOpacity style={styles.tagAddButton} onPress={addTag}>
+              <Ionicons name="add" size={20} color="#4285F4" />
+            </TouchableOpacity>
+          </View>
           
           <Text style={styles.inputLabel}>Titel</Text>
           <TextInput
@@ -434,41 +708,111 @@ const CreateArticleScreen = ({ navigation, route }) => {
             maxLength={100}
           />
           
-          <Text style={styles.inputLabel}>Inhalt</Text>
-          <View style={styles.editorContainer}>
-            <QuillEditor
-              ref={editorRef}
-              style={styles.quill}
-              initialHtml={''}
-            />
+          <View style={styles.labelRow}>
+            <Text style={styles.inputLabel}>Inhalt</Text>
+            <TouchableOpacity onPress={toggleContentMode}>
+              <Text style={styles.toggleModeText}>{isHtmlMode ? 'WYSIWYG' : 'HTML'}</Text>
+            </TouchableOpacity>
           </View>
-          <QuillToolbar 
-            editor={editorRef} 
-            options={['bold','italic','underline','strike','color','background','header','list','align','link','image']}
-            theme="light" 
-          />
+          {isHtmlMode ? (
+            <TextInput
+              style={[styles.editorContainer, styles.htmlInput]}
+              multiline
+              value={content}
+              onChangeText={handleHtmlChange}
+              placeholder="<p>Schreibe hier HTML...</p>"
+              textAlignVertical="top"
+            />
+          ) : (
+            <View style={styles.editorContainer}>
+              <RichEditor
+                ref={editorRef}
+                initialContentHTML={content}
+                onChange={handleRichEditorChange}
+                androidHardwareAccelerationDisabled={true}
+                editorStyle={{ backgroundColor: '#fff' }}
+                style={styles.rich}
+              />
+            </View>
+          )}
+          {!isHtmlMode && (
+            <RichToolbar
+              editor={editorRef}
+              actions={[actions.setBold, actions.setItalic, actions.setUnderline, actions.heading1, actions.insertBulletsList, actions.insertOrderedList, actions.alignLeft, actions.alignCenter, actions.alignRight, actions.insertLink]}
+            />
+          )}
 
-          {/* Image Upload - REMOVED: only shown for org articles */}
-          {/* {activeOrganizationId && ( */} 
+          {/* Image Upload - Multiple images supported */}
             <>
-              <Text style={styles.inputLabel}>Bild (Optional)</Text>
-              {imageAsset && (
-                <View style={styles.imagePreviewContainer}>
-                    <Image source={{ uri: imageAsset.uri }} style={styles.imagePreview} />
-                    <TouchableOpacity onPress={() => setImageAsset(null)} style={styles.removeImageButton}>
+              <Text style={styles.inputLabel}>Bilder (Optional, max. 10)</Text>
+              {imageAssets.length > 0 && (
+                <ScrollView 
+                  horizontal 
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.imagePreviewScroll}
+                  contentContainerStyle={styles.imagePreviewScrollContent}
+                >
+                  {imageAssets.map((asset, index) => (
+                    <View key={index} style={styles.imagePreviewItem}>
+                      <Image source={{ uri: asset.uri }} style={styles.imagePreviewThumb} />
+                      <TouchableOpacity 
+                        onPress={() => removeImage(index)} 
+                        style={styles.removeImageButton}
+                      >
                         <Ionicons name="close-circle" size={24} color="#ff3b30" />
-                    </TouchableOpacity>
+                      </TouchableOpacity>
+                      {index === 0 && (
+                        <View style={styles.coverBadge}>
+                          <Text style={styles.coverBadgeText}>Cover</Text>
+                        </View>
+                      )}
+                    </View>
+                  ))}
+                </ScrollView>
+              )}
+              <TouchableOpacity 
+                style={styles.imagePickerButton} 
+                onPress={pickImage} 
+                disabled={isUploading || imageAssets.length >= 10}
+              >
+                <Ionicons name="images" size={20} color="#4285F4" style={{marginRight: 10}} />
+                <Text style={styles.imagePickerButtonText}>
+                  {imageAssets.length > 0 ? `Weitere Bilder hinzufügen (${imageAssets.length}/10)` : 'Bilder auswählen'}
+                </Text>
+              </TouchableOpacity>
+            </>
+
+          {/* File Attachments Upload */}
+            <>
+              <Text style={styles.inputLabel}>Dateianhänge (Optional)</Text>
+              {fileAssets.length > 0 && (
+                <View style={styles.fileListContainer}>
+                  {fileAssets.map((file, index) => (
+                    <View key={index} style={styles.fileItem}>
+                      <Ionicons name={getFileIcon(file.mimeType)} size={24} color="#4285F4" />
+                      <View style={styles.fileInfo}>
+                        <Text style={styles.fileName} numberOfLines={1}>{file.name}</Text>
+                        {file.size > 0 && <Text style={styles.fileSize}>{formatFileSize(file.size)}</Text>}
+                      </View>
+                      <TouchableOpacity onPress={() => removeFile(index)} style={styles.removeFileButton}>
+                        <Ionicons name="close-circle" size={22} color="#ff3b30" />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
                 </View>
               )}
-               <TouchableOpacity style={styles.imagePickerButton} onPress={pickImage} disabled={isUploading}>
-                 <Ionicons name="camera" size={20} color="#4285F4" style={{marginRight: 10}} />
-                 <Text style={styles.imagePickerButtonText}>
-                   {imageAsset ? 'Bild ändern' : 'Bild auswählen'}
-                 </Text>
-               </TouchableOpacity>
+              <TouchableOpacity 
+                style={styles.filePickerButton} 
+                onPress={pickFile} 
+                disabled={isUploading}
+              >
+                <Ionicons name="attach" size={20} color="#4285F4" style={{marginRight: 10}} />
+                <Text style={styles.filePickerButtonText}>
+                  {fileAssets.length > 0 ? 'Weitere Dateien hinzufügen' : 'Dateien anhängen'}
+                </Text>
+              </TouchableOpacity>
               {isUploading && <ActivityIndicator size="small" color="#4285F4" style={{ marginTop: 10}} />}
             </>
-          {/* )} */}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -595,10 +939,21 @@ const styles = StyleSheet.create({
     borderColor: '#eee',
     backgroundColor: '#fff',
   },
-  quill: {
+  rich: {
     minHeight: 200,
-    padding: 8,
-    backgroundColor: '#fff',
+  },
+  htmlInput: {
+    padding: 10,
+    minHeight: 200,
+  },
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  toggleModeText: {
+    color: '#4285F4',
+    fontWeight: 'bold',
   },
   imagePickerButton: {
     flexDirection: 'row',
@@ -614,24 +969,42 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
   },
-  imagePreviewContainer: {
-      position: 'relative',
-      marginBottom: 10,
-      alignItems: 'center',
-  },
-  imagePreview: {
-    width: '100%',
-    height: 200,
-    borderRadius: 8,
+  imagePreviewScroll: {
     marginTop: 10,
+    marginBottom: 5,
+  },
+  imagePreviewScrollContent: {
+    paddingRight: 10,
+  },
+  imagePreviewItem: {
+    position: 'relative',
+    marginRight: 10,
+  },
+  imagePreviewThumb: {
+    width: 120,
+    height: 90,
+    borderRadius: 8,
   },
   removeImageButton: {
-      position: 'absolute',
-      top: 5,
-      right: 5,
-      backgroundColor: 'rgba(255, 255, 255, 0.7)',
-      borderRadius: 12,
-      padding: 2,
+    position: 'absolute',
+    top: -8,
+    right: -8,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderRadius: 12,
+  },
+  coverBadge: {
+    position: 'absolute',
+    bottom: 4,
+    left: 4,
+    backgroundColor: '#4285F4',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  coverBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
   },
   loadingIndicator: {
     marginVertical: 10,
@@ -640,6 +1013,93 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     color: '#6c757d',
     paddingVertical: 10,
+  },
+  tagsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: 8,
+  },
+  tagChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#e7f0fe',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 16,
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  tagChipText: {
+    color: '#4285F4',
+    fontSize: 13,
+    marginRight: 4,
+  },
+  tagRemoveIcon: {
+    marginLeft: 2,
+  },
+  tagInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  tagInput: {
+    flex: 1,
+    backgroundColor: '#f8f8f8',
+    padding: 12,
+    borderRadius: 8,
+    fontSize: 14,
+  },
+  tagAddButton: {
+    padding: 12,
+    marginLeft: 8,
+    backgroundColor: '#eef4ff',
+    borderRadius: 8,
+  },
+  fileListContainer: {
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  fileItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8f8f8',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  fileInfo: {
+    flex: 1,
+    marginLeft: 10,
+  },
+  fileName: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
+  },
+  fileSize: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 2,
+  },
+  removeFileButton: {
+    padding: 4,
+  },
+  filePickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f7ff',
+    padding: 12,
+    borderRadius: 8,
+    justifyContent: 'center',
+    marginTop: 5,
+    borderWidth: 1,
+    borderColor: '#d0e3ff',
+    borderStyle: 'dashed',
+  },
+  filePickerButtonText: {
+    color: '#4285F4',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
 });
 

@@ -45,14 +45,7 @@ const getTransformedImageUrl = (originalUrl) => {
   return originalUrl.replace('/object/public/', '/render/image/public/') + '?width=400&quality=60';
 };
 
-// Configure Notification Handler (optional, but good practice)
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: false,
-    shouldSetBadge: false,
-  }),
-});
+// Note: Notification handler is configured globally in App.js
 
 const ChatDetailScreen = ({ route, navigation }) => {
   const { chatGroup: initialChatGroup, onReturn } = route.params;
@@ -73,6 +66,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
   const [isUploading, setIsUploading] = useState(false);
   const flatListRef = useRef(null);
   const [isOrgMember, setIsOrgMember] = useState(false);
+  const [hasAutoScrolled, setHasAutoScrolled] = useState(false); // Track initial auto-scroll
   // --- Push Notification State ---
   const [expoPushToken, setExpoPushToken] = useState('');
   const [isSubscribed, setIsSubscribed] = useState(false);
@@ -470,7 +464,25 @@ const ChatDetailScreen = ({ route, navigation }) => {
   // Load messages when component mounts or chat group changes
   useEffect(() => {
     fetchMessages();
+    setHasAutoScrolled(false); // Reset auto-scroll when switching chats
   }, [chatGroup.id]);
+
+  // Utility: reliably scroll to the latest message (bottom)
+  const scrollToBottom = () => {
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: false });
+      }, 50);
+    });
+  };
+
+  // Auto-scroll to the latest message once after initial load
+  useEffect(() => {
+    if (!isOfflineMode && !loading && messages.length > 0 && !hasAutoScrolled) {
+      scrollToBottom();
+      setHasAutoScrolled(true);
+    }
+  }, [messages, loading, isOfflineMode, hasAutoScrolled]);
 
   // Fetch messages for the current chat group
   const fetchMessages = async () => {
@@ -1104,13 +1116,27 @@ const ChatDetailScreen = ({ route, navigation }) => {
     <SafeAreaView style={styles.container}>
       {renderHeader()}
       
+      {/* Reverse messages for inverted list so newest is first in data */}
+      {(() => { return null })()}
+      
       <FlatList
         ref={flatListRef}
-        data={messages}
+        data={[...messages].reverse()}
         renderItem={renderItem}
         keyExtractor={item => item.id.toString()}
         style={styles.messagesList}
         contentContainerStyle={styles.messagesContent}
+        inverted
+        onContentSizeChange={() => {
+          if (!hasAutoScrolled) {
+            scrollToBottom();
+          }
+        }}
+        onLayout={() => {
+          if (!hasAutoScrolled && messages.length > 0) {
+            scrollToBottom();
+          }
+        }}
         onRefresh={isOfflineMode ? undefined : fetchMessages}
         refreshing={!isOfflineMode && loading}
         ListEmptyComponent={

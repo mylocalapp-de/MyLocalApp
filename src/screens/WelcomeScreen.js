@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Animated,
   Dimensions,
+  Alert
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -41,11 +42,12 @@ const effectiveAnimationDuration = ANIMATION_DURATION * (numRepeats / 1.5); // A
 
 const WelcomeScreen = ({ navigation }) => {
   const { signIn } = useAuth();
-  const [step, setStep] = useState('welcome'); // Only 'welcome' and 'login' steps needed now
+  const [step, setStep] = useState('welcome'); // 'welcome', 'login', 'forgotPassword'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false); // Keep loading state for login
+  const [loading, setLoading] = useState(false); 
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
   const scrollX = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -66,6 +68,45 @@ const WelcomeScreen = ({ navigation }) => {
 
     return () => scrollX.stopAnimation(); // Cleanup on unmount/step change
   }, [step, scrollX]);
+
+  const handlePasswordReset = async () => {
+    if (!email.trim() || !email.includes('@')) {
+      setError('Bitte gib eine gültige E-Mail-Adresse ein');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setSuccessMessage('');
+
+    try {
+      const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+      
+      const response = await fetch('https://admin.mylocalapp.de/api/password-reset/reset', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Supabase-Url': supabaseUrl
+        },
+        body: JSON.stringify({ email: email.trim() })
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setSuccessMessage('Wenn die E-Mail existiert, wurde ein neues Passwort gesendet.');
+        // Optional: Clear email field? No, maybe keep it if they need to check.
+      } else {
+        // Handle specific API errors if needed, otherwise show generic
+        setError(data.message || 'Fehler beim Zurücksetzen des Passworts.');
+      }
+    } catch (err) {
+      console.error('Error requesting password reset:', err);
+      setError('Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es später erneut.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleLoginSubmit = async () => {
     if (!email.trim() || !email.includes('@')) {
@@ -232,6 +273,14 @@ const WelcomeScreen = ({ navigation }) => {
           >
             <Text style={styles.secondaryButtonText}>Login mit existierendem Account</Text>
           </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.textButton, { marginTop: 15 }]}
+            onPress={() => setStep('forgotPassword')}
+            disabled={loading}
+          >
+            <Text style={styles.textButtonText}>Passwort wiederherstellen</Text>
+          </TouchableOpacity>
           
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
         </View>
@@ -304,6 +353,68 @@ const WelcomeScreen = ({ navigation }) => {
     </View>
   );
 
+  const renderForgotPassword = () => (
+    <View style={styles.contentContainer}>
+      <Text style={styles.preferencesTitle}>Passwort wiederherstellen</Text>
+      <Text style={styles.preferencesText}>
+        Bitte gib deine E-Mail-Adresse ein, um dein Passwort zurückzusetzen.
+      </Text>
+      
+      <View style={styles.formContainer}>
+        <View style={styles.inputContainer}>
+          <Text style={styles.inputLabel}>E-Mail</Text>
+          <TextInput
+            style={styles.textInput}
+            value={email}
+            onChangeText={setEmail}
+            placeholder="deine@email.de"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+        </View>
+        
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {successMessage ? <Text style={styles.successText}>{successMessage}</Text> : null}
+        
+        <View style={styles.infoBox}>
+             <Text style={styles.infoText}>
+                Wenn du deine E-Mail-Adresse nicht mehr weißt oder dich ohne E-Mail registriert hast, schreibe bitte eine E-Mail an info@mylocalapp.de oder erstelle einen neuen Account.
+             </Text>
+        </View>
+      </View>
+      
+      <View style={styles.actionsContainer}>
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={() => {
+            setStep('welcome');
+            setError('');
+            setSuccessMessage('');
+          }}
+        >
+          <Ionicons name="arrow-back" size={20} color="#666" />
+          <Text style={styles.backButtonText}>Zurück</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[
+            styles.continueButton,
+            loading && styles.buttonDisabled
+          ]}
+          onPress={handlePasswordReset}
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <Text style={styles.continueButtonText}>Zurücksetzen</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
   return (
     <SafeAreaView style={styles.container}>
       {step === 'welcome' ? (
@@ -311,6 +422,10 @@ const WelcomeScreen = ({ navigation }) => {
       ) : step === 'login' ? (
         <ScrollView contentContainerStyle={styles.scrollContainer}>
           {renderLoginForm()}
+        </ScrollView>
+      ) : step === 'forgotPassword' ? (
+        <ScrollView contentContainerStyle={styles.scrollContainer}>
+            {renderForgotPassword()}
         </ScrollView>
       ) : null}
     </SafeAreaView>
@@ -471,6 +586,38 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 4,
+  },
+  successText: {
+    color: '#388E3C', // Green for success
+    marginTop: 15,
+    textAlign: 'center',
+    fontWeight: 'bold',
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 4,
+  },
+  textButton: {
+    padding: 10,
+    alignItems: 'center',
+  },
+  textButtonText: {
+    color: '#3F51B5',
+    fontSize: 14,
+    textDecorationLine: 'underline',
+  },
+  infoBox: {
+      marginTop: 20,
+      padding: 15,
+      backgroundColor: '#E8EAF6', // Light indigo background
+      borderRadius: 8,
+      borderLeftWidth: 4,
+      borderLeftColor: '#3F51B5',
+  },
+  infoText: {
+      fontSize: 13,
+      color: '#333',
+      lineHeight: 18,
   },
   formContainer: {
     width: '100%',

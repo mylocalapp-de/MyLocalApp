@@ -113,6 +113,7 @@ const EventDetailScreen = ({ route, navigation }) => {
   const [organizerName, setOrganizerName] = useState('Organisator');
   const [isOrganizer, setIsOrganizer] = useState(false);
   const [canEditDelete, setCanEditDelete] = useState(false);
+  const [hasLinkedArticle, setHasLinkedArticle] = useState(false); // For Event-Articles
   
   // State for comments and reactions
   const [comment, setComment] = useState('');
@@ -259,6 +260,19 @@ const EventDetailScreen = ({ route, navigation }) => {
       // Determine if the current user can edit/delete this event
       await checkEditDeletePermission(eventData);
       
+      // Check if this event has a linked article (is an Event-Article)
+      try {
+        const { data: linkedArticle } = await supabase
+          .from('articles')
+          .select('id')
+          .eq('linked_event_id', eventId)
+          .maybeSingle();
+        setHasLinkedArticle(!!linkedArticle);
+      } catch (e) {
+        console.error('Error checking linked article:', e);
+        setHasLinkedArticle(false);
+      }
+      
       // Fetch comments
       fetchComments();
       
@@ -330,7 +344,7 @@ const EventDetailScreen = ({ route, navigation }) => {
         .from('event_comments_with_users')
         .select('*')
         .eq('event_id', eventId)
-        .order('created_at', { ascending: true });
+        .order('created_at', { ascending: false });
       
       if (error) {
         console.error('Error fetching comments:', error);
@@ -566,7 +580,12 @@ const EventDetailScreen = ({ route, navigation }) => {
       return;
     }
 
-    navigation.navigate('EditEvent', { eventId });
+    // Navigate to EditEventArticle if this event has a linked article
+    if (hasLinkedArticle) {
+      navigation.navigate('EditEventArticle', { eventId });
+    } else {
+      navigation.navigate('EditEvent', { eventId });
+    }
     closeMenu();
   };
 

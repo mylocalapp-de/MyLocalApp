@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useState, useContext, useEffect, useReducer, useRef, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase'; // Assuming supabase client is setup here
 import { useAuth } from './AuthContext'; // To potentially access user info
@@ -11,59 +11,179 @@ const OrganizationContext = createContext();
 // Key for storing active organization ID in AsyncStorage
 const ACTIVE_ORG_STORAGE_KEY = 'activeOrganizationId';
 
+// --- State Machine Types ---
+// mode: 'personal' | 'switching' | 'org'
+const ORG_MODES = {
+  PERSONAL: 'personal',
+  SWITCHING: 'switching',
+  ORG: 'org',
+};
+
+// Reducer action types
+const ORG_ACTIONS = {
+  START_SWITCH: 'START_SWITCH',
+  SWITCH_SUCCESS: 'SWITCH_SUCCESS',
+  SWITCH_FAIL: 'SWITCH_FAIL',
+  CLEAR_TO_PERSONAL: 'CLEAR_TO_PERSONAL',
+  UPDATE_ORG_DETAILS: 'UPDATE_ORG_DETAILS',
+  SET_ERROR: 'SET_ERROR',
+  START_MUTATION: 'START_MUTATION',
+  END_MUTATION: 'END_MUTATION',
+};
+
+// Initial state
+const initialOrgState = {
+  mode: ORG_MODES.PERSONAL,
+  activeOrgId: null,
+  activeOrg: null,
+  error: null,
+  switchRequestId: null, // Nonce for guarding stale async results
+  pendingMutations: 0, // Counter for ongoing mutation operations
+};
+
+// Reducer function
+const orgReducer = (state, action) => {
+  switch (action.type) {
+    case ORG_ACTIONS.START_SWITCH:
+      return {
+        ...state,
+        mode: ORG_MODES.SWITCHING,
+        error: null,
+        switchRequestId: action.requestId,
+      };
+    case ORG_ACTIONS.SWITCH_SUCCESS:
+      // Guard: only accept if requestId matches (latest request wins)
+      if (state.switchRequestId !== action.requestId) {
+        console.log(`OrgReducer: Ignoring stale SWITCH_SUCCESS (expected ${state.switchRequestId}, got ${action.requestId})`);
+        return state;
+      }
+      return {
+        ...state,
+        mode: action.orgData ? ORG_MODES.ORG : ORG_MODES.PERSONAL,
+        activeOrgId: action.orgId,
+        activeOrg: action.orgData,
+        error: null,
+        switchRequestId: null,
+      };
+    case ORG_ACTIONS.SWITCH_FAIL:
+      // Guard: only accept if requestId matches
+      if (state.switchRequestId !== action.requestId) {
+        console.log(`OrgReducer: Ignoring stale SWITCH_FAIL (expected ${state.switchRequestId}, got ${action.requestId})`);
+        return state;
+      }
+      return {
+        ...state,
+        mode: ORG_MODES.PERSONAL,
+        activeOrgId: null,
+        activeOrg: null,
+        error: action.error,
+        switchRequestId: null,
+      };
+    case ORG_ACTIONS.CLEAR_TO_PERSONAL:
+      return {
+        ...state,
+        mode: ORG_MODES.PERSONAL,
+        activeOrgId: null,
+        activeOrg: null,
+        error: null,
+        switchRequestId: null,
+      };
+    case ORG_ACTIONS.UPDATE_ORG_DETAILS:
+      // Only update if we're in org mode and IDs match
+      if (state.mode !== ORG_MODES.ORG || state.activeOrgId !== action.orgId) {
+        return state;
+      }
+      return {
+        ...state,
+        activeOrg: { ...state.activeOrg, ...action.updates },
+      };
+    case ORG_ACTIONS.SET_ERROR:
+      return { ...state, error: action.error };
+    case ORG_ACTIONS.START_MUTATION:
+      return { ...state, pendingMutations: state.pendingMutations + 1 };
+    case ORG_ACTIONS.END_MUTATION:
+      return { ...state, pendingMutations: Math.max(0, state.pendingMutations - 1) };
+    default:
+      return state;
+  }
+};
+
 // Provider component
 export const OrganizationProvider = ({ children }) => {
-  const [activeOrganizationId, setActiveOrganizationId] = useState(null);
-  const [activeOrganization, setActiveOrganization] = useState(null); // Store full org details
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadingOrgLogo, setLoadingOrgLogo] = useState(false); // <-- ADDED: Loading state for logo upload
-  const [loadingOrgAboutMe, setLoadingOrgAboutMe] = useState(false); // --- ADDED: State for About Me Update ---
+  // Use reducer for core org state
+  const [orgState, dispatch] = useReducer(orgReducer, initialOrgState);
+  
+  // Separate loading states for specific operations (not switching)
+  const [loadingOrgLogo, setLoadingOrgLogo] = useState(false);
+  const [loadingOrgAboutMe, setLoadingOrgAboutMe] = useState(false);
+  
+  // Track if initial load is complete
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
+  
+  // Organization members state (centralized with race-safety)
+  const [organizationMembers, setOrganizationMembers] = useState([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [membersError, setMembersError] = useState(null);
+  const membersRequestIdRef = useRef(null);
+  
+  // Request ID counter ref for generating unique nonces
+  const requestIdCounter = useRef(0);
+  const generateRequestId = useCallback(() => {
+    requestIdCounter.current += 1;
+    return `switch-${Date.now()}-${requestIdCounter.current}`;
+  }, []);
+  
   const {
       user,
       userOrganizations,
-      loadUserProfile,
-  } = useAuth(); // Get user status, userOrganizations and loadUserProfile function
+      refreshCurrentUserProfile, // Safe parameterless refresh
+      patchUserOrganization, // Local org patching
+      removeUserOrganization, // Local org removal
+  } = useAuth(); // Get user status, userOrganizations and org patching functions
+  
+  // Derived values for backward compatibility
+  const activeOrganizationId = orgState.activeOrgId;
+  const activeOrganization = orgState.activeOrg;
+  const isOrganizationActive = orgState.mode === ORG_MODES.ORG;
+  // isLoading: true during initial load OR when switching
+  const isLoading = !initialLoadComplete || orgState.mode === ORG_MODES.SWITCHING;
+  // isMutating: true when any mutation operation is in progress
+  const isMutating = orgState.pendingMutations > 0;
 
   // Effect to log changes in userOrganizations (for debugging the trigger)
   useEffect(() => {
     // REMOVED THE AUTOMATIC SWITCH LOGIC - Let UI handle redirection
-    if (user && !isLoading) { 
+    if (user && initialLoadComplete) { 
         console.log('OrgContext: Detected change in userOrganizations:', userOrganizations);
         // NO LONGER attempting switchOrganizationContext(null) from here
     }
     // Keep dependencies
-  }, [userOrganizations, user, activeOrganizationId, isLoading]);
+  }, [userOrganizations, user, activeOrganizationId, initialLoadComplete]);
 
-  // <<< NEW useEffect to update activeOrganization state on role change >>>
+  // Update activeOrganization state on role change (via reducer)
   useEffect(() => {
     // Only run if a user is logged in, an org is active, and we have the lists
     if (user && activeOrganizationId && activeOrganization && userOrganizations) {
         // Find the membership details for the *currently logged-in user* in the *active organization*
         const updatedOrgMembershipForCurrentUser = userOrganizations.find(
             org => org.id === activeOrganizationId // Match the active org ID
-            // No user ID check needed here, userOrganizations is already filtered by AuthContext for the logged-in user
         );
         
         const newRoleForCurrentUser = updatedOrgMembershipForCurrentUser?.role;
         
-        // console.log(`OrgContext Check: Active Org ID: ${activeOrganizationId}, Current User: ${user.id}, Current Role in State: ${activeOrganization.currentUserRole}, New Role from userOrgs for this user: ${newRoleForCurrentUser}`);
-        
         // Update the activeOrganization state ONLY if the *current user's* role has changed
         if (newRoleForCurrentUser && newRoleForCurrentUser !== activeOrganization.currentUserRole) {
             console.log(`OrgContext: Detected role change for CURRENT USER (${user.id}) in active org ${activeOrganizationId}. Updating role from ${activeOrganization.currentUserRole} to ${newRoleForCurrentUser}.`);
-            setActiveOrganization(prev => {
-                if (!prev) return null; // Safety check
-                return {
-                    ...prev,
+            dispatch({
+                type: ORG_ACTIONS.UPDATE_ORG_DETAILS,
+                orgId: activeOrganizationId,
+                updates: {
                     currentUserRole: newRoleForCurrentUser,
-                    // Re-evaluate invite code visibility based on the current user's new role
-                    invite_code: newRoleForCurrentUser === 'admin' ? prev.invite_code : null 
-                };
+                    // All members can see invite code now
+                },
             });
         }
     }
-    // Depend on userOrganizations, activeOrganizationId, and user object (to get user.id)
-    // Also depend on activeOrganization itself to prevent potential stale closures, though the primary trigger is userOrganizations
   }, [userOrganizations, activeOrganizationId, user, activeOrganization]); 
 
   // Load active organization from storage on mount
@@ -75,16 +195,13 @@ export const OrganizationProvider = ({ children }) => {
           // Fetch full organization details if an ID was stored
           await switchOrganizationContext(storedOrgId);
         } else {
-          setActiveOrganizationId(null);
-          setActiveOrganization(null);
+          dispatch({ type: ORG_ACTIONS.CLEAR_TO_PERSONAL });
         }
       } catch (error) {
         console.error("Error loading active organization:", error);
-        // Handle error appropriately, maybe clear state
-        setActiveOrganizationId(null);
-        setActiveOrganization(null);
+        dispatch({ type: ORG_ACTIONS.CLEAR_TO_PERSONAL });
       } finally {
-        setIsLoading(false);
+        setInitialLoadComplete(true);
       }
     };
 
@@ -92,138 +209,115 @@ export const OrganizationProvider = ({ children }) => {
         loadActiveOrg();
     } else {
         // Clear active org if user logs out
-        setActiveOrganizationId(null);
-        setActiveOrganization(null);
+        dispatch({ type: ORG_ACTIONS.CLEAR_TO_PERSONAL });
         AsyncStorage.removeItem(ACTIVE_ORG_STORAGE_KEY);
-        setIsLoading(false);
+        setInitialLoadComplete(true);
     }
   }, [user]); // Rerun when user logs in or out
 
-  // Function to switch the active organization context
+  // Function to switch the active organization context (uses reducer with request ID guard)
   const switchOrganizationContext = async (organizationId) => {
-    // **** ADDED SIMPLE LOG - RE-APPLYING ****
-    console.log(`%%%% OrgContext: switchOrganizationContext CALLED with ID: ${organizationId} %%%%`);
+    const requestId = generateRequestId();
+    console.log(`%%%% OrgContext: switchOrganizationContext CALLED with ID: ${organizationId}, requestId: ${requestId} %%%%`);
 
-    setIsLoading(true);
-    const switchTimestamp = Date.now();
-    console.log(`OrgContext: [${switchTimestamp}] START switchOrganizationContext - Target Org ID: ${organizationId}`);
+    // Signal that we're starting a switch
+    dispatch({ type: ORG_ACTIONS.START_SWITCH, requestId });
 
     // Ensure 'user' is accessible here.
     if (!user) {
-        console.error(`OrgContext: [${switchTimestamp}] Cannot switch context - User is not logged in.`);
-        setActiveOrganizationId(null);
-        setActiveOrganization(null);
+        console.error(`OrgContext: [${requestId}] Cannot switch context - User is not logged in.`);
         await AsyncStorage.removeItem(ACTIVE_ORG_STORAGE_KEY);
-        setIsLoading(false);
-        console.log(`OrgContext: [${switchTimestamp}] END switchOrganizationContext (No user logged in).`);
+        dispatch({ type: ORG_ACTIONS.SWITCH_FAIL, requestId, error: 'User not logged in.' });
         return { success: false, error: 'User not logged in.' };
     }
-    console.log(`OrgContext: [${switchTimestamp}] Current logged in user ID: ${user.id}`);
+    console.log(`OrgContext: [${requestId}] Current logged in user ID: ${user.id}`);
 
     try {
       if (!organizationId) {
         // Switching back to personal context
-        console.log(`OrgContext: [${switchTimestamp}] Switching back to personal context.`);
-        setActiveOrganizationId(null);
-        setActiveOrganization(null);
+        console.log(`OrgContext: [${requestId}] Switching back to personal context.`);
         await AsyncStorage.removeItem(ACTIVE_ORG_STORAGE_KEY);
-        console.log(`OrgContext: [${switchTimestamp}] Successfully switched back to personal context. State cleared.`);
-      } else {
-        // Fetch organization details from Supabase
-        console.log(`OrgContext: [${switchTimestamp}] Fetching details for organization ID: ${organizationId}`);
-        const { data, error } = await supabase
-          .from('organizations')
-          .select('id, name, logo_url, invite_code, admin_id, about_me')
-          .eq('id', organizationId)
-          .maybeSingle();
-
-        if (error) {
-          console.error(`OrgContext: [${switchTimestamp}] Error fetching organization details for ID ${organizationId}:`, error);
-          throw new Error(`Error fetching organization details: ${error.message}`);
-        }
-
-        console.log(`OrgContext: [${switchTimestamp}] Fetched org details result for ID ${organizationId}:`, data);
-
-        if (data) {
-           console.log(`OrgContext: [${switchTimestamp}] Checking membership for user ${user?.id} in organization ${organizationId}...`);
-           const { data: memberData, error: memberError } = await supabase
-             .from('organization_members')
-             .select('role')
-             .eq('organization_id', organizationId)
-             .eq('user_id', user?.id)
-             .maybeSingle();
-
-           if (memberError) {
-               console.error(`OrgContext: [${switchTimestamp}] Error checking membership for user ${user?.id} in org ${organizationId}:`, memberError);
-               throw new Error(`Error checking membership: ${memberError.message}`);
-           }
-
-           console.log(`OrgContext: [${switchTimestamp}] Membership check result for user ${user?.id} in org ${organizationId}:`, memberData);
-
-           if (!memberData) {
-               console.warn(`OrgContext: [${switchTimestamp}] User ${user?.id} is NOT a member of organization ${organizationId}. Cannot switch context.`);
-               setActiveOrganizationId(null);
-               setActiveOrganization(null);
-               await AsyncStorage.removeItem(ACTIVE_ORG_STORAGE_KEY);
-               console.log(`OrgContext: [${switchTimestamp}] END switchOrganizationContext (User not a member). State cleared.`);
-               return { success: false, error: 'User is not a member of this organization.' };
-           }
-
-           console.log(`OrgContext: [${switchTimestamp}] User ${user?.id} IS a member (Role: ${memberData.role}). Proceeding with switch to org ${organizationId}.`);
-           const orgDetails = {
-               ...data,
-               invite_code: memberData.role === 'admin' ? data.invite_code : null,
-               currentUserRole: memberData.role,
-               about_me: data.about_me, // <<< ADDED about_me from fetched data
-           };
-
-          // --- BEGIN STATE UPDATES ---
-          console.log(`OrgContext: [${switchTimestamp}] Updating state: Setting active ID to ${organizationId}`);
-          setActiveOrganizationId(organizationId);
-          console.log(`OrgContext: [${switchTimestamp}] Updating state: Setting active Org details:`, orgDetails);
-          setActiveOrganization(orgDetails);
-          console.log(`OrgContext: [${switchTimestamp}] Updating state: Saving active ID to AsyncStorage`);
-          await AsyncStorage.setItem(ACTIVE_ORG_STORAGE_KEY, organizationId);
-          console.log(`OrgContext: [${switchTimestamp}] State updates complete. Preparing to return success.`);
-          // --- END STATE UPDATES ---
-
-          console.log(`OrgContext: [${switchTimestamp}] Successfully switched context. State updated for organization:`, orgDetails);
-          return { success: true, data: orgDetails };
-        } else {
-          console.warn(`OrgContext: [${switchTimestamp}] Organization ${organizationId} not found or access denied by RLS.`);
-          setActiveOrganizationId(null);
-          setActiveOrganization(null);
-          await AsyncStorage.removeItem(ACTIVE_ORG_STORAGE_KEY);
-          console.log(`OrgContext: [${switchTimestamp}] END switchOrganizationContext (Org not found or RLS denied). State cleared.`);
-          return { success: false, error: 'Organization not found or access denied.' };
-        }
+        dispatch({ type: ORG_ACTIONS.SWITCH_SUCCESS, requestId, orgId: null, orgData: null });
+        console.log(`OrgContext: [${requestId}] Successfully switched back to personal context.`);
+        return { success: true };
       }
-      console.log(`OrgContext: [${switchTimestamp}] END switchOrganizationContext (Successful switch/clear). Preparing to return success.`);
-      return { success: true };
+      
+      // Fetch organization details from Supabase
+      console.log(`OrgContext: [${requestId}] Fetching details for organization ID: ${organizationId}`);
+      const { data, error } = await supabase
+        .from('organizations')
+        .select('id, name, logo_url, invite_code, admin_id, about_me')
+        .eq('id', organizationId)
+        .maybeSingle();
+
+      if (error) {
+        console.error(`OrgContext: [${requestId}] Error fetching organization details for ID ${organizationId}:`, error);
+        throw new Error(`Error fetching organization details: ${error.message}`);
+      }
+
+      console.log(`OrgContext: [${requestId}] Fetched org details result for ID ${organizationId}:`, data);
+
+      if (data) {
+         console.log(`OrgContext: [${requestId}] Checking membership for user ${user?.id} in organization ${organizationId}...`);
+         const { data: memberData, error: memberError } = await supabase
+           .from('organization_members')
+           .select('role')
+           .eq('organization_id', organizationId)
+           .eq('user_id', user?.id)
+           .maybeSingle();
+
+         if (memberError) {
+             console.error(`OrgContext: [${requestId}] Error checking membership for user ${user?.id} in org ${organizationId}:`, memberError);
+             throw new Error(`Error checking membership: ${memberError.message}`);
+         }
+
+         console.log(`OrgContext: [${requestId}] Membership check result for user ${user?.id} in org ${organizationId}:`, memberData);
+
+         if (!memberData) {
+             console.warn(`OrgContext: [${requestId}] User ${user?.id} is NOT a member of organization ${organizationId}. Cannot switch context.`);
+             await AsyncStorage.removeItem(ACTIVE_ORG_STORAGE_KEY);
+             dispatch({ type: ORG_ACTIONS.SWITCH_FAIL, requestId, error: 'User is not a member of this organization.' });
+             return { success: false, error: 'User is not a member of this organization.' };
+         }
+
+         console.log(`OrgContext: [${requestId}] User ${user?.id} IS a member (Role: ${memberData.role}). Proceeding with switch to org ${organizationId}.`);
+         const orgDetails = {
+             ...data,
+             invite_code: data.invite_code, // All members can see invite code
+             currentUserRole: memberData.role,
+             about_me: data.about_me,
+         };
+
+        // Persist to storage
+        await AsyncStorage.setItem(ACTIVE_ORG_STORAGE_KEY, organizationId);
+        
+        // Dispatch success - the reducer will guard against stale results
+        dispatch({ type: ORG_ACTIONS.SWITCH_SUCCESS, requestId, orgId: organizationId, orgData: orgDetails });
+        console.log(`OrgContext: [${requestId}] Successfully switched context to organization:`, orgDetails);
+        return { success: true, data: orgDetails };
+      } else {
+        console.warn(`OrgContext: [${requestId}] Organization ${organizationId} not found or access denied by RLS.`);
+        await AsyncStorage.removeItem(ACTIVE_ORG_STORAGE_KEY);
+        dispatch({ type: ORG_ACTIONS.SWITCH_FAIL, requestId, error: 'Organization not found or access denied.' });
+        return { success: false, error: 'Organization not found or access denied.' };
+      }
     } catch (error) {
-       console.error(`OrgContext: [${switchTimestamp}] Unexpected error in switchOrganizationContext:`, error);
-       console.log(`OrgContext: [${switchTimestamp}] Resetting state due to error.`);
-       setActiveOrganizationId(null);
-       setActiveOrganization(null);
+       console.error(`OrgContext: [${requestId}] Unexpected error in switchOrganizationContext:`, error);
        await AsyncStorage.removeItem(ACTIVE_ORG_STORAGE_KEY);
-       console.log(`OrgContext: [${switchTimestamp}] END switchOrganizationContext (Caught error). State cleared.`);
+       dispatch({ type: ORG_ACTIONS.SWITCH_FAIL, requestId, error: error.message || 'Failed to switch organization.' });
        return { success: false, error: error.message || 'Failed to switch organization.' };
-    } finally {
-      console.log(`OrgContext: [${switchTimestamp}] Entering FINALLY block for switchOrganizationContext.`);
-      setIsLoading(false);
-      // console.log(`OrgContext: [${switchTimestamp}] FINALLY block switchOrganizationContext. isLoading set to false.`); // Line 202 - Temporarily commented out for debugging
-      console.log(`OrgContext: [${switchTimestamp}] Exiting FINALLY block. isLoading is now false.`);
     }
+    // Note: No finally block needed - reducer handles state transitions atomically
   };
 
   // Function to delete an organization (admin only)
   const deleteOrganization = async (organizationId) => {
-    setIsLoading(true);
+    dispatch({ type: ORG_ACTIONS.START_MUTATION });
     console.log(`OrgContext: Starting deleteOrganization for ID: ${organizationId}`);
 
     if (!user) {
       console.error("OrgContext: Cannot delete organization - User is not logged in.");
-      setIsLoading(false);
+      dispatch({ type: ORG_ACTIONS.END_MUTATION });
       return { success: false, error: 'User not logged in.' };
     }
 
@@ -260,14 +354,13 @@ export const OrganizationProvider = ({ children }) => {
 
       // Clear active organization if it was the one deleted
       if (activeOrganizationId === organizationId) {
-        setActiveOrganizationId(null);
-        setActiveOrganization(null);
         await AsyncStorage.removeItem(ACTIVE_ORG_STORAGE_KEY);
+        dispatch({ type: ORG_ACTIONS.CLEAR_TO_PERSONAL });
       }
       
-      // Refresh user profile data to update the organizations list
-      await loadUserProfile();
-      console.log("Refreshed user profile data after organization deletion");
+      // Remove org from local list instead of full refetch
+      removeUserOrganization(organizationId);
+      console.log("Removed organization from local list after deletion");
 
       console.log(`OrgContext: Successfully deleted organization: ${organizationId}`);
       return { success: true };
@@ -275,7 +368,7 @@ export const OrganizationProvider = ({ children }) => {
       console.error("Unexpected error in deleteOrganization:", error);
       return { success: false, error: error.message || 'Failed to delete organization.' };
     } finally {
-      setIsLoading(false);
+      dispatch({ type: ORG_ACTIONS.END_MUTATION });
     }
   };
 
@@ -290,10 +383,10 @@ export const OrganizationProvider = ({ children }) => {
     console.log(`[${timestamp}] OrgContext: Starting logo upload for org ${organizationId}. Image URI: ${imageUri}`);
 
     try {
-      // Check if user is an admin of this organization
+      // Verify user is a member of this organization (RLS handles authorization)
       const orgMembership = userOrganizations.find(org => org.id === organizationId);
-      if (orgMembership?.role !== 'admin') {
-          return { success: false, error: { message: 'Nur Admins können das Logo ändern.'}};
+      if (!orgMembership) {
+          return { success: false, error: { message: 'Du bist kein Mitglied dieser Organisation.'}};
       }
 
       // Determine file extension and path
@@ -353,15 +446,19 @@ export const OrganizationProvider = ({ children }) => {
 
       console.log(`[${timestamp}] OrgContext: Organization logo_url updated successfully for org ${organizationId}.`);
 
-      // Update local activeOrganization state immediately if this is the active org
+      // Update local activeOrganization state immediately if this is the active org via reducer
       if (activeOrganizationId === organizationId) {
-         setActiveOrganization(prev => prev ? ({ ...prev, logo_url: publicUrl }) : null);
+         dispatch({
+             type: ORG_ACTIONS.UPDATE_ORG_DETAILS,
+             orgId: organizationId,
+             updates: { logo_url: publicUrl },
+         });
          console.log(`[${timestamp}] OrgContext: Updated activeOrganization state with new logo_url.`);
       }
 
-      // Refresh user profile/orgs list to ensure other parts of the app get the update
-      await loadUserProfile();
-      console.log(`[${timestamp}] OrgContext: Refreshed user profile/orgs after logo update.`);
+      // Patch user's org list locally instead of full refetch
+      patchUserOrganization(organizationId, { logo_url: publicUrl });
+      console.log(`[${timestamp}] OrgContext: Patched org logo_url locally.`);
 
       return { success: true, data: { logoUrl: publicUrl } };
 
@@ -374,28 +471,75 @@ export const OrganizationProvider = ({ children }) => {
     }
   };
 
-  // --- Organization Management Functions (Moved from AuthContext) ---
-  const fetchOrganizationMembers = async (organizationId) => {
-      if (!organizationId) return { success: false, error: { message: 'Organisations-ID benötigt.' } };
-      // RLS policies should handle authorization (user must be a member to call)
-      // Or add an explicit membership check if needed.
-      console.log(`[OrgContext] Fetching members for org ID: ${organizationId} using RPC get_organization_members_with_names`);
+  // --- Organization Management Functions ---
+  
+  // Race-safe member fetching - stores in context state
+  const fetchOrganizationMembers = useCallback(async (organizationId) => {
+      if (!organizationId) {
+          setOrganizationMembers([]);
+          return { success: false, error: { message: 'Organisations-ID benötigt.' } };
+      }
+      
+      // Generate unique request ID for race-safety
+      const requestId = `members-${Date.now()}-${Math.random()}`;
+      membersRequestIdRef.current = requestId;
+      
+      setLoadingMembers(true);
+      setMembersError(null);
+      
+      console.log(`[OrgContext] Fetching members for org ID: ${organizationId}, requestId: ${requestId}`);
       try {
           const { data, error } = await supabase.rpc('get_organization_members_with_names', {
               p_organization_id: organizationId
           });
+          
+          // Guard against stale results
+          if (membersRequestIdRef.current !== requestId) {
+              console.log(`[OrgContext] Ignoring stale members result (expected ${membersRequestIdRef.current}, got ${requestId})`);
+              return { success: false, error: { message: 'Request superseded by newer request.' } };
+          }
+          
           if (error) {
               console.error("OrgContext: Error calling get_organization_members_with_names RPC:", error);
+              setMembersError(error.message || 'Fehler beim Laden der Mitglieder.');
               return { success: false, error: { message: error.message || 'Fehler beim Laden der Mitglieder.' } };
           }
+          
           const memberData = data ?? [];
           console.log(`[OrgContext] Member data received from RPC for org ${organizationId}:`, memberData);
+          setOrganizationMembers(memberData);
           return { success: true, data: memberData };
       } catch (error) {
+          // Guard against stale results in catch block too
+          if (membersRequestIdRef.current !== requestId) {
+              return { success: false, error: { message: 'Request superseded by newer request.' } };
+          }
           console.error("OrgContext: Unexpected error fetching members:", error);
+          setMembersError('Ein unerwarteter Fehler ist aufgetreten.');
           return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+      } finally {
+          // Only clear loading if this is still the latest request
+          if (membersRequestIdRef.current === requestId) {
+              setLoadingMembers(false);
+          }
       }
-  };
+  }, []);
+  
+  // Clear members when switching away from org context
+  useEffect(() => {
+      if (!isOrganizationActive) {
+          setOrganizationMembers([]);
+          setMembersError(null);
+          membersRequestIdRef.current = null;
+      }
+  }, [isOrganizationActive]);
+  
+  // Auto-fetch members when org becomes active
+  useEffect(() => {
+      if (isOrganizationActive && activeOrganizationId && user) {
+          fetchOrganizationMembers(activeOrganizationId);
+      }
+  }, [isOrganizationActive, activeOrganizationId, user, fetchOrganizationMembers]);
 
   const updateOrganizationDetails = async (organizationId, details) => {
        if (!user) return { success: false, error: { message: 'Nicht angemeldet.' } }; // Check user
@@ -417,7 +561,7 @@ export const OrganizationProvider = ({ children }) => {
            return { success: true, data: activeOrganization }; // Nothing changed, return current data
        }
 
-       setIsLoading(true); // Use OrgContext loading state
+       dispatch({ type: ORG_ACTIONS.START_MUTATION });
        try {
             const { data, error } = await supabase
                 .from('organizations')
@@ -436,12 +580,18 @@ export const OrganizationProvider = ({ children }) => {
                 return { success: false, error: { message } };
             }
             
-            // If the active org was updated, refresh its details in state
+            // If the active org was updated, update via reducer
             if(activeOrganizationId === organizationId) {
-                setActiveOrganization(prev => prev ? { ...prev, ...data } : null); // Update with all returned data
+                dispatch({
+                    type: ORG_ACTIONS.UPDATE_ORG_DETAILS,
+                    orgId: organizationId,
+                    updates: data,
+                });
             }
-            // Refresh user's org list in AuthContext to reflect potential name change in lists
-            await loadUserProfile(); 
+            // Patch user's org list locally if name changed (about_me not in org list)
+            if (data.name) {
+                patchUserOrganization(organizationId, { name: data.name });
+            }
 
             return { success: true, data };
 
@@ -449,7 +599,7 @@ export const OrganizationProvider = ({ children }) => {
            console.error("OrgContext: Unexpected error updating org details:", error);
            return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
        } finally {
-           setIsLoading(false);
+           dispatch({ type: ORG_ACTIONS.END_MUTATION });
        }
   };
 
@@ -458,7 +608,7 @@ export const OrganizationProvider = ({ children }) => {
     if (!organizationId) return { success: false, error: { message: 'Organisations-ID benötigt.' } };
     if (!newName || newName.trim() === '') return { success: false, error: { message: 'Organisationsname darf nicht leer sein.' } };
 
-    setIsLoading(true); // Use OrgContext loading
+    dispatch({ type: ORG_ACTIONS.START_MUTATION });
     try {
         console.log(`OrgContext: Attempting to update name for org ${organizationId} to "${newName.trim()}" by admin ${user.id}`);
         // RLS policy "Allow admin to manage their organization" handles authorization
@@ -480,12 +630,16 @@ export const OrganizationProvider = ({ children }) => {
         }
 
         console.log(`OrgContext: Successfully updated org name to "${data.name}"`);
-        // Refresh the active org state if this is the active org
+        // Refresh the active org state if this is the active org via reducer
         if (activeOrganizationId === organizationId) {
-            setActiveOrganization(prev => prev ? { ...prev, name: data.name } : null);
+            dispatch({
+                type: ORG_ACTIONS.UPDATE_ORG_DETAILS,
+                orgId: organizationId,
+                updates: { name: data.name },
+            });
         }
-        // Refresh user's org list in AuthContext
-        await loadUserProfile();
+        // Patch user's org list locally instead of full refetch
+        patchUserOrganization(organizationId, { name: data.name });
         
         return { success: true, data };
 
@@ -493,7 +647,7 @@ export const OrganizationProvider = ({ children }) => {
         console.error("OrgContext: Unexpected error updating org name:", error);
         return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
     } finally {
-        setIsLoading(false);
+        dispatch({ type: ORG_ACTIONS.END_MUTATION });
     }
   };
 
@@ -502,7 +656,7 @@ export const OrganizationProvider = ({ children }) => {
     if (!organizationId || !memberUserId) return { success: false, error: { message: 'Organisations- und Mitglieds-ID benötigt.' } };
     if (memberUserId === user.id) return { success: false, error: { message: 'Du kannst dich nicht selbst entfernen.'}}; // Prevent self-removal via this function
 
-    setIsLoading(true); // Use OrgContext loading
+    dispatch({ type: ORG_ACTIONS.START_MUTATION });
     try {
         console.log(`OrgContext: Attempting to remove member ${memberUserId} from org ${organizationId} by admin ${user.id}`);
         // RLS policy "prevent_last_admin_leave_or_remove_others" handles authorization
@@ -528,7 +682,7 @@ export const OrganizationProvider = ({ children }) => {
         console.error("OrgContext: Unexpected error removing member:", error);
         return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
     } finally {
-        setIsLoading(false);
+        dispatch({ type: ORG_ACTIONS.END_MUTATION });
     }
   };
 
@@ -536,7 +690,7 @@ export const OrganizationProvider = ({ children }) => {
     if (!user) return { success: false, error: { message: 'Nicht angemeldet.' } };
     if (!organizationId || !newAdminUserId) return { success: false, error: { message: 'Organisations- und neue Admin-ID benötigt.' } };
 
-    setIsLoading(true); // Use OrgContext loading
+    dispatch({ type: ORG_ACTIONS.START_MUTATION });
     try {
       console.log(`OrgContext: Attempting to transfer admin role in org ${organizationId} to user ${newAdminUserId} by current admin ${user.id}`);
       const { data, error } = await supabase.rpc('set_organization_admin', {
@@ -555,13 +709,17 @@ export const OrganizationProvider = ({ children }) => {
       }
 
       console.log(`OrgContext: Successfully transferred admin role in org ${organizationId} to user ${newAdminUserId}`);
-      // Refresh user profile & orgs because the current user's role might have changed
-      await loadUserProfile(); 
+      // Patch the current user's role locally (they become 'member')
+      patchUserOrganization(organizationId, { role: 'member' });
+      
       // Refresh the active org state if this is the active org to update current user's role
        if (activeOrganizationId === organizationId) {
-           // Re-fetch active org details or just update role locally
-           // Re-fetching is safer to ensure consistency
-           await switchOrganizationContext(organizationId); 
+           // Update role locally via reducer + re-fetch to get new invite code state
+           dispatch({
+               type: ORG_ACTIONS.UPDATE_ORG_DETAILS,
+               orgId: organizationId,
+               updates: { currentUserRole: 'member' }, // Keep invite_code visible for all members
+           });
        }
       // ProfileScreen will also need to refetch members to update roles visually
       return { success: true };
@@ -570,7 +728,7 @@ export const OrganizationProvider = ({ children }) => {
         console.error("OrgContext: Unexpected error transferring admin role:", error);
         return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
     } finally {
-        setIsLoading(false);
+        dispatch({ type: ORG_ACTIONS.END_MUTATION });
     }
   };
 
@@ -605,15 +763,16 @@ export const OrganizationProvider = ({ children }) => {
 
           console.log(`[${timestamp}] OrgContext: Successfully updated org about_me for org ${organizationId}.`);
 
-          // Update local activeOrganization state if this is the active org
+          // Update local activeOrganization state if this is the active org via reducer
           if (activeOrganizationId === organizationId) {
-              setActiveOrganization(prev => prev ? ({ ...prev, about_me: data.about_me }) : null);
+              dispatch({
+                  type: ORG_ACTIONS.UPDATE_ORG_DETAILS,
+                  orgId: organizationId,
+                  updates: { about_me: data.about_me },
+              });
               console.log(`[${timestamp}] OrgContext: Updated activeOrganization state with new about_me.`);
           }
-
-          // Refresh user profile/orgs list (might not be strictly necessary for about_me, but good practice)
-          await loadUserProfile(); 
-          console.log(`[${timestamp}] OrgContext: Refreshed user profile/orgs after about_me update.`);
+          // Note: about_me is not stored in userOrganizations list, no patching needed
 
           return { success: true, data: { aboutMe: data.about_me } };
 
@@ -630,25 +789,33 @@ export const OrganizationProvider = ({ children }) => {
   return (
     <OrganizationContext.Provider
         value={{
+            // Core state (derived from reducer)
             activeOrganizationId,
             activeOrganization, // Provide full details
-            isLoading,
+            isLoading, // True during initial load or switching
+            isOrganizationActive, // True when mode is 'org'
+            isMutating, // True when pendingMutations > 0
+            orgError: orgState.error, // Expose error state
+            
+            // Actions
             switchOrganizationContext,
-            deleteOrganization, // Add the new function
-            isOrganizationActive: !!activeOrganizationId, // Convenience boolean
-            // Add moved functions to the context value
-            fetchOrganizationMembers,
-            updateOrganizationDetails,
-            updateOrganizationName,
+            deleteOrganization,
+            
+            // Member management (centralized, race-safe)
+            organizationMembers, // Current members list
+            loadingMembers, // Members loading state
+            membersError, // Members error state
+            fetchOrganizationMembers, // Manual refetch
             removeOrganizationMember,
             transferOrganizationAdmin,
-            // Add logo update function and loading state
+            
+            // Organization details management
+            updateOrganizationDetails,
+            updateOrganizationName,
             updateOrganizationLogo,
             loadingOrgLogo,
-            // --- ADDED: About Me update function and state ---
             updateOrganizationAboutMe,
             loadingOrgAboutMe,
-            // --- END ADDED ---
         }}
     >
       {children}
