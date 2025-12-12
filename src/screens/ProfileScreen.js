@@ -42,14 +42,18 @@ const ProfileScreen = () => {
     switchOrganizationContext,
     deleteOrganization,
     isLoading: isOrgContextLoading, // Renamed to avoid clash
-    // Get moved functions from OrganizationContext
-    fetchOrganizationMembers, 
-    updateOrganizationDetails, // Assuming this will be used later
-    updateOrganizationName,
+    // Member management (centralized, race-safe)
+    organizationMembers, // From context
+    loadingMembers: isFetchingMembers, // From context (aliased)
+    membersError: orgMgmtError, // From context (aliased)
+    fetchOrganizationMembers,
     removeOrganizationMember,
     transferOrganizationAdmin,
-    updateOrganizationLogo, // <-- ADDED
-    loadingOrgLogo, // <-- ADDED
+    // Org details management
+    updateOrganizationDetails,
+    updateOrganizationName,
+    updateOrganizationLogo,
+    loadingOrgLogo,
   } = useOrganization();
 
   // **** ADDED LOGGING: Inspect the function from context ****
@@ -78,7 +82,8 @@ const ProfileScreen = () => {
     updatePreferences, // Keep: Relates to user profile
     updateEmail, // Keep: Relates to user auth
     updatePassword, // Keep: Relates to user auth
-    loadUserProfile, 
+    loadUserProfile,
+    refreshCurrentUserProfile, // Safe parameterless refresh 
     loading: authLoading,
     // updateOrganizationName, // REMOVE
     createOrganization, // Keep: User creates, part of Auth context
@@ -123,10 +128,7 @@ const ProfileScreen = () => {
   // State for image picker status
   const [uploadingImage, setUploadingImage] = useState(false);
   
-  // State for Organization Management
-  const [organizationMembers, setOrganizationMembers] = useState([]);
-  const [isFetchingMembers, setIsFetchingMembers] = useState(false);
-  const [orgMgmtError, setOrgMgmtError] = useState('');
+  // State for Organization Management (members now from context)
   const [memberManagementLoading, setMemberManagementLoading] = useState(false);
   // State for Org Edit Modal
   const [showOrgEditModal, setShowOrgEditModal] = useState(false);
@@ -167,31 +169,13 @@ const ProfileScreen = () => {
     );
   };
   
-  // Helper function to reload members
-  const reloadMembers = useCallback(async () => {
-    // Ensure user is logged in and org context is active
-    if (user && isOrganizationActive && activeOrganizationId) {
-      setIsFetchingMembers(true);
-      setOrgMgmtError('');
-      console.log(`[ProfileScreen] Calling fetchOrganizationMembers (from OrgContext) for org: ${activeOrganizationId}`);
-      // Use fetchOrganizationMembers directly from useOrganization context
-      const result = await fetchOrganizationMembers(activeOrganizationId);
-      if (result.success) {
-          console.log("[ProfileScreen] Members received:", result.data);
-          setOrganizationMembers(result.data || []);
-      } else {
-          console.error("[ProfileScreen] Error fetching members:", result.error);
-          setOrgMgmtError(result.error?.message || 'Mitglieder konnten nicht geladen werden.');
-          setOrganizationMembers([]);
-      }
-      setIsFetchingMembers(false);
+  // Helper function to reload members (delegates to context)
+  const reloadMembers = useCallback(() => {
+    if (activeOrganizationId) {
+      fetchOrganizationMembers(activeOrganizationId);
     }
-  }, [user, isOrganizationActive, activeOrganizationId, fetchOrganizationMembers]); // Add fetchOrganizationMembers dependency
-
-  // Fetch organization members when context becomes active (use the helper)
-  useEffect(() => {
-    reloadMembers();
-  }, [reloadMembers]); // Depend on the memoized function
+  }, [activeOrganizationId, fetchOrganizationMembers]);
+  // Note: Members are auto-fetched by the context when org becomes active
 
   // Log relevant context state changes (DEBUG)
   // useEffect(() => {
@@ -587,7 +571,7 @@ const ProfileScreen = () => {
           Alert.alert(
             "Organisation nicht gefunden", 
             "Diese Organisation existiert nicht mehr. Die Organisationsliste wird aktualisiert.",
-            [{ text: "OK", onPress: () => loadUserProfile() }]
+            [{ text: "OK", onPress: () => refreshCurrentUserProfile() }]
           );
         } else {
           Alert.alert(
@@ -821,8 +805,8 @@ const ProfileScreen = () => {
       <View style={styles.profileHeader}>
         {/* Display Image or Initials Avatar */}
         <TouchableOpacity
-           onPress={isOrganizationActive ? (isAdmin ? handleSelectOrgLogo : null) : handleSelectProfilePicture} // Allow org logo change for admins
-           disabled={uploadingImage || loadingProfilePicture || loadingOrgLogo || (isOrganizationActive && !isAdmin)} // Disable based on context and role
+           onPress={isOrganizationActive ? handleSelectOrgLogo : handleSelectProfilePicture} // Allow any org member to change logo
+           disabled={uploadingImage || loadingProfilePicture || loadingOrgLogo} // Disable only during loading
            style={styles.avatarContainer} // Added container for better layout
         >
           {/* Personal Avatar Logic */}
@@ -852,8 +836,8 @@ const ProfileScreen = () => {
                  <Ionicons name="camera-outline" size={18} color="#fff" />
               </View>
           )}
-          {/* Organization Context Edit Icon (for Admins) */}
-          {isOrganizationActive && isAdmin && !loadingOrgLogo && (
+          {/* Organization Context Edit Icon (for all members) */}
+          {isOrganizationActive && !loadingOrgLogo && (
              <View style={styles.avatarEditIcon}>
                 <Ionicons name="camera-outline" size={18} color="#fff" />
              </View>
@@ -909,14 +893,13 @@ const ProfileScreen = () => {
           )}
           {isOrganizationActive && (
             <>
-              {isAdmin === true && (
-                  <TouchableOpacity
-                      style={styles.headerIconButton} // Use consistent styling
-                      onPress={handleOpenOrgEdit}
-                  >
-                      <Ionicons name="pencil" size={20} color="#34A853" />
-                  </TouchableOpacity>
-              )}
+              {/* Edit button available for all org members */}
+              <TouchableOpacity
+                  style={styles.headerIconButton} // Use consistent styling
+                  onPress={handleOpenOrgEdit}
+              >
+                  <Ionicons name="pencil" size={20} color="#34A853" />
+              </TouchableOpacity>
               <TouchableOpacity
                   style={styles.headerIconButton} // Use consistent styling
                   onPress={handleReloadOrgContext}
@@ -1725,17 +1708,13 @@ const ProfileScreen = () => {
     }
   };
 
-  // --- NEW: Handler to select and upload organization logo ---
+  // --- Handler to select and upload organization logo (available to all members) ---
   const handleSelectOrgLogo = async () => {
     if (!user || !isOrganizationActive || !activeOrganizationId) {
       Alert.alert('Fehler', 'Keine aktive Organisation oder Benutzer.');
       return;
     }
-    // Redundant check, already handled by disabling button, but good practice
-    if (activeOrganization?.currentUserRole !== 'admin') {
-       Alert.alert('Berechtigung fehlt', 'Nur Administratoren können das Logo ändern.');
-       return;
-    }
+    // All org members can now change the logo (RLS handles authorization)
     if (loadingOrgLogo) return; // Prevent multiple uploads
 
     // Request permission

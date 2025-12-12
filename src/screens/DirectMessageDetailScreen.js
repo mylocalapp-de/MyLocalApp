@@ -573,17 +573,20 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
     <SafeAreaView style={styles.container}>
       {renderHeader()}
 
+
+      {/* Use inverted FlatList with reversed data so newest sits at bottom and you can scroll up */}
       <FlatList
         ref={flatListRef}
-        data={messages}
+        data={[...messages].reverse()}
         renderItem={renderItem}
         keyExtractor={item => item.id.toString()}
         style={styles.messagesList}
         contentContainerStyle={styles.messagesContent}
+        inverted
         onRefresh={isOfflineMode ? undefined : fetchMessages}
         refreshing={!isOfflineMode && loading}
-        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })} // Scroll on initial load
-        onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })} // Scroll when layout changes
+        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
+        onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>

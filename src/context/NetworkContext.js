@@ -1,4 +1,4 @@
-import React, { createContext, useState, useEffect, useContext, useCallback } from 'react';
+import React, { createContext, useState, useEffect, useContext, useCallback, useRef } from 'react';
 import NetInfo from '@react-native-community/netinfo';
 import { Alert } from 'react-native';
 import {
@@ -21,10 +21,15 @@ export const NetworkProvider = ({ children }) => {
     const [isSavingData, setIsSavingData] = useState(false); // Loading state for save button
     const [initialCheckDone, setInitialCheckDone] = useState(false); // Track initial network check
 
-    // Effect to subscribe to network changes and load initial state
+    // Keep refs for latest values inside event handlers
+    const isOfflineModeRef = useRef(isOfflineMode);
+    useEffect(() => { isOfflineModeRef.current = isOfflineMode; }, [isOfflineMode]);
+    const initialCheckDoneRef = useRef(initialCheckDone);
+    useEffect(() => { initialCheckDoneRef.current = initialCheckDone; }, [initialCheckDone]);
+
+    // Subscribe to network changes once on mount
     useEffect(() => {
         const unsubscribe = NetInfo.addEventListener(state => {
-            // Explicitly check for false. Null or true means potentially reachable.
             const isDefinitelyOffline = state.isConnected === false || state.isInternetReachable === false;
             const currentlyConnected = !isDefinitelyOffline;
 
@@ -33,61 +38,68 @@ export const NetworkProvider = ({ children }) => {
 
             setIsConnected(currentlyConnected);
 
-            if (!initialCheckDone) {
-                // INITIAL CHECK: Prompt only if isConnected is explicitly false.
-                // This remains unchanged and avoids prompts from initial 'null' isInternetReachable.
-                if (state.isConnected === false && !isOfflineMode) {
+            if (!initialCheckDoneRef.current) {
+                if (state.isConnected === false && !isOfflineModeRef.current) {
                     console.log('[NetworkContext] Initial check: No connection detected (isConnected=false). Prompting offline mode.');
                     promptOfflineMode();
                 } else {
                     console.log('[NetworkContext] Initial check: Connection detected or already in offline mode.');
                 }
-                setInitialCheckDone(true); // Mark initial check as done regardless of prompt
-            } else {
-                // SUBSEQUENT CHECKS: Prompt if we are definitely offline (isConnected is false or isInternetReachable is false)
-                // and not currently in offline mode.
-                if (isDefinitelyOffline && !isOfflineMode) {
-                     console.log('[NetworkContext] Subsequent check: Connection lost (isDefinitelyOffline=true) and not in offline mode. Prompting offline mode.');
-                     promptOfflineMode();
-                }
-                // Note: The logic for handling connection restoration while offline remains unchanged.
-                // if (currentlyConnected === true && isOfflineMode) { ... }
+                initialCheckDoneRef.current = true;
+                setInitialCheckDone(true);
+                return; // avoid running subsequent logic on first pass
+            }
+
+            if (isDefinitelyOffline && !isOfflineModeRef.current) {
+                console.log('[NetworkContext] Subsequent check: Connection lost and not in offline mode. Prompting offline mode.');
+                promptOfflineMode();
             }
         });
 
-        // Load initial offline mode status and timestamp from storage
-        const loadInitialState = async () => {
-            const storedIsOffline = await loadOfflineModeStatus();
-            const storedTimestamp = await loadLastOfflineSaveTimestamp();
-            setIsOfflineMode(storedIsOffline);
-            setLastOfflineSaveTimestamp(storedTimestamp);
-            console.log(`[NetworkContext] Initial Load: isOfflineMode=${storedIsOffline}, lastSave=${storedTimestamp}`);
-        };
-
-        loadInitialState();
-
         return () => {
-            unsubscribe(); // Cleanup listener
+            unsubscribe();
         };
-    }, [initialCheckDone, isOfflineMode]); // Add isOfflineMode dependency
+    }, []);
+
+    // Load initial state once on mount (non-sticky offline mode)
+    useEffect(() => {
+        const loadInitialState = async () => {
+            const storedTimestamp = await loadLastOfflineSaveTimestamp();
+            setIsOfflineMode(false);
+            await saveOfflineModeStatus(false);
+            setLastOfflineSaveTimestamp(storedTimestamp);
+            console.log(`[NetworkContext] Initial Load: isOfflineMode reset to false, lastSave=${storedTimestamp}`);
+        };
+        loadInitialState();
+    }, []);
+
+    // Track whether the offline prompt is currently shown to avoid duplicates
+    const isPromptOpenRef = useRef(false);
 
     // Function to prompt the user about offline mode
     const promptOfflineMode = () => {
-        // Prevent prompt if already in offline mode
-        if (isOfflineMode) return;
+        // Prevent prompt if already in offline mode or a prompt is currently open
+        if (isOfflineModeRef.current || isPromptOpenRef.current) return;
 
+        isPromptOpenRef.current = true;
         Alert.alert(
             "Keine Internetverbindung",
             "Keine Internetverbindung gefunden. Willst du in den Offline-Modus wechseln?",
             [
                 {
                     text: "Offline Modus",
-                    onPress: () => toggleOfflineMode(true), // Switch to offline mode
+                    onPress: () => {
+                        isPromptOpenRef.current = false;
+                        toggleOfflineMode(true);
+                    },
                 },
                 {
                     text: "Abbrechen",
                     style: "cancel",
-                    onPress: () => console.log("Offline mode cancelled by user."),
+                    onPress: () => {
+                        isPromptOpenRef.current = false;
+                        console.log("Offline mode cancelled by user.");
+                    },
                 },
             ],
             { cancelable: false }

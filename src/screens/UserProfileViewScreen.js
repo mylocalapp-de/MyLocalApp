@@ -12,7 +12,6 @@ import {
     Platform,
     Dimensions
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -30,12 +29,18 @@ const UserProfileViewScreen = ({ route, navigation }) => {
 
     const [viewedProfile, setViewedProfile] = useState(null);
     const [userArticles, setUserArticles] = useState([]);
+    const [userEvents, setUserEvents] = useState([]);
     const [loadingProfile, setLoadingProfile] = useState(true);
     const [loadingArticles, setLoadingArticles] = useState(false);
+    const [loadingEvents, setLoadingEvents] = useState(false);
     const [error, setError] = useState(null);
     const [isOwnProfile, setIsOwnProfile] = useState(false);
     const [isBlocked, setIsBlocked] = useState(false);
     const [blockLoading, setBlockLoading] = useState(false);
+    
+    // Tag filtering state
+    const [selectedTags, setSelectedTags] = useState([]);
+    const [availableTags, setAvailableTags] = useState([]);
 
     useEffect(() => {
         if (!userId) {
@@ -81,7 +86,8 @@ const UserProfileViewScreen = ({ route, navigation }) => {
             if (!profileData) throw new Error('Profil nicht gefunden.');
 
             setViewedProfile(profileData);
-            fetchUserArticles(profileData.id); // Fetch articles after profile is loaded
+            fetchUserArticles(profileData.id);
+            fetchUserEvents(profileData.id);
 
         } catch (err) {
             console.error("Error fetching user profile:", err);
@@ -94,23 +100,94 @@ const UserProfileViewScreen = ({ route, navigation }) => {
         setLoadingArticles(true);
         try {
             const { data: articlesData, error: articlesError } = await supabase
-                .from('article_listings') // Use the view for efficiency
+                .from('article_listings')
                 .select('*')
                 .eq('author_id', profileUserId)
-                .eq('is_organization_post', false) // Only personal articles
+                .eq('is_organization_post', false)
                 .order('published_at', { ascending: false });
 
             if (articlesError) throw articlesError;
-            setUserArticles(articlesData || []);
+            const articles = articlesData || [];
+            setUserArticles(articles);
+            updateAvailableTags(articles, userEvents);
 
         } catch (err) {
             console.error("Error fetching user articles:", err);
-            // Don't set main error, maybe just log or show a message in the articles section
         } finally {
             setLoadingArticles(false);
-            setLoadingProfile(false); // Profile loading includes article loading now
+            setLoadingProfile(false);
         }
     };
+
+    const fetchUserEvents = async (profileUserId) => {
+        setLoadingEvents(true);
+        try {
+            const { data: eventsData, error: eventsError } = await supabase
+                .from('events')
+                .select('*')
+                .eq('organizer_id', profileUserId)
+                .is('organization_id', null) // Only personal events
+                .eq('is_published', true)
+                .order('date', { ascending: false });
+
+            if (eventsError) throw eventsError;
+
+            const formattedEvents = (eventsData || []).map(event => ({
+                ...event,
+                formattedDate: event.date ? new Date(event.date).toLocaleDateString('de-DE') : 'Datum unbekannt'
+            }));
+
+            setUserEvents(formattedEvents);
+            updateAvailableTags(userArticles, formattedEvents);
+
+        } catch (err) {
+            console.error("Error fetching user events:", err);
+        } finally {
+            setLoadingEvents(false);
+        }
+    };
+
+    // Function to collect unique tags from articles and events
+    const updateAvailableTags = (articlesList, eventsList) => {
+        const allTags = new Set();
+        
+        articlesList.forEach(article => {
+            if (article.tags && Array.isArray(article.tags)) {
+                article.tags.forEach(tag => allTags.add(tag));
+            }
+        });
+        
+        eventsList.forEach(event => {
+            if (event.tags && Array.isArray(event.tags)) {
+                event.tags.forEach(tag => allTags.add(tag));
+            }
+        });
+        
+        setAvailableTags(Array.from(allTags).sort());
+    };
+
+    // Toggle tag selection for filtering
+    const toggleTagFilter = (tag) => {
+        setSelectedTags(prev => 
+            prev.includes(tag) 
+                ? prev.filter(t => t !== tag) 
+                : [...prev, tag]
+        );
+    };
+
+    // Filter articles by selected tags
+    const filteredArticles = selectedTags.length === 0 
+        ? userArticles 
+        : userArticles.filter(article => 
+            article.tags && article.tags.some(tag => selectedTags.includes(tag))
+        );
+
+    // Filter events by selected tags
+    const filteredEvents = selectedTags.length === 0 
+        ? userEvents 
+        : userEvents.filter(event => 
+            event.tags && event.tags.some(tag => selectedTags.includes(tag))
+        );
 
     const handleSendMessage = async () => {
         if (!viewedProfile || !user || isBlocked) return; // Need both users, don't allow messaging blocked user
@@ -190,24 +267,103 @@ const UserProfileViewScreen = ({ route, navigation }) => {
     // --- End Block/Unblock Logic ---
 
     const renderArticle = ({ item }) => (
-         <ArticleCard 
+        <ArticleCard 
             article={item} 
-            onPress={() => navigation.navigate('ArticleDetail', { articleId: item.id })} 
+            onPress={() => {
+                if (item.linked_event_id) {
+                    navigation.navigate('EventDetail', { eventId: item.linked_event_id });
+                } else {
+                    navigation.navigate('ArticleDetail', { articleId: item.id });
+                }
+            }} 
         />
     );
 
+    const renderEvent = ({ item }) => (
+        <TouchableOpacity 
+            style={styles.eventCard}
+            onPress={() => navigation.navigate('EventDetail', { eventId: item.id })}
+        >
+            {item.image_url && (
+                <Image source={{ uri: item.image_url }} style={styles.eventImage} />
+            )}
+            <View style={styles.eventInfo}>
+                <Text style={styles.eventTitle} numberOfLines={2}>{item.title}</Text>
+                <View style={styles.eventMeta}>
+                    <Ionicons name="calendar-outline" size={14} color="#666" />
+                    <Text style={styles.eventDate}>{item.formattedDate}</Text>
+                </View>
+                {item.location && (
+                    <View style={styles.eventMeta}>
+                        <Ionicons name="location-outline" size={14} color="#666" />
+                        <Text style={styles.eventLocation} numberOfLines={1}>{item.location}</Text>
+                    </View>
+                )}
+                {item.tags && item.tags.length > 0 && (
+                    <View style={styles.eventTags}>
+                        {item.tags.slice(0, 3).map((tag, index) => (
+                            <View key={index} style={styles.eventTagChip}>
+                                <Text style={styles.eventTagText}>{tag}</Text>
+                            </View>
+                        ))}
+                    </View>
+                )}
+            </View>
+        </TouchableOpacity>
+    );
+
+    // Render tag filter buttons
+    const renderTagFilters = () => {
+        if (availableTags.length === 0) return null;
+        
+        return (
+            <View style={styles.tagFilterSection}>
+                <Text style={styles.tagFilterLabel}>Nach Schlagwörtern filtern:</Text>
+                <ScrollView 
+                    horizontal 
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.tagFilterContainer}
+                >
+                    {availableTags.map((tag, index) => {
+                        const isSelected = selectedTags.includes(tag);
+                        return (
+                            <TouchableOpacity
+                                key={index}
+                                style={[styles.tagFilterButton, isSelected && styles.tagFilterButtonSelected]}
+                                onPress={() => toggleTagFilter(tag)}
+                            >
+                                <Text style={[styles.tagFilterText, isSelected && styles.tagFilterTextSelected]}>
+                                    {tag}
+                                </Text>
+                            </TouchableOpacity>
+                        );
+                    })}
+                </ScrollView>
+                {selectedTags.length > 0 && (
+                    <TouchableOpacity 
+                        style={styles.clearFiltersButton}
+                        onPress={() => setSelectedTags([])}
+                    >
+                        <Text style={styles.clearFiltersText}>Filter zurücksetzen</Text>
+                    </TouchableOpacity>
+                )}
+            </View>
+        );
+    };
+
     if (loadingProfile) {
         return (
-             <SafeAreaView style={[styles.container, styles.centered]}>
+             <View style={[styles.container, styles.centered]}>
+                <ScreenHeader showBackButton={true} navigation={navigation} title="Profil" />
                 <ActivityIndicator size="large" color="#4285F4" />
                 <Text style={styles.loadingText}>Profil wird geladen...</Text>
-            </SafeAreaView>
+            </View>
         );
     }
 
     if (error) {
         return (
-            <SafeAreaView style={styles.container}>
+            <View style={styles.container}>
                  <ScreenHeader showBackButton={true} navigation={navigation} title="Fehler" />
                  <View style={styles.centered}>
                     <Ionicons name="alert-circle-outline" size={40} color="#ff3b30" />
@@ -219,18 +375,18 @@ const UserProfileViewScreen = ({ route, navigation }) => {
                         <Text style={styles.backButtonText}>Zurück</Text>
                     </TouchableOpacity>
                  </View>
-            </SafeAreaView>
+            </View>
         );
     }
 
     if (!viewedProfile) {
          return (
-            <SafeAreaView style={styles.container}>
+            <View style={styles.container}>
                  <ScreenHeader showBackButton={true} navigation={navigation} title="Fehler" />
                  <View style={styles.centered}>
                     <Text style={styles.errorText}>Profil konnte nicht gefunden werden.</Text>
                  </View>
-            </SafeAreaView>
+            </View>
         );
     }
 
@@ -249,7 +405,7 @@ const UserProfileViewScreen = ({ route, navigation }) => {
     };
 
     return (
-        <SafeAreaView style={styles.container}>
+        <View style={styles.container}>
             <ScreenHeader 
                 showBackButton={true} 
                 navigation={navigation} 
@@ -289,24 +445,50 @@ const UserProfileViewScreen = ({ route, navigation }) => {
                     </Text>
                 </View>
 
+                {/* Tag Filter Section */}
+                {renderTagFilters()}
+
+                {/* Articles Section */}
                 <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Artikel von {viewedProfile.display_name || 'diesem Benutzer'}</Text>
                     {loadingArticles ? (
                         <ActivityIndicator color="#4285F4" style={{ marginTop: 20 }} />
-                    ) : userArticles.length > 0 ? (
+                    ) : filteredArticles.length > 0 ? (
                         <FlatList
-                            data={userArticles}
+                            data={filteredArticles}
                             renderItem={renderArticle}
                             keyExtractor={item => item.id.toString()}
-                            scrollEnabled={false} // Disable scrolling within FlatList inside ScrollView
+                            scrollEnabled={false}
                             ItemSeparatorComponent={() => <View style={styles.separator} />}
                         />
                     ) : (
-                        <Text style={styles.noArticlesText}>Dieser Benutzer hat noch keine Artikel veröffentlicht.</Text>
+                        <Text style={styles.noArticlesText}>
+                            {selectedTags.length > 0 ? 'Keine Artikel mit diesen Schlagwörtern.' : 'Dieser Benutzer hat noch keine Artikel veröffentlicht.'}
+                        </Text>
+                    )}
+                </View>
+
+                {/* Events Section */}
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Veranstaltungen von {viewedProfile.display_name || 'diesem Benutzer'}</Text>
+                    {loadingEvents ? (
+                        <ActivityIndicator color="#4285F4" style={{ marginTop: 20 }} />
+                    ) : filteredEvents.length > 0 ? (
+                        <FlatList
+                            data={filteredEvents}
+                            renderItem={renderEvent}
+                            keyExtractor={item => item.id.toString()}
+                            scrollEnabled={false}
+                            ItemSeparatorComponent={() => <View style={styles.separator} />}
+                        />
+                    ) : (
+                        <Text style={styles.noArticlesText}>
+                            {selectedTags.length > 0 ? 'Keine Veranstaltungen mit diesen Schlagwörtern.' : 'Dieser Benutzer hat noch keine Veranstaltungen erstellt.'}
+                        </Text>
                     )}
                 </View>
             </ScrollView>
-        </SafeAreaView>
+        </View>
     );
 };
 
@@ -444,8 +626,115 @@ const styles = StyleSheet.create({
     },
     blockedMessageText: {
         marginLeft: 8,
-        color: '#ff3b30', // Red text
+        color: '#ff3b30',
         fontSize: 13,
+    },
+    // Tag Filter Styles
+    tagFilterSection: {
+        backgroundColor: '#fff',
+        borderRadius: 8,
+        padding: 15,
+        marginHorizontal: 10,
+        marginBottom: 15,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 2,
+        elevation: 1,
+    },
+    tagFilterLabel: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#333',
+        marginBottom: 10,
+    },
+    tagFilterContainer: {
+        flexDirection: 'row',
+        paddingRight: 10,
+    },
+    tagFilterButton: {
+        backgroundColor: '#f1f1f1',
+        paddingVertical: 6,
+        paddingHorizontal: 12,
+        borderRadius: 16,
+        marginRight: 8,
+        borderWidth: 1,
+        borderColor: '#ddd',
+    },
+    tagFilterButtonSelected: {
+        backgroundColor: '#4285F4',
+        borderColor: '#4285F4',
+    },
+    tagFilterText: {
+        fontSize: 13,
+        color: '#333',
+    },
+    tagFilterTextSelected: {
+        color: '#fff',
+        fontWeight: 'bold',
+    },
+    clearFiltersButton: {
+        marginTop: 10,
+        alignSelf: 'flex-start',
+    },
+    clearFiltersText: {
+        fontSize: 13,
+        color: '#ff3b30',
+    },
+    // Event Card Styles
+    eventCard: {
+        backgroundColor: '#f9f9f9',
+        borderRadius: 8,
+        marginBottom: 10,
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: '#eee',
+    },
+    eventImage: {
+        width: '100%',
+        height: 120,
+    },
+    eventInfo: {
+        padding: 12,
+    },
+    eventTitle: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#333',
+        marginBottom: 6,
+    },
+    eventMeta: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 4,
+    },
+    eventDate: {
+        fontSize: 13,
+        color: '#666',
+        marginLeft: 6,
+    },
+    eventLocation: {
+        fontSize: 13,
+        color: '#666',
+        marginLeft: 6,
+        flex: 1,
+    },
+    eventTags: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        marginTop: 6,
+    },
+    eventTagChip: {
+        backgroundColor: '#e7f0fe',
+        paddingVertical: 3,
+        paddingHorizontal: 8,
+        borderRadius: 10,
+        marginRight: 6,
+        marginTop: 4,
+    },
+    eventTagText: {
+        fontSize: 11,
+        color: '#4285F4',
     },
 });
 

@@ -214,6 +214,13 @@ export const AuthProvider = ({ children, expoPushToken }) => {
     console.log(`AuthContext: [${callTimestamp}] START loadUserProfileAndOrgs for user ID:`, userId);
 
     if (!userId) {
+      // DEV warning: calling without userId when user exists is likely a bug
+      if (__DEV__ && user?.id) {
+        console.warn(
+          'AuthContext: loadUserProfileAndOrgs called without userId but user exists. ' +
+          'Use refreshCurrentUserProfile() instead to avoid clearing state.'
+        );
+      }
       console.log(`AuthContext: [${callTimestamp}] loadUserProfileAndOrgs - No userId provided. Clearing profile/orgs.`);
       setProfile(null);
       setUserOrganizations([]);
@@ -281,11 +288,11 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         // await AsyncStorage.removeItem('userPreferences');
       }
 
-      // Handle organizations result (keep as is)
-      // ... existing org handling code ...
+      // Handle organizations result - keep last-good data on error
       if (orgsResult.error) {
         console.error(`AuthContext: [${callTimestamp}] Error loading user organizations for ID ${userId}:`, JSON.stringify(orgsResult.error, null, 2));
-        setUserOrganizations([]); // Clear on error
+        // Keep existing userOrganizations instead of clearing - more resilient to transient errors
+        console.warn(`AuthContext: [${callTimestamp}] Keeping existing userOrganizations due to error.`);
       } else {
         const orgData = orgsResult.data || [];
         const formattedOrgs = orgData.map(org => ({
@@ -300,14 +307,70 @@ export const AuthProvider = ({ children, expoPushToken }) => {
 
     } catch (error) {
       console.error(`AuthContext: [${callTimestamp}] Unexpected error in loadUserProfileAndOrgs for ID ${userId}:`, error);
-      setProfile(null);
-      setUserOrganizations([]); // Clear on error
-      setHasCompletedOnboarding(false); // Ensure onboarding is false on error
-      await AsyncStorage.removeItem('hasCompletedOnboarding');
+      // Keep existing data on unexpected errors - more resilient to network issues
+      // Only log and warn, don't clear state (last-good data is better than empty)
+      console.warn(`AuthContext: [${callTimestamp}] Keeping existing profile/orgs data due to unexpected error.`);
     } finally {
       setLoadingProfile(false);
       console.log(`AuthContext: [${callTimestamp}] END loadUserProfileAndOrgs for ID ${userId}. loadingProfile set to false.`);
     }
+  };
+
+  // Safe parameterless refresh - always uses current user's ID
+  const refreshCurrentUserProfile = async () => {
+    const currentUserId = user?.id;
+    if (!currentUserId) {
+      console.warn('AuthContext: refreshCurrentUserProfile called but no user is logged in. Skipping refresh.');
+      return;
+    }
+    console.log(`AuthContext: refreshCurrentUserProfile - Refreshing for current user: ${currentUserId}`);
+    await loadUserProfileAndOrgs(currentUserId);
+  };
+
+  // --- Local Organization Patching (avoids full refetch) ---
+  
+  // Patch a single organization's details in the local list
+  const patchUserOrganization = (orgId, updates) => {
+    if (!orgId || !updates) return;
+    setUserOrganizations(prev => {
+      const index = prev.findIndex(org => org.id === orgId);
+      if (index === -1) {
+        console.warn(`AuthContext: patchUserOrganization - org ${orgId} not found in list`);
+        return prev; // No change
+      }
+      const updated = [...prev];
+      updated[index] = { ...updated[index], ...updates };
+      console.log(`AuthContext: Patched org ${orgId} locally:`, updates);
+      return updated;
+    });
+  };
+
+  // Remove an organization from the local list
+  const removeUserOrganization = (orgId) => {
+    if (!orgId) return;
+    setUserOrganizations(prev => {
+      const filtered = prev.filter(org => org.id !== orgId);
+      if (filtered.length === prev.length) {
+        console.warn(`AuthContext: removeUserOrganization - org ${orgId} not found in list`);
+        return prev;
+      }
+      console.log(`AuthContext: Removed org ${orgId} from local list`);
+      return filtered;
+    });
+  };
+
+  // Add a new organization to the local list
+  const addUserOrganization = (newOrg) => {
+    if (!newOrg?.id) return;
+    setUserOrganizations(prev => {
+      // Check if already exists
+      if (prev.some(org => org.id === newOrg.id)) {
+        console.warn(`AuthContext: addUserOrganization - org ${newOrg.id} already exists in list`);
+        return prev;
+      }
+      console.log(`AuthContext: Added org ${newOrg.id} to local list:`, newOrg);
+      return [...prev, newOrg];
+    });
   };
 
   // --- NEW: Temporary Account Creation ---
@@ -1115,7 +1178,12 @@ export const AuthProvider = ({ children, expoPushToken }) => {
     updatePassword, // ADD THIS LINE
     updateProfilePicture, // ADDED
     loadingProfilePicture, // ADDED
-    loadUserProfile: loadUserProfileAndOrgs, // Keep combined loading function
+    loadUserProfile: loadUserProfileAndOrgs, // Keep combined loading function (requires userId)
+    refreshCurrentUserProfile, // Safe parameterless refresh using current user
+    // Local org list patching (avoids full refetch)
+    patchUserOrganization,
+    removeUserOrganization,
+    addUserOrganization,
     // Organization Functions (These DO belong in AuthContext)
     createOrganization, 
     joinOrganizationByInviteCode,

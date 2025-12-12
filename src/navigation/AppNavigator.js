@@ -9,6 +9,7 @@ import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { useAuth } from '../context/AuthContext';
 import { useAppConfig } from '../context/AppConfigContext';
+import { navigationRef } from './navigationRef';
 
 // Import screens
 import HomeScreen from '../screens/HomeScreen';
@@ -35,6 +36,8 @@ import OnboardingScreen from '../screens/OnboardingScreen';
 import VerificationScreen from '../screens/VerificationScreen';
 import UserProfileViewScreen from '../screens/UserProfileViewScreen';
 import OrganizationProfileViewScreen from '../screens/OrganizationProfileViewScreen';
+import CreateEventArticleScreen from '../screens/CreateEventArticleScreen';
+import EditEventArticleScreen from '../screens/EditEventArticleScreen';
 
 const Tab = createBottomTabNavigator();
 const ChatStack = createStackNavigator();
@@ -249,7 +252,7 @@ const AppNavigator = () => {
   const shouldShowVerification = !!user && !!profile && (profile.is_verified === false) && !disableVerify;
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <RootStack.Navigator screenOptions={{ headerShown: false }}>
         {hasCompletedOnboarding ? (
           shouldShowVerification ? (
@@ -278,6 +281,8 @@ const AppNavigator = () => {
         <RootStack.Screen name="EventDetail" component={EventDetailScreen} options={{ headerShown: false }} />
         <RootStack.Screen name="CreateEvent" component={CreateEventScreen} options={{ headerShown: false, presentation: 'modal' }} />
         <RootStack.Screen name="EditEvent" component={EditEventScreen} options={{ headerShown: false, presentation: 'modal' }} />
+        <RootStack.Screen name="CreateEventArticle" component={CreateEventArticleScreen} options={{ headerShown: false, presentation: 'modal' }} />
+        <RootStack.Screen name="EditEventArticle" component={EditEventArticleScreen} options={{ headerShown: false, presentation: 'modal' }} />
         <RootStack.Screen name="CreatePoi" component={CreatePoiScreen} options={{ headerShown: false, presentation: 'modal' }} />
         <RootStack.Screen 
             name="ArticleDetail" 

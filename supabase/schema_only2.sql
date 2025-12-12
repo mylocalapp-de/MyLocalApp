@@ -3539,7 +3539,8 @@ CREATE TABLE public.organizations (
     invite_code text DEFAULT public.generate_unique_invite_code(),
     created_at timestamp with time zone DEFAULT now(),
     updated_at timestamp with time zone DEFAULT now(),
-    about_me text
+    about_me text,
+    is_verein boolean DEFAULT false NOT NULL
 );
 
 
@@ -3557,6 +3558,12 @@ COMMENT ON TABLE public.organizations IS 'Stores information about organizations
 --
 
 COMMENT ON COLUMN public.organizations.invite_code IS 'Unique, shareable code for users to join the organization.';
+
+--
+-- Name: COLUMN organizations.is_verein; Type: COMMENT; Schema: public; Owner: supabase_admin
+--
+
+COMMENT ON COLUMN public.organizations.is_verein IS 'Marks organization as a registered club (Verein).';
 
 
 --
