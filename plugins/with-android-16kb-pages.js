@@ -1,11 +1,14 @@
 const { withAppBuildGradle } = require('@expo/config-plugins');
 
 /**
- * Config plugin to enable 16KB page size support for Android 15+
- * Required by Google Play as of 2024
+ * Config plugin to enable 16KB page size compatibility for Android 15+
+ * Required by Google Play as of November 2025
  * 
- * Sets useLegacyPackaging = false which ensures native libs are stored
- * uncompressed and page-aligned in the APK/AAB.
+ * Since React Native and third-party libraries may not be 16KB-aligned,
+ * we use useLegacyPackaging = true to compress native libs.
+ * This extracts libs at install time, bypassing alignment requirements.
+ * 
+ * Reference: https://developer.android.com/guide/practices/page-sizes
  */
 function with16KBPages(config) {
   return withAppBuildGradle(config, (config) => {
@@ -18,7 +21,7 @@ function with16KBPages(config) {
     const packagingConfig = `$1
     packaging {
         jniLibs {
-            useLegacyPackaging = false
+            useLegacyPackaging = true
         }
     }`;
 
