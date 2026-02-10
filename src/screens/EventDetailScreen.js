@@ -76,18 +76,18 @@ const germanRuleTranslator = (key, index) => {
     // 2. Fallback for generic keys with index
     else if (key === 'weekday' && index !== undefined && index >= 0 && index < weekdays.length) {
         translationResult = weekdays[index];
-        console.log(`[germanRuleTranslator] Used generic weekday index ${index}: "${translationResult}"`);
+        // console.log(`[germanRuleTranslator] Used generic weekday index ${index}: "${translationResult}"`);
     }
     else if (key === 'month' && index !== undefined && index >= 0 && index < months.length) {
         translationResult = months[index];
-        console.log(`[germanRuleTranslator] Used generic month index ${index}: "${translationResult}"`);
+        // console.log(`[germanRuleTranslator] Used generic month index ${index}: "${translationResult}"`);
     }
     // 3. Handle ordinals
     else {
        const ordinalMatch = key.match(/^(\d+)(st|nd|rd|th)$/);
        if (ordinalMatch) {
            translationResult = `${ordinalMatch[1]}.`;
-           console.log(`[germanRuleTranslator] Handled ordinal "${key}" as: "${translationResult}"`);
+           // console.log(`[germanRuleTranslator] Handled ordinal "${key}" as: "${translationResult}"`);
        } else {
            // 4. No translation found
            console.warn(`[germanRuleTranslator] No translation found for key: "${key}"`);
@@ -95,7 +95,7 @@ const germanRuleTranslator = (key, index) => {
        }
     }
 
-    console.log(`[germanRuleTranslator] Returning for "${key}": "${translationResult}"`);
+    // console.log(`[germanRuleTranslator] Returning for "${key}": "${translationResult}"`);
     return translationResult;
 };
 
@@ -153,7 +153,7 @@ const EventDetailScreen = ({ route, navigation }) => {
 
   // Load event data from storage
   const loadEventFromStorage = async () => {
-    console.log(`[EventDetailScreen] Loading event ${eventId} from offline storage...`);
+    // console.log(`[EventDetailScreen] Loading event ${eventId} from offline storage...`);
     setLoading(true);
     setError(null);
     setEvent(null);
@@ -176,14 +176,14 @@ const EventDetailScreen = ({ route, navigation }) => {
           setOrganizerName(eventFromList.organizer_name || 'Organisator'); // Use name from listing
           setCanEditDelete(false); // Cannot edit/delete offline
           setIsFullEventAvailable(true); // Assume listing data is sufficient for now
-          console.log(`[EventDetailScreen] Found event ${eventId} in offline list.`);
+          // console.log(`[EventDetailScreen] Found event ${eventId} in offline list.`);
         } else {
           setError('Event offline nicht gefunden.');
-          console.log(`[EventDetailScreen] Event ${eventId} not found in offline list.`);
+          // console.log(`[EventDetailScreen] Event ${eventId} not found in offline list.`);
         }
       } else {
         setError('Offline-Eventdaten nicht verfügbar.');
-        console.log('[EventDetailScreen] Offline events list not found.');
+        // console.log('[EventDetailScreen] Offline events list not found.');
       }
     } catch (err) {
       console.error('[EventDetailScreen] Error loading event from storage:', err);

@@ -74,12 +74,12 @@ const OnboardingScreen = ({ navigation }) => {
     setIsLoading(true);
 
     try {
-      console.log(`Onboarding Final Step: Attempting temporary account creation. Name: ${displayName}, Email: ${email || '(leer/optional)'}`);
+      // console.log(`Onboarding Final Step: Attempting temporary account creation. Name: ${displayName}, Email: ${email || '(leer/optional)'}`);
       // E-Mail optional: wenn leer, null übergeben, damit Platzhalter in AuthContext genutzt wird
       const result = await createTemporaryAccount(displayName.trim(), email.trim() || null); 
 
       if (result.success) {
-        console.log('Onboarding: Temporary account created successfully via AuthContext.');
+        // console.log('Onboarding: Temporary account created successfully via AuthContext.');
         // Persist the show_in_list choice on the profile after account exists
         try {
           await updateProfile({ show_in_list: !!showInList });

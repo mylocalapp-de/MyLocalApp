@@ -92,9 +92,9 @@ const CalendarScreen = ({ navigation }) => {
       if (isOfflineMode) return; // Don't refresh from network if offline
       // Add a small delay
       const focusTimeout = setTimeout(() => {
-        console.log('CalendarScreen focused - Preparing to refresh events...');
+        // console.log('CalendarScreen focused - Preparing to refresh events...');
         try {
-          console.log('CalendarScreen Focus Listener: Current user state before fetch:', user ? `ID: ${user.id}` : 'null');
+          // console.log('CalendarScreen Focus Listener: Current user state before fetch:', user ? `ID: ${user.id}` : 'null');
           fetchEventData();
         } catch (error) {
           console.error("CalendarScreen Focus Listener: Error executing fetchEventData:", error);
@@ -107,7 +107,7 @@ const CalendarScreen = ({ navigation }) => {
 
   // Function to load data from AsyncStorage
   const loadDataFromStorage = async () => {
-    console.log("[CalendarScreen] Loading data from offline storage...");
+    // console.log("[CalendarScreen] Loading data from offline storage...");
     setIsLoading(true);
     setLoadingFilters(true);
     setError(null);
@@ -117,7 +117,7 @@ const CalendarScreen = ({ navigation }) => {
       const offlineEvents = await loadOfflineData('events');
       if (offlineEvents) {
         setAllEventsData(offlineEvents);
-        console.log(`[CalendarScreen] Loaded ${offlineEvents.length} events from storage.`);
+        // console.log(`[CalendarScreen] Loaded ${offlineEvents.length} events from storage.`);
       } else {
         setError('Keine Offline-Events gefunden. Bitte gehe online und speichere Daten.');
         setAllEventsData([]);
@@ -133,10 +133,10 @@ const CalendarScreen = ({ navigation }) => {
               is_highlighted: cat.is_highlighted || false
           }));
           setCalendarFilters([{ name: 'Alle', is_highlighted: false }, ...fetchedFilters]);
-          console.log(`[CalendarScreen] Loaded ${fetchedFilters.length} event filters from storage.`);
+          // console.log(`[CalendarScreen] Loaded ${fetchedFilters.length} event filters from storage.`);
       } else {
           setCalendarFilters([{ name: 'Alle', is_highlighted: false }]); // Fallback
-          console.log('[CalendarScreen] No offline event filters found, using default.');
+          // console.log('[CalendarScreen] No offline event filters found, using default.');
       }
 
       // Set initial date range (no change needed, useMemo handles display)
@@ -406,7 +406,7 @@ const CalendarScreen = ({ navigation }) => {
 
   // onDayPress remains largely the same, but relies on the useEffect above for marking
    const onDayPress = (day) => {
-       console.log('Selected day:', day.dateString);
+       // console.log('Selected day:', day.dateString);
 
        // Ensure day.dateString is valid before setting state
        if (!day.dateString || isNaN(new Date(day.dateString).getTime())) {
@@ -551,7 +551,7 @@ const CalendarScreen = ({ navigation }) => {
 
   // Update month string when calendar month changes
   const onMonthChange = (month) => {
-    console.log('Month changed:', month.dateString);
+    // console.log('Month changed:', month.dateString);
     setCurrentMonthString(month.dateString.slice(0, 7)); // Update YYYY-MM
   };
 

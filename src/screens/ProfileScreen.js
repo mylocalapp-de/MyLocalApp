@@ -249,11 +249,11 @@ const ProfileScreen = () => {
     setCreateFormError('');
 
     try {
-      console.log(`Attempting account upgrade for email: ${createEmail}`);
+      // console.log(`Attempting account upgrade for email: ${createEmail}`);
       const result = await upgradeToFullAccount(createEmail, createPassword);
 
       if (result.success) {
-        console.log('Account upgrade process successful in AuthContext');
+        // console.log('Account upgrade process successful in AuthContext');
         Alert.alert(
           'Erfolgreich',
           'Dein Account wurde erstellt. Du bist jetzt eingeloggt.'
@@ -275,7 +275,7 @@ const ProfileScreen = () => {
   const handleSaveProfile = async () => {
     if (isOrganizationActive) return; // Prevent saving personal profile while org active
     
-    console.log('Saving personal profile changes (including about_me)...'); // Updated log
+    // console.log('Saving personal profile changes (including about_me)...'); // Updated log
     
     if (!editDisplayName.trim()) {
       setEditFormError('Bitte gib einen Benutzernamen ein.');
@@ -315,7 +315,7 @@ const ProfileScreen = () => {
     // <<< END ADDED SECTION >>>
 
     if (!needsUpdate) {
-        console.log("No profile changes detected.");
+        // console.log("No profile changes detected.");
         setShowProfileEditModal(false);
         setIsEditLoading(false);
         return; // Nothing to save
@@ -323,7 +323,7 @@ const ProfileScreen = () => {
 
     try {
         // Call updateUserProfile from AuthContext (assuming it handles partial updates)
-        console.log("Calling updateUserProfile with updates:", updates);
+        // console.log("Calling updateUserProfile with updates:", updates);
         const result = await updateProfile(updates); // Use updateProfile from AuthContext
 
         if (result.success) {
@@ -393,7 +393,7 @@ const ProfileScreen = () => {
     }
 
     if (!needsUpdate) {
-        console.log("No organization details changed.");
+        // console.log("No organization details changed.");
         setShowOrgEditModal(false); // Nothing changed
         return;
     }
@@ -406,7 +406,7 @@ const ProfileScreen = () => {
       // <<< MODIFY: Use updateOrganizationDetails (assuming it exists/handles partial updates) >>>
       // If updateOrganizationDetails doesn't exist, you'll need to add it to OrganizationContext
       // or modify updateOrganizationName to accept an object.
-      console.log("Calling updateOrganizationDetails with updates:", updates); 
+      // console.log("Calling updateOrganizationDetails with updates:", updates); 
       const result = await updateOrganizationDetails(activeOrganizationId, updates); 
       // <<< END MODIFICATION >>>
 
@@ -445,13 +445,13 @@ const ProfileScreen = () => {
         Alert.alert('Erfolgreich', 'Deine E-Mail-Adresse wurde aktualisiert.');
       } else {
         // console.error removed to avoid expo error overlay
-        console.log('Failed to update email:', result.error);
+        // console.log('Failed to update email:', result.error);
         const errorMessage = result.error?.message || 'E-Mail konnte nicht geändert werden.';
         setAccountSettingsError(errorMessage);
       }
     } catch (error) {
       // console.error removed
-      console.log('Unexpected error during email update:', error);
+      // console.log('Unexpected error during email update:', error);
       setAccountSettingsError('Ein unerwarteter Fehler ist aufgetreten.');
     } finally {
       setIsAccountSettingsLoading(false);
@@ -498,12 +498,12 @@ const ProfileScreen = () => {
         setIsMakingPermanent(false);
       } else {
         // console.error removed
-        console.log('Failed to update password:', result.error);
+        // console.log('Failed to update password:', result.error);
         setAccountSettingsError(result.error?.message || 'Passwort konnte nicht geändert werden.');
       }
     } catch (error) {
       // console.error removed
-      console.log('Unexpected error during password update:', error);
+      // console.log('Unexpected error during password update:', error);
       setAccountSettingsError('Ein unerwarteter Fehler ist aufgetreten.');
     } finally {
       setIsAccountSettingsLoading(false);
@@ -937,7 +937,7 @@ const ProfileScreen = () => {
   const renderOrgManagementSection = () => {
     // Strengthen the guard: Ensure activeOrganization is fully loaded
     if (!isOrganizationActive || !activeOrganization || !activeOrganization.currentUserRole) {
-        console.log("ProfileScreen: renderOrgManagementSection - Bailing out due to missing activeOrganization data.");
+        // console.log("ProfileScreen: renderOrgManagementSection - Bailing out due to missing activeOrganization data.");
         // Optionally render a placeholder or loading indicator here
         return (
              <View style={styles.card}>

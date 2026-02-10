@@ -66,7 +66,7 @@ const NewDirectMessageScreen = ({ navigation }) => {
           setOrgError('Organisationen konnten nicht geladen werden.');
           setOrganizations([]);
         } else {
-          console.log('Fetched organizations:', data);
+          // console.log('Fetched organizations:', data);
           // tag items so the DM starter knows the entity type
           const withType = (data || []).map((o) => ({ ...o, entityType: 'org' }));
           setOrganizations(withType);
@@ -126,7 +126,7 @@ const NewDirectMessageScreen = ({ navigation }) => {
       }
 
       const userIdsToFetch = results.map(user => user.id);
-      console.log(`[NewDM] Fetching avatars for ${userIdsToFetch.length} search results.`);
+      // console.log(`[NewDM] Fetching avatars for ${userIdsToFetch.length} search results.`);
 
       try {
           const { data: profilesData, error: profilesError } = await supabase
@@ -177,7 +177,7 @@ const NewDirectMessageScreen = ({ navigation }) => {
 
     setIsSearching(true);
     setSearchError(null);
-    console.log(`Searching for users with display name like: %${query}%`);
+    // console.log(`Searching for users with display name like: %${query}%`);
 
     try {
       const { data, error: rpcError } = await supabase.rpc('search_users_by_display_name', {
@@ -189,7 +189,7 @@ const NewDirectMessageScreen = ({ navigation }) => {
         setSearchError('Benutzer konnten nicht gesucht werden.');
         setSearchResults([]);
       } else if (data) {
-        console.log('Search results from RPC:', data);
+        // console.log('Search results from RPC:', data);
         // --- Fetch avatars after getting results ---
         const resultsWithAvatars = await fetchAvatarsForSearchResults(data);
         // ensure entity type is user
@@ -217,7 +217,7 @@ const NewDirectMessageScreen = ({ navigation }) => {
       const params = isOrg ? { p_organization_id: target.id } : { p_other_user_id: target.id };
 
       try {
-          console.log(`Calling RPC ${rpcName} with params:`, params);
+          // console.log(`Calling RPC ${rpcName} with params:`, params);
           const { data: conversationId, error: rpcError } = await supabase.rpc(rpcName, params);
 
           if (rpcError || !conversationId) {
@@ -228,7 +228,7 @@ const NewDirectMessageScreen = ({ navigation }) => {
               return;
           }
 
-          console.log(`Navigating to DM Detail - Conversation ID: ${conversationId}, Target Name: ${target.name || target.display_name}, Is Org: ${isOrg}`);
+          // console.log(`Navigating to DM Detail - Conversation ID: ${conversationId}, Target Name: ${target.name || target.display_name}, Is Org: ${isOrg}`);
 
           navigation.replace('DirectMessageDetail', {
               conversationId: conversationId,

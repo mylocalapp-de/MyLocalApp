@@ -51,10 +51,10 @@ const HomeScreen = ({ navigation }) => {
     const unsubscribe = navigation.addListener('focus', () => {
       // Add a small delay to ensure component is mounted before fetching
       const focusTimeout = setTimeout(() => { // Assign timeout to variable for potential cleanup
-        console.log('HomeScreen focused - Preparing to refresh articles...');
+        // console.log('HomeScreen focused - Preparing to refresh articles...');
         try {
           // Check if user context is available (important if RLS depends on it)
-          console.log('HomeScreen Focus Listener: Current user state before fetch:', user ? `ID: ${user.id}` : 'null'); 
+          // console.log('HomeScreen Focus Listener: Current user state before fetch:', user ? `ID: ${user.id}` : 'null'); 
           
           // Fetch based on active filter
           if (selectedFilter === 'Vereine') {
@@ -86,7 +86,7 @@ const HomeScreen = ({ navigation }) => {
 
   // Function to load data from AsyncStorage
   const loadDataFromStorage = async () => {
-    console.log("[HomeScreen] Loading data from offline storage...");
+    // console.log("[HomeScreen] Loading data from offline storage...");
     setIsLoading(true);
     setIsLoadingFilters(true);
     setError(null);
@@ -99,7 +99,7 @@ const HomeScreen = ({ navigation }) => {
       if (offlineArticles) {
         loadedArticles = formatArticles(offlineArticles); // Use existing formatting logic
         setArticles(loadedArticles);
-        console.log(`[HomeScreen] Loaded ${loadedArticles.length} articles from storage.`);
+        // console.log(`[HomeScreen] Loaded ${loadedArticles.length} articles from storage.`);
       } else {
          setError('Keine Offline-Artikel gefunden. Bitte gehe online und speichere Daten.');
          setArticles([]);

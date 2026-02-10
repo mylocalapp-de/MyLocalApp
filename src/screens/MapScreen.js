@@ -83,7 +83,7 @@ const MapScreen = ({ navigation }) => {
     const unsubscribe = navigation.addListener('focus', () => {
       // Add a small delay to ensure component is mounted before fetching
       setTimeout(() => {
-        console.log('MapScreen focused - refreshing data');
+        // console.log('MapScreen focused - refreshing data');
         fetchData(); // Refetch POIs when screen is focused
       }, 100);
     });

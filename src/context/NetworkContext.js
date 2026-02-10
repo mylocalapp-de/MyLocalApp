@@ -33,17 +33,17 @@ export const NetworkProvider = ({ children }) => {
             const isDefinitelyOffline = state.isConnected === false || state.isInternetReachable === false;
             const currentlyConnected = !isDefinitelyOffline;
 
-            console.log('[NetworkContext] Network State Change:', state);
-            console.log(`[NetworkContext] isConnected: ${state.isConnected}, isInternetReachable: ${state.isInternetReachable}, Effective: ${currentlyConnected}`);
+            // console.log('[NetworkContext] Network State Change:', state);
+            // console.log(`[NetworkContext] isConnected: ${state.isConnected}, isInternetReachable: ${state.isInternetReachable}, Effective: ${currentlyConnected}`);
 
             setIsConnected(currentlyConnected);
 
             if (!initialCheckDoneRef.current) {
                 if (state.isConnected === false && !isOfflineModeRef.current) {
-                    console.log('[NetworkContext] Initial check: No connection detected (isConnected=false). Prompting offline mode.');
+                    // console.log('[NetworkContext] Initial check: No connection detected (isConnected=false). Prompting offline mode.');
                     promptOfflineMode();
                 } else {
-                    console.log('[NetworkContext] Initial check: Connection detected or already in offline mode.');
+                    // console.log('[NetworkContext] Initial check: Connection detected or already in offline mode.');
                 }
                 initialCheckDoneRef.current = true;
                 setInitialCheckDone(true);
@@ -51,7 +51,7 @@ export const NetworkProvider = ({ children }) => {
             }
 
             if (isDefinitelyOffline && !isOfflineModeRef.current) {
-                console.log('[NetworkContext] Subsequent check: Connection lost and not in offline mode. Prompting offline mode.');
+                // console.log('[NetworkContext] Subsequent check: Connection lost and not in offline mode. Prompting offline mode.');
                 promptOfflineMode();
             }
         });
@@ -68,7 +68,7 @@ export const NetworkProvider = ({ children }) => {
             setIsOfflineMode(false);
             await saveOfflineModeStatus(false);
             setLastOfflineSaveTimestamp(storedTimestamp);
-            console.log(`[NetworkContext] Initial Load: isOfflineMode reset to false, lastSave=${storedTimestamp}`);
+            // console.log(`[NetworkContext] Initial Load: isOfflineMode reset to false, lastSave=${storedTimestamp}`);
         };
         loadInitialState();
     }, []);
@@ -98,7 +98,7 @@ export const NetworkProvider = ({ children }) => {
                     style: "cancel",
                     onPress: () => {
                         isPromptOpenRef.current = false;
-                        console.log("Offline mode cancelled by user.");
+                        // console.log("Offline mode cancelled by user.");
                     },
                 },
             ],
@@ -108,14 +108,14 @@ export const NetworkProvider = ({ children }) => {
 
     // Function to toggle offline mode manually
     const toggleOfflineMode = useCallback(async (offline) => {
-        console.log(`[NetworkContext] Toggling offline mode to: ${offline}`);
+        // console.log(`[NetworkContext] Toggling offline mode to: ${offline}`);
         setIsOfflineMode(offline);
         await saveOfflineModeStatus(offline);
         if (offline && !isConnected) {
-             console.log("[NetworkContext] Entered offline mode while disconnected.");
+             // console.log("[NetworkContext] Entered offline mode while disconnected.");
         }
         if (!offline && isConnected) {
-             console.log("[NetworkContext] Exited offline mode while connected.");
+             // console.log("[NetworkContext] Exited offline mode while connected.");
              // Potentially trigger data refresh here if needed
         }
     }, [isConnected]);
@@ -127,11 +127,11 @@ export const NetworkProvider = ({ children }) => {
             return { success: false, error: "No internet connection" };
         }
         if (isSavingData) {
-            console.log("[NetworkContext] Data saving already in progress.");
+            // console.log("[NetworkContext] Data saving already in progress.");
             return { success: false, error: "Saving already in progress"};
         }
 
-        console.log("[NetworkContext] Starting offline data save...");
+        // console.log("[NetworkContext] Starting offline data save...");
         setIsSavingData(true);
         let success = true;
         let errorMsg = null;
@@ -159,7 +159,7 @@ export const NetworkProvider = ({ children }) => {
             // Process Articles
             if (articlesResult.status === 'fulfilled' && !articlesResult.value.error) {
                 await saveOfflineData('articles', articlesResult.value.data || []);
-                console.log(`[NetworkContext] Saved ${articlesResult.value.data?.length ?? 0} articles.`);
+                // console.log(`[NetworkContext] Saved ${articlesResult.value.data?.length ?? 0} articles.`);
             } else {
                 console.error("[NetworkContext] Error fetching articles:", articlesResult.reason || articlesResult.value.error);
                 throw new Error("Artikel konnten nicht geladen werden."); // Throw error if critical data fails
@@ -168,7 +168,7 @@ export const NetworkProvider = ({ children }) => {
             // Process Article Filters
             if (filtersResult.status === 'fulfilled' && !filtersResult.value.error) {
                 await saveOfflineData('article_filters', filtersResult.value.data || []);
-                console.log(`[NetworkContext] Saved ${filtersResult.value.data?.length ?? 0} filters.`);
+                // console.log(`[NetworkContext] Saved ${filtersResult.value.data?.length ?? 0} filters.`);
             } else {
                 console.error("[NetworkContext] Error fetching article filters:", filtersResult.reason || filtersResult.value.error);
                 // Decide if this is critical enough to throw
@@ -177,7 +177,7 @@ export const NetworkProvider = ({ children }) => {
             // Process Events
             if (eventsResult.status === 'fulfilled' && !eventsResult.value.error) {
                 await saveOfflineData('events', eventsResult.value.data || []);
-                console.log(`[NetworkContext] Saved ${eventsResult.value.data?.length ?? 0} events.`);
+                // console.log(`[NetworkContext] Saved ${eventsResult.value.data?.length ?? 0} events.`);
             } else {
                 console.error("[NetworkContext] Error fetching events:", eventsResult.reason || eventsResult.value.error);
                 throw new Error("Events konnten nicht geladen werden.");
@@ -186,7 +186,7 @@ export const NetworkProvider = ({ children }) => {
             // Process Chat Groups
             if (chatGroupsResult.status === 'fulfilled' && !chatGroupsResult.value.error) {
                 await saveOfflineData('chat_groups', chatGroupsResult.value.data || []);
-                console.log(`[NetworkContext] Saved ${chatGroupsResult.value.data?.length ?? 0} chat groups.`);
+                // console.log(`[NetworkContext] Saved ${chatGroupsResult.value.data?.length ?? 0} chat groups.`);
             } else {
                 console.error("[NetworkContext] Error fetching chat groups:", chatGroupsResult.reason || chatGroupsResult.value.error);
                 throw new Error("Chat-Gruppen konnten nicht geladen werden.");
@@ -196,7 +196,7 @@ export const NetworkProvider = ({ children }) => {
             const now = Date.now();
             setLastOfflineSaveTimestamp(now);
             await saveLastOfflineSaveTimestamp(now);
-            console.log("[NetworkContext] Offline data save completed successfully.");
+            // console.log("[NetworkContext] Offline data save completed successfully.");
 
         } catch (err) {
             console.error("[NetworkContext] Error during offline data save:", err);

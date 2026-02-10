@@ -36,14 +36,14 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 
 // For debugging in development
 if (__DEV__) {
-  console.log("Supabase URL:", supabaseUrl || "Undefined");
-  console.log("Supabase Anon Key:", supabaseAnonKey ? "Defined" : "Undefined");
+  // console.log("Supabase URL:", supabaseUrl || "Undefined");
+  // console.log("Supabase Anon Key:", supabaseAnonKey ? "Defined" : "Undefined");
   
   // Check if Supabase URL is reachable
   if (supabaseUrl) {
     fetch(supabaseUrl)
       .then(response => {
-        console.log(`Supabase URL connectivity check: Success (${response.status})`);
+        // console.log(`Supabase URL connectivity check: Success (${response.status})`);
       })
       .catch(error => {
         console.error(`Supabase URL connectivity check failed: ${error.message}`);

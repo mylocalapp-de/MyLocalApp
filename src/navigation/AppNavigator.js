@@ -239,8 +239,8 @@ const AppNavigator = () => {
   
   // Force a re-render when auth state changes
   React.useEffect(() => {
-    console.log('Navigation: Auth state changed. User:', user ? 'Logged in' : 'Not logged in');
-    console.log('Navigation: hasCompletedOnboarding:', hasCompletedOnboarding);
+    // console.log('Navigation: Auth state changed. User:', user ? 'Logged in' : 'Not logged in');
+    // console.log('Navigation: hasCompletedOnboarding:', hasCompletedOnboarding);
     setAuthChecked(true);
   }, [user, hasCompletedOnboarding]);
 

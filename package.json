@@ -6,7 +6,11 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "format": "prettier --write src/",
+    "format:check": "prettier --check src/"
   },
   "dependencies": {
     "@expo-google-fonts/lobster": "^0.3.0",
@@ -57,8 +61,15 @@
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",
+    "@babel/eslint-parser": "^7.28.6",
     "@react-native-community/cli": "^18.0.0",
     "@types/react": "~19.0.10",
+    "eslint": "^8.57.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-native": "^5.0.0",
+    "prettier": "^3.8.1",
     "typescript": "~5.8.3"
   },
   "private": true,
