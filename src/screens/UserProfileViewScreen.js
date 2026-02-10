@@ -49,11 +49,11 @@ const UserProfileViewScreen = ({ route, navigation }) => {
             return;
         }
         
-        console.log(`[UserProfileViewScreen] Checking profile ownership:`);
-        console.log(`  - Current User ID (from context): ${user?.id}`);
-        console.log(`  - Viewed User ID (from params):   ${userId}`);
+        // console.log(`[UserProfileViewScreen] Checking profile ownership:`);
+        // console.log(`  - Current User ID (from context): ${user?.id}`);
+        // console.log(`  - Viewed User ID (from params):   ${userId}`);
         const ownProfileCheck = user?.id === userId;
-        console.log(`  - Is Own Profile? ${ownProfileCheck}`);
+        // console.log(`  - Is Own Profile? ${ownProfileCheck}`);
 
         setIsOwnProfile(ownProfileCheck);
 
@@ -61,7 +61,7 @@ const UserProfileViewScreen = ({ route, navigation }) => {
         if (currentUserProfile && currentUserProfile.blocked && !ownProfileCheck) {
             const blockedCheck = currentUserProfile.blocked.includes(userId);
             setIsBlocked(blockedCheck);
-            console.log(`  - Is Viewed User Blocked? ${blockedCheck}`);
+            // console.log(`  - Is Viewed User Blocked? ${blockedCheck}`);
         }
 
         if (isOfflineMode) {
@@ -194,7 +194,7 @@ const UserProfileViewScreen = ({ route, navigation }) => {
 
         try {
             // Call the RPC directly instead of using a context function
-            console.log(`Calling RPC find_or_create_user_dm_conversation for other user: ${viewedProfile.id}`);
+            // console.log(`Calling RPC find_or_create_user_dm_conversation for other user: ${viewedProfile.id}`);
             const { data: conversationId, error: rpcError } = await supabase.rpc(
                 'find_or_create_user_dm_conversation',
                 { p_other_user_id: viewedProfile.id } 
@@ -232,11 +232,11 @@ const UserProfileViewScreen = ({ route, navigation }) => {
         if (isBlocked) {
             // Unblock: Remove the user ID
             updatedBlockedList = currentlyBlocked.filter(id => id !== targetUserId);
-            console.log(`[UserProfileViewScreen] Unblocking user ${targetUserId}`);
+            // console.log(`[UserProfileViewScreen] Unblocking user ${targetUserId}`);
         } else {
             // Block: Add the user ID
             updatedBlockedList = [...currentlyBlocked, targetUserId];
-            console.log(`[UserProfileViewScreen] Blocking user ${targetUserId}`);
+            // console.log(`[UserProfileViewScreen] Blocking user ${targetUserId}`);
         }
 
         try {

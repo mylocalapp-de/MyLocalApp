@@ -36,14 +36,14 @@ export const AuthProvider = ({ children, expoPushToken }) => {
   // --- Push Token Registration Logic ---
   const registerOrUpdatePushToken = useCallback(async (token, userId) => {
     if (!token) {
-      console.log("AuthContext: [PushToken] No push token provided, skipping registration.");
+      // console.log("AuthContext: [PushToken] No push token provided, skipping registration.");
       return;
     }
 
-    console.log(`AuthContext: [PushToken] Attempting registration. Token: ${token}, UserID: ${userId === null ? 'null (anonymous)' : userId}`);
+    // console.log(`AuthContext: [PushToken] Attempting registration. Token: ${token}, UserID: ${userId === null ? 'null (anonymous)' : userId}`);
 
     const upsertData = [{ expo_push_token: token, user_id: userId }];
-    console.log(`AuthContext: [PushToken] Data prepared for upsert:`, JSON.stringify(upsertData));
+    // console.log(`AuthContext: [PushToken] Data prepared for upsert:`, JSON.stringify(upsertData));
 
     try {
       // Upsert token, minimal returning. Remove select to avoid RLS return issues.
@@ -57,7 +57,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
       if (error) {
         console.error(`AuthContext: [PushToken] Error upserting token. UserID: ${userId === null ? 'null' : userId}. Error:`, JSON.stringify(error, null, 2));
       } else {
-        console.log(`AuthContext: [PushToken] Successfully upserted token. UserID: ${userId === null ? 'null' : userId}. Result data (minimal):`, data);
+        // console.log(`AuthContext: [PushToken] Successfully upserted token. UserID: ${userId === null ? 'null' : userId}. Result data (minimal):`, data);
       }
     } catch (e) {
       console.error(`AuthContext: [PushToken] Unexpected error during push token upsert. UserID: ${userId === null ? 'null' : userId}. Error:`, e);
@@ -81,7 +81,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
       try {
         // Check Supabase session
         const { data: { session: currentSession } } = await supabase.auth.getSession();
-        console.log("AuthContext: Initial session fetch:", currentSession ? `Session found (User ID: ${currentSession.user.id})` : 'No session');
+        // console.log("AuthContext: Initial session fetch:", currentSession ? `Session found (User ID: ${currentSession.user.id})` : 'No session');
         const initialUser = currentSession?.user ?? null;
         setSession(currentSession);
         setUser(initialUser); // Set initial user state
@@ -116,23 +116,23 @@ export const AuthProvider = ({ children, expoPushToken }) => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, newSession) => {
         setLoadingAuth(true); // Indicate auth state change processing
-        console.log(`AuthContext: Auth state changed event: ${_event}`, newSession ? `Session User: ${newSession.user.id}` : 'No session');
+        // console.log(`AuthContext: Auth state changed event: ${_event}`, newSession ? `Session User: ${newSession.user.id}` : 'No session');
 
         const newSupabaseUser = newSession?.user ?? null;
         const previousSupabaseUserId = user?.id ?? null; // Get ID from current state `user`
         const userIdChanged = newSupabaseUser?.id !== previousSupabaseUserId;
 
-        console.log(`AuthContext: User ID check - Prev: ${previousSupabaseUserId}, New: ${newSupabaseUser?.id}, Changed: ${userIdChanged}`);
+        // console.log(`AuthContext: User ID check - Prev: ${previousSupabaseUserId}, New: ${newSupabaseUser?.id}, Changed: ${userIdChanged}`);
 
         // Update session state regardless of event type
         setSession(newSession);
 
         // Update user state *only* if the user ID has actually changed
         if (userIdChanged) {
-          console.log('AuthContext: Updating user context state object due to ID change.');
+          // console.log('AuthContext: Updating user context state object due to ID change.');
           setUser(newSupabaseUser); // This state change will trigger the token registration useEffect
         } else {
-          console.log('AuthContext: Skipping user context state object update (ID unchanged).');
+          // console.log('AuthContext: Skipping user context state object update (ID unchanged).');
           // If user didn't change, but an event happened (like TOKEN_REFRESHED),
           // ensure profile loading stops if it was triggered.
           if (!newSupabaseUser) setLoadingProfile(false); // No user exists after event
@@ -144,7 +144,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
             case 'SIGNED_IN':
             case 'INITIAL_SESSION': // Treat initial session like sign in if user exists
                 if (newSupabaseUser) {
-                    console.log(`AuthContext: ${_event} event - Loading profile/orgs for user:`, newSupabaseUser.id);
+                    // console.log(`AuthContext: ${_event} event - Loading profile/orgs for user:`, newSupabaseUser.id);
                     await loadUserProfileAndOrgs(newSupabaseUser.id);
                     // Setting onboarding based on whether a profile exists maybe? Or keep asyncstorage?
                     // For now, keep AsyncStorage check, set during onboarding/signin
@@ -152,7 +152,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
                     setHasCompletedOnboarding(onboardingStatus === 'true');
 
                 } else {
-                    console.log('AuthContext: INITIAL_SESSION with no user.');
+                    // console.log('AuthContext: INITIAL_SESSION with no user.');
                     setProfile(null);
                     setUserOrganizations([]);
                     setHasCompletedOnboarding(false);
@@ -162,7 +162,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
                 break;
 
             case 'SIGNED_OUT':
-                console.log('AuthContext: SIGNED_OUT event.');
+                // console.log('AuthContext: SIGNED_OUT event.');
                 // User state is set to null via setUser(newSupabaseUser) when ID changes.
                 // The signOut function handles clearing local storage.
                 setProfile(null);
@@ -176,7 +176,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
             // unless user ID changes, which is handled above.
             // Ensure loading state is managed.
             default:
-                console.log(`AuthContext: Auth event: ${_event} - user ID unchanged or handled. Profile Loading: ${loadingProfile}`);
+                // console.log(`AuthContext: Auth event: ${_event} - user ID unchanged or handled. Profile Loading: ${loadingProfile}`);
                  if (!newSupabaseUser) {
                     // If event resulted in no user, ensure profile loading stops.
                     setLoadingProfile(false);
@@ -184,7 +184,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
                     // If user ID didn't change, stop profile loading if it hasn't already.
                     // Maybe reload profile on USER_UPDATED?
                     if(_event === 'USER_UPDATED') {
-                        console.log("AuthContext: USER_UPDATED event, reloading profile/orgs.");
+                        // console.log("AuthContext: USER_UPDATED event, reloading profile/orgs.");
                         await loadUserProfileAndOrgs(newSupabaseUser.id);
                     } else {
                     setLoadingProfile(false);
@@ -211,7 +211,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
   // --- Profile & Organization Loading ---
   const loadUserProfileAndOrgs = async (userId) => {
     const callTimestamp = Date.now();
-    console.log(`AuthContext: [${callTimestamp}] START loadUserProfileAndOrgs for user ID:`, userId);
+    // console.log(`AuthContext: [${callTimestamp}] START loadUserProfileAndOrgs for user ID:`, userId);
 
     if (!userId) {
       // DEV warning: calling without userId when user exists is likely a bug
@@ -221,14 +221,14 @@ export const AuthProvider = ({ children, expoPushToken }) => {
           'Use refreshCurrentUserProfile() instead to avoid clearing state.'
         );
       }
-      console.log(`AuthContext: [${callTimestamp}] loadUserProfileAndOrgs - No userId provided. Clearing profile/orgs.`);
+      // console.log(`AuthContext: [${callTimestamp}] loadUserProfileAndOrgs - No userId provided. Clearing profile/orgs.`);
       setProfile(null);
       setUserOrganizations([]);
       setLoadingProfile(false);
-      console.log(`AuthContext: [${callTimestamp}] END loadUserProfileAndOrgs (no user ID).`);
+      // console.log(`AuthContext: [${callTimestamp}] END loadUserProfileAndOrgs (no user ID).`);
       return;
     }
-    console.log(`AuthContext: [${callTimestamp}] loadUserProfileAndOrgs - Setting loadingProfile true for user ID:`, userId);
+    // console.log(`AuthContext: [${callTimestamp}] loadUserProfileAndOrgs - Setting loadingProfile true for user ID:`, userId);
     setLoadingProfile(true);
     try {
       // Fetch profile and organizations concurrently
@@ -258,7 +258,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         setPreferences([]); // Clear derived state
         // Clear local storage? Maybe not, user might log in again.
       } else if (profileResult.data) {
-        console.log(`AuthContext: [${callTimestamp}] Profile loaded for ID ${userId}:`, profileResult.data);
+        // console.log(`AuthContext: [${callTimestamp}] Profile loaded for ID ${userId}:`, profileResult.data);
         const loadedProfile = profileResult.data;
         // Set the entire profile object, including avatar_url
         // Ensure backward compatibility if column is missing: default is_verified to true
@@ -277,7 +277,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         setHasCompletedOnboarding(true);
 
       } else {
-        console.log(`AuthContext: [${callTimestamp}] No profile found for user ID ${userId}. Clearing profile state.`);
+        // console.log(`AuthContext: [${callTimestamp}] No profile found for user ID ${userId}. Clearing profile state.`);
         // If no profile found for a logged-in user, it's an issue.
         setProfile(null);
         setDisplayName('');
@@ -301,7 +301,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
             logo_url: org.logo_url,
             role: org.organization_members?.[0]?.role ?? 'member' // Safely access nested role
         }));
-        console.log(`AuthContext: [${callTimestamp}] User organizations loaded successfully for ID ${userId}:`, formattedOrgs);
+        // console.log(`AuthContext: [${callTimestamp}] User organizations loaded successfully for ID ${userId}:`, formattedOrgs);
         setUserOrganizations(formattedOrgs);
       }
 
@@ -312,7 +312,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
       console.warn(`AuthContext: [${callTimestamp}] Keeping existing profile/orgs data due to unexpected error.`);
     } finally {
       setLoadingProfile(false);
-      console.log(`AuthContext: [${callTimestamp}] END loadUserProfileAndOrgs for ID ${userId}. loadingProfile set to false.`);
+      // console.log(`AuthContext: [${callTimestamp}] END loadUserProfileAndOrgs for ID ${userId}. loadingProfile set to false.`);
     }
   };
 
@@ -323,7 +323,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
       console.warn('AuthContext: refreshCurrentUserProfile called but no user is logged in. Skipping refresh.');
       return;
     }
-    console.log(`AuthContext: refreshCurrentUserProfile - Refreshing for current user: ${currentUserId}`);
+    // console.log(`AuthContext: refreshCurrentUserProfile - Refreshing for current user: ${currentUserId}`);
     await loadUserProfileAndOrgs(currentUserId);
   };
 
@@ -340,7 +340,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
       }
       const updated = [...prev];
       updated[index] = { ...updated[index], ...updates };
-      console.log(`AuthContext: Patched org ${orgId} locally:`, updates);
+      // console.log(`AuthContext: Patched org ${orgId} locally:`, updates);
       return updated;
     });
   };
@@ -354,7 +354,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         console.warn(`AuthContext: removeUserOrganization - org ${orgId} not found in list`);
         return prev;
       }
-      console.log(`AuthContext: Removed org ${orgId} from local list`);
+      // console.log(`AuthContext: Removed org ${orgId} from local list`);
       return filtered;
     });
   };
@@ -368,7 +368,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         console.warn(`AuthContext: addUserOrganization - org ${newOrg.id} already exists in list`);
         return prev;
       }
-      console.log(`AuthContext: Added org ${newOrg.id} to local list:`, newOrg);
+      // console.log(`AuthContext: Added org ${newOrg.id} to local list:`, newOrg);
       return [...prev, newOrg];
     });
   };
@@ -377,7 +377,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
   const createTemporaryAccount = async (userDisplayName, userEmail = null) => {
     setLoading(true); // Use overall loading
     try {
-      console.log('AuthContext: Attempting to create temporary account for:', userDisplayName);
+      // console.log('AuthContext: Attempting to create temporary account for:', userDisplayName);
 
       if (!userDisplayName || userDisplayName.trim() === '') {
         return { success: false, error: { message: 'Bitte gib einen Anzeigenamen ein.' } };
@@ -395,7 +395,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
       const email = userEmail ? userEmail.trim() : `${userDisplayName.trim().replace(/\s+/g, '.').toLowerCase()}.${randomSuffix}@temp.mylocalapp.de`;
       const allPreferences = ['kultur', 'sport', 'verkehr', 'politik', 'vereine', 'gemeinde']; // Pre-select all preferences
 
-      console.log(`AuthContext: Generated credentials - Email: ${email}, Password: [REDACTED], DisplayName: ${userDisplayName}`);
+      // console.log(`AuthContext: Generated credentials - Email: ${email}, Password: [REDACTED], DisplayName: ${userDisplayName}`);
 
       // Sign up with Supabase Auth
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
@@ -426,14 +426,14 @@ export const AuthProvider = ({ children, expoPushToken }) => {
       }
 
       const userId = signUpData.user.id;
-      console.log('AuthContext: Temporary SignUp successful, user ID:', userId);
+      // console.log('AuthContext: Temporary SignUp successful, user ID:', userId);
 
       // --- Profile Verification (Trigger should handle creation) ---
       // We rely on the trigger `handle_new_user` to create the profile entry.
       // We wait a bit and then try to load it to confirm.
       await new Promise(resolve => setTimeout(resolve, 1500)); // Wait for trigger
 
-      console.log('AuthContext: Checking if profile exists for temporary user ID:', userId);
+      // console.log('AuthContext: Checking if profile exists for temporary user ID:', userId);
       const { data: createdProfile, error: profileCheckError, status } = await supabase
           .from('profiles')
         .select('id, is_temporary') // Check if is_temporary was set correctly
@@ -446,7 +446,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
       }
 
       if (createdProfile && createdProfile.is_temporary === true) {
-        console.log('AuthContext: Temporary profile confirmed.', createdProfile);
+        // console.log('AuthContext: Temporary profile confirmed.', createdProfile);
         // The onAuthStateChange listener will handle setting state and loading profile/orgs.
         // Mark onboarding complete in local storage here
         await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
@@ -473,7 +473,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
   const upgradeToFullAccount = async (email, password) => {
     setLoading(true);
     try {
-      console.log('AuthContext: Attempting to upgrade temporary account to full account:', email);
+      // console.log('AuthContext: Attempting to upgrade temporary account to full account:', email);
 
       if (!user) {
         return { success: false, error: { message: 'Kein temporärer Benutzer angemeldet.' } };
@@ -491,7 +491,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
       }
 
       // 1. Update Supabase Auth User (email and password)
-      console.log(`AuthContext: Updating Auth user ${user.id} with new email/password.`);
+      // console.log(`AuthContext: Updating Auth user ${user.id} with new email/password.`);
       const { data: updateData, error: updateError } = await supabase.auth.updateUser({
         email: email.trim(),
         password: password // Update password
@@ -507,10 +507,10 @@ export const AuthProvider = ({ children, expoPushToken }) => {
           return { success: false, error: { message } };
       }
 
-      console.log('AuthContext: Auth user email/password updated successfully.', updateData);
+      // console.log('AuthContext: Auth user email/password updated successfully.', updateData);
 
       // 2. Update Profile to set is_temporary = false
-      console.log(`AuthContext: Updating profile ${user.id} to set is_temporary=false.`);
+      // console.log(`AuthContext: Updating profile ${user.id} to set is_temporary=false.`);
       const { error: profileUpdateError } = await supabase
         .from('profiles')
         .update({ is_temporary: false, updated_at: new Date() })
@@ -526,7 +526,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         };
       }
 
-      console.log('AuthContext: Profile updated successfully (is_temporary=false).');
+      // console.log('AuthContext: Profile updated successfully (is_temporary=false).');
 
       // Reload profile to get the updated is_temporary state
       await loadUserProfileAndOrgs(user.id);
@@ -549,7 +549,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
   const signIn = async (email, password) => {
     setLoading(true);
     try {
-      console.log('AuthContext: Attempting sign in:', email);
+      // console.log('AuthContext: Attempting sign in:', email);
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -565,10 +565,10 @@ export const AuthProvider = ({ children, expoPushToken }) => {
          return { success: false, error: { message: 'Anmeldung fehlgeschlagen, keine Benutzerdaten.' } };
       }
 
-      console.log('AuthContext: SignIn successful, user:', data.user.id);
+      // console.log('AuthContext: SignIn successful, user:', data.user.id);
 
       // Set onboarding complete flag in storage on successful sign-in
-      console.log('AuthContext: Setting onboarding complete status after sign-in.');
+      // console.log('AuthContext: Setting onboarding complete status after sign-in.');
       await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
       setHasCompletedOnboarding(true); // Update state
 
@@ -588,7 +588,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
   const signOut = async () => {
     setLoading(true);
     try {
-      console.log('AuthContext: Signing out...');
+      // console.log('AuthContext: Signing out...');
       const currentToken = expoPushToken; // Capture token before state changes potentially clear it
 
       const { error } = await supabase.auth.signOut();
@@ -596,7 +596,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         console.error('AuthContext: Supabase signOut error:', error);
         // Still attempt to clear local state and register token as anon
       }
-      console.log('AuthContext: Supabase SignOut successful or attempted.');
+      // console.log('AuthContext: Supabase SignOut successful or attempted.');
 
       // Clear local data - KEEP THIS
       // Remove local storage items that are no longer used
@@ -617,11 +617,11 @@ export const AuthProvider = ({ children, expoPushToken }) => {
 
       // After ensuring user state is null, update token to be anonymous
       if (currentToken) {
-        console.log('AuthContext: Updating push token to anonymous after sign out.');
+        // console.log('AuthContext: Updating push token to anonymous after sign out.');
         await registerOrUpdatePushToken(currentToken, null);
       }
       
-      console.log('AuthContext: SignOut complete, local state cleared.');
+      // console.log('AuthContext: SignOut complete, local state cleared.');
       return { success: true };
     } catch (error) {
       console.error('AuthContext: Unexpected error during signOut:', error);
@@ -659,7 +659,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
 
     // Update DB
       try {
-        console.log('AuthContext: Updating profile display name in DB for user:', user.id);
+        // console.log('AuthContext: Updating profile display name in DB for user:', user.id);
         const { error } = await supabase
           .from('profiles')
         .update({ display_name: newDisplayName.trim(), updated_at: new Date() })
@@ -677,7 +677,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         }
       // Update profile state in context
       setProfile(prev => prev ? ({ ...prev, display_name: newDisplayName.trim() }) : null);
-        console.log('AuthContext: Profile display name updated successfully in DB.');
+        // console.log('AuthContext: Profile display name updated successfully in DB.');
       return { success: true, data: newDisplayName.trim() };
       } catch (e) {
          console.error('AuthContext: Unexpected error updating display name in DB:', e);
@@ -708,7 +708,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
 
      // Update DB
        try {
-         console.log('AuthContext: Updating profile preferences in DB for user:', user.id);
+         // console.log('AuthContext: Updating profile preferences in DB for user:', user.id);
          const { error } = await supabase
            .from('profiles')
            .update({ preferences: newPreferences, updated_at: new Date() })
@@ -726,7 +726,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
          }
          // Update profile state in context
          setProfile(prev => prev ? ({ ...prev, preferences: newPreferences }) : null);
-         console.log('AuthContext: Profile preferences updated successfully in DB.');
+         // console.log('AuthContext: Profile preferences updated successfully in DB.');
          return { success: true, data: newPreferences };
        } catch (e) {
           console.error('AuthContext: Unexpected error updating preferences in DB:', e);
@@ -742,7 +742,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
             return { success: false, error: { message: 'Kein Benutzer angemeldet.' } };
         }
         if (Object.keys(updates).length === 0) {
-            console.log('AuthContext: updateProfile called with no updates.');
+            // console.log('AuthContext: updateProfile called with no updates.');
             return { success: true }; // No changes needed
         }
 
@@ -755,7 +755,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         // No separate state for about_me, it's directly in profile
 
         try {
-            console.log(`AuthContext: Updating profile in DB for user ${user.id}:`, updates);
+            // console.log(`AuthContext: Updating profile in DB for user ${user.id}:`, updates);
             const { error } = await supabase
                 .from('profiles')
                 .update({ ...updates, updated_at: new Date() }) // Spread the updates object
@@ -774,7 +774,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
                 };
             }
 
-            console.log('AuthContext: Profile updated successfully in DB.');
+            // console.log('AuthContext: Profile updated successfully in DB.');
             // No need to update state again, already done optimistically
             return { success: true, data: updatedProfile };
         } catch (e) {
@@ -808,7 +808,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
      setLoading(true); // Use account settings loading? Or overall?
      try {
        // Update email using Supabase Auth
-       console.log('AuthContext: Attempting to update email via Supabase Auth...');
+       // console.log('AuthContext: Attempting to update email via Supabase Auth...');
        const { data, error: updateError } = await supabase.auth.updateUser({
          email: newEmail
        });
@@ -819,7 +819,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
          return { success: false, error: { message: updateError.message || 'E-Mail konnte nicht geändert werden.' } };
        }
 
-       console.log("AuthContext: Email update successful via API.", data);
+       // console.log("AuthContext: Email update successful via API.", data);
        // Since email confirmation is disabled in project settings, treat as immediate success.
        // The onAuthStateChange listener should eventually update the user object in the context.
        // Reload the profile manually IF the user object doesn't update quickly enough via listener.
@@ -851,7 +851,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
       let profileUpdateError = null; // To track profile update specifically
 
       try {
-          console.log('AuthContext: Attempting password update via Supabase Auth...');
+          // console.log('AuthContext: Attempting password update via Supabase Auth...');
           // 1. Update Auth User Password
           const { data: authUpdateData, error: authUpdateError } = await supabase.auth.updateUser({
               password: newPassword
@@ -862,13 +862,13 @@ export const AuthProvider = ({ children, expoPushToken }) => {
               return { success: false, error: { message: authUpdateError.message || 'Passwort konnte nicht geändert werden.' } };
           }
 
-          console.log("AuthContext: Auth password updated successfully.", authUpdateData);
+          // console.log("AuthContext: Auth password updated successfully.", authUpdateData);
           passwordUpdateResult = { success: true }; // Mark auth password update as success
 
           // 2. Update Profile to set is_temporary = false *IF* it was temporary
           // Check the profile state from the context
           if (profile?.is_temporary) {
-              console.log(`AuthContext: Account was temporary. Updating profile ${user.id} to set is_temporary=false.`);
+              // console.log(`AuthContext: Account was temporary. Updating profile ${user.id} to set is_temporary=false.`);
               const { error: updateError } = await supabase
                   .from('profiles')
                   .update({ is_temporary: false, updated_at: new Date() })
@@ -878,12 +878,12 @@ export const AuthProvider = ({ children, expoPushToken }) => {
                   console.warn('AuthContext: Error updating profile (setting is_temporary=false): ', updateError);
                   profileUpdateError = updateError; // Store the error
               } else {
-                  console.log('AuthContext: Profile updated successfully (is_temporary=false).');
+                  // console.log('AuthContext: Profile updated successfully (is_temporary=false).');
                   // Trigger profile reload to get the new state reflected in the context/UI
                   loadUserProfileAndOrgs(user.id);
               }
           } else {
-             console.log("AuthContext: Account was already permanent, skipping profile flag update.");
+             // console.log("AuthContext: Account was already permanent, skipping profile flag update.");
           }
 
       } catch (error) {
@@ -917,7 +917,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
 
     setLoadingProfilePicture(true);
     try {
-      console.log(`AuthContext: Starting profile picture upload for user ${user.id}. Image URI: ${imageUri}`);
+      // console.log(`AuthContext: Starting profile picture upload for user ${user.id}. Image URI: ${imageUri}`);
 
       // Determine file extension from URI
       const fileExt = imageUri.split('.').pop();
@@ -931,7 +931,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
       });
 
       // Upload to Supabase Storage
-      console.log(`AuthContext: Uploading to storage. Path: ${filePath}, Type: ${fileType}`);
+      // console.log(`AuthContext: Uploading to storage. Path: ${filePath}, Type: ${fileType}`);
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('profile_images') // Use the article_images bucket as requested
         .upload(filePath, Buffer.from(base64, 'base64'), {
@@ -945,7 +945,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         return { success: false, error: { message: uploadError.message || 'Fehler beim Hochladen des Bildes.' } };
       }
 
-      console.log('AuthContext: Storage upload successful:', uploadData);
+      // console.log('AuthContext: Storage upload successful:', uploadData);
 
       // Get the public URL for the uploaded file
       // Construct the URL manually as getPublicUrl might be deprecated or behave unexpectedly
@@ -958,10 +958,10 @@ export const AuthProvider = ({ children, expoPushToken }) => {
       const imageUrlPath = uploadData?.path ?? filePath;
       const publicUrl = `${storageBaseUrl}/storage/v1/object/public/profile_images/${imageUrlPath}?t=${new Date().getTime()}`; // Update bucket name in URL
 
-      console.log('AuthContext: Generated public URL:', publicUrl);
+      // console.log('AuthContext: Generated public URL:', publicUrl);
 
       // Update the avatar_url in the profiles table
-      console.log(`AuthContext: Updating profile table with avatar_url for user ${user.id}`);
+      // console.log(`AuthContext: Updating profile table with avatar_url for user ${user.id}`);
       const { error: dbError } = await supabase
         .from('profiles')
         .update({ avatar_url: publicUrl, updated_at: new Date() })
@@ -974,7 +974,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         return { success: false, error: { message: dbError.message || 'Fehler beim Speichern des Bild-Links.' } };
       }
 
-      console.log('AuthContext: Profile avatar_url updated successfully.');
+      // console.log('AuthContext: Profile avatar_url updated successfully.');
 
       // Update local profile state immediately
       setProfile(prev => prev ? ({ ...prev, avatar_url: publicUrl }) : null);
@@ -1014,9 +1014,9 @@ export const AuthProvider = ({ children, expoPushToken }) => {
           }
 
           newOrg = rpcData[0]; 
-          console.log('AuthContext: Organization created via RPC:', newOrg);
+          // console.log('AuthContext: Organization created via RPC:', newOrg);
           await loadUserProfileAndOrgs(user.id); // Refetch to include the new org
-          console.log('AuthContext: User profile and orgs refetched.');
+          // console.log('AuthContext: User profile and orgs refetched.');
           return { success: true, data: newOrg };
 
       } catch (error) {
@@ -1116,7 +1116,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
     const currentToken = expoPushToken; // Capture token before anything happens
     setLoading(true);
     try {
-      console.log(`AuthContext: Attempting to delete account for user ${user.id} via RPC.`);
+      // console.log(`AuthContext: Attempting to delete account for user ${user.id} via RPC.`);
       
       // Call the RPC function to perform checks (like admin status) and delete profile data
       const { error: rpcError } = await supabase.rpc('delete_user_account');
@@ -1127,7 +1127,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         return { success: false, error: { message: rpcError.message || 'Fehler beim Löschen über RPC.' } };
       }
 
-      console.log(`AuthContext: RPC delete_user_account successful for user ${user.id}. Now signing out.`);
+      // console.log(`AuthContext: RPC delete_user_account successful for user ${user.id}. Now signing out.`);
 
       // IMPORTANT: The actual deletion from auth.users needs a service_role key.
       // This should be handled by a separate backend process or Supabase Function triggered by the RPC potentially.
@@ -1141,7 +1141,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         return { success: true, warning: 'Account data deleted, but local sign out failed.' }; 
       }
       
-      console.log(`AuthContext: Account deletion process complete (profile data removed, user signed out, token updated).`);
+      // console.log(`AuthContext: Account deletion process complete (profile data removed, user signed out, token updated).`);
       return { success: true };
 
     } catch (error) {

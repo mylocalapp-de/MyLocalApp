@@ -128,11 +128,11 @@ const WelcomeScreen = ({ navigation }) => {
     setError('');
     
     try {
-      console.log('Attempting to sign in with:', email);
+      // console.log('Attempting to sign in with:', email);
       const result = await signIn(email, password);
       
       if (result.success) {
-        console.log('Login successful, AppNavigator will handle navigation via AuthContext state.');
+        // console.log('Login successful, AppNavigator will handle navigation via AuthContext state.');
       } else {
         console.error('Login failed:', result.error);
         const errorMessage = result.error?.message;

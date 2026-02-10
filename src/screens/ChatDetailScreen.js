@@ -79,7 +79,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
   async function registerForPushNotificationsAsync() {
     let token;
     if (!Device.isDevice) {
-      console.log('Push notifications require a physical device, skipping registration.');
+      // console.log('Push notifications require a physical device, skipping registration.');
       return null;
     }
 
@@ -104,7 +104,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
         return null;
       }
       token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
-      console.log('Expo Push Token:', token);
+      // console.log('Expo Push Token:', token);
       setExpoPushToken(token); // Store token in state
     } catch (e) {
       console.error("Error getting push token:", e);
@@ -128,7 +128,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
   // Get push token on mount if not already available
   useEffect(() => {
     if (!expoPushToken) {
-      console.log('Attempting to register for push notifications...');
+      // console.log('Attempting to register for push notifications...');
       registerForPushNotificationsAsync();
     }
   }, []);
@@ -141,11 +141,11 @@ const ChatDetailScreen = ({ route, navigation }) => {
         // Reset subscription status if dependencies are missing
         setIsSubscribed(false);
         setCheckingSubscription(false);
-        console.log('Skipping subscription check: Missing chatGroup ID or token.');
+        // console.log('Skipping subscription check: Missing chatGroup ID or token.');
         return;
       }
 
-      console.log(`Checking subscription for group ${chatGroup.id}, token ${expoPushToken.substring(0, 10)}...`);
+      // console.log(`Checking subscription for group ${chatGroup.id}, token ${expoPushToken.substring(0, 10)}...`);
       setCheckingSubscription(true);
       
       try {
@@ -160,7 +160,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
           console.error('Error checking anonymous subscription:', anonError);
         } else if (anonCount > 0) {
           // Found anonymous subscription
-          console.log(`Anonymous subscription found: count=${anonCount}`);
+          // console.log(`Anonymous subscription found: count=${anonCount}`);
           setIsSubscribed(true);
           setCheckingSubscription(false);
           return; // Exit early if found
@@ -177,7 +177,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
           if (error) {
             console.error('Error checking authenticated subscription:', error);
           } else {
-            console.log(`Authenticated subscription check result: count=${count}`);
+            // console.log(`Authenticated subscription check result: count=${count}`);
             setIsSubscribed(count > 0);
             setCheckingSubscription(false);
             return;
@@ -191,7 +191,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
         setIsSubscribed(false);
       } finally {
         setCheckingSubscription(false);
-        console.log('Subscription check finished.');
+        // console.log('Subscription check finished.');
       }
     };
 
@@ -200,20 +200,20 @@ const ChatDetailScreen = ({ route, navigation }) => {
 
   // Function to toggle subscription status
   const toggleSubscription = async () => {
-    console.log('toggleSubscription triggered');
+    // console.log('toggleSubscription triggered');
 
     if (!expoPushToken) {
-      console.log('toggleSubscription: Expo push token is missing.');
+      // console.log('toggleSubscription: Expo push token is missing.');
       Alert.alert('Fehler', 'Push Token nicht verfügbar. Bitte versuche es erneut.');
       return;
     }
-    console.log('toggleSubscription: Expo push token found:', expoPushToken.substring(0,10) + '...');
+    // console.log('toggleSubscription: Expo push token found:', expoPushToken.substring(0,10) + '...');
 
     if (checkingSubscription || togglingSubscription) {
-        console.log(`toggleSubscription: Aborting, already in progress (checking: ${checkingSubscription}, toggling: ${togglingSubscription})`);
+        // console.log(`toggleSubscription: Aborting, already in progress (checking: ${checkingSubscription}, toggling: ${togglingSubscription})`);
         return; // Prevent multiple simultaneous toggles
     }
-    console.log(`toggleSubscription: Proceeding. isSubscribed: ${isSubscribed}`);
+    // console.log(`toggleSubscription: Proceeding. isSubscribed: ${isSubscribed}`);
 
     const action = isSubscribed ? 'deaktivieren' : 'aktivieren';
     const title = `Benachrichtigungen ${action}?`;
@@ -257,7 +257,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
                 }
                 
                 setIsSubscribed(false);
-                console.log('Successfully unsubscribed.');
+                // console.log('Successfully unsubscribed.');
               } else {
                 // SUBSCRIBE: Use appropriate table based on login status
                 if (user) {
@@ -280,7 +280,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
                     }
                   } else {
                     setIsSubscribed(true);
-                    console.log('Successfully subscribed authenticated user.');
+                    // console.log('Successfully subscribed authenticated user.');
                   }
                 } else {
                   // Anonymous user: use anonymous_push_subscriptions
@@ -301,7 +301,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
                     }
                   } else {
                     setIsSubscribed(true);
-                    console.log('Successfully subscribed anonymous user.');
+                    // console.log('Successfully subscribed anonymous user.');
                   }
                 }
               }
@@ -321,16 +321,16 @@ const ChatDetailScreen = ({ route, navigation }) => {
   // Check if user is member of the org associated with this chat group
   useEffect(() => {
     // Log the dependencies whenever this effect runs
-    console.log(`ChatDetailScreen: Membership Effect Triggered. User: ${!!user}, OrgID: ${chatGroup?.organization_id}, UserOrgs available: ${!!userOrganizations}`);
+    // console.log(`ChatDetailScreen: Membership Effect Triggered. User: ${!!user}, OrgID: ${chatGroup?.organization_id}, UserOrgs available: ${!!userOrganizations}`);
 
     if (user && chatGroup?.organization_id && userOrganizations) {
-      console.log(`ChatDetailScreen: Checking membership. UserOrgs: ${JSON.stringify(userOrganizations)}`); // Log the actual orgs list
+      // console.log(`ChatDetailScreen: Checking membership. UserOrgs: ${JSON.stringify(userOrganizations)}`); // Log the actual orgs list
       const memberCheck = userOrganizations.some(org => org.id === chatGroup.organization_id);
       setIsOrgMember(memberCheck);
-      console.log(`ChatDetailScreen: User ${user.id} membership check for org ${chatGroup.organization_id}: ${memberCheck}`);
+      // console.log(`ChatDetailScreen: User ${user.id} membership check for org ${chatGroup.organization_id}: ${memberCheck}`);
     } else {
       // Log why the check might be failing
-      console.log(`ChatDetailScreen: Membership check skipped/failed in ELSE block. User: ${!!user}, OrgID: ${chatGroup?.organization_id}, UserOrgs: ${JSON.stringify(userOrganizations)}`);
+      // console.log(`ChatDetailScreen: Membership check skipped/failed in ELSE block. User: ${!!user}, OrgID: ${chatGroup?.organization_id}, UserOrgs: ${JSON.stringify(userOrganizations)}`);
       setIsOrgMember(false);
     }
   }, [user, chatGroup, userOrganizations]);
@@ -682,7 +682,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
     setSendingMessage(true);
     
     try {
-      console.log('Sending message:', {
+      // console.log('Sending message:', {
         chatGroupId: chatGroup.id,
         chatGroupType: chatGroup.dbType,
         userId: user?.id,
@@ -726,7 +726,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
           Alert.alert('Fehler', 'Nachricht konnte nicht gesendet werden: ' + error.message);
           return;
         } else {
-          console.log('Message sent successfully:', data);
+          // console.log('Message sent successfully:', data);
           
           // Update local chat group object with the last message
           chatGroup.lastMessage = message.trim() || 'Bild';
@@ -1030,7 +1030,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
   // Render Header with Notification Bell
   const renderHeader = () => {
     // Log state before rendering button
-    console.log(`Render Header: checking=${checkingSubscription}, toggling=${togglingSubscription}, hasToken=${!!expoPushToken}`);
+    // console.log(`Render Header: checking=${checkingSubscription}, toggling=${togglingSubscription}, hasToken=${!!expoPushToken}`);
 
     // Determine if the header title should be clickable
     const isOrgProfileLinkable = isBroadcast() && chatGroup?.organization_id && !isOfflineMode;

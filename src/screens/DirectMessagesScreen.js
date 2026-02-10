@@ -52,7 +52,7 @@ const DirectMessagesScreen = ({ navigation }) => {
     
     let conversationChangesChannel;
     if (!isOfflineMode && user) {
-        console.log('[DMScreen] Setting up real-time subscription...');
+        // console.log('[DMScreen] Setting up real-time subscription...');
         conversationChangesChannel = supabase
             .channel('dm-list-changes')
             .on(
@@ -65,18 +65,18 @@ const DirectMessagesScreen = ({ navigation }) => {
                     // table: 'dm_conversations' // Might miss new message updates
                 },
                 (payload) => {
-                    console.log('[DMScreen] Real-time change received:', payload);
+                    // console.log('[DMScreen] Real-time change received:', payload);
                     // Basic approach: Refetch the list on any relevant change.
                     // More advanced: Try to update the specific row in state.
                     if (payload.table === 'dm_conversations' || payload.table === 'direct_messages') {
-                        console.log(`[DMScreen] Change detected in ${payload.table}, refetching conversations.`);
+                        // console.log(`[DMScreen] Change detected in ${payload.table}, refetching conversations.`);
                         fetchConversations();
                     }
                 }
             )
             .subscribe((status, err) => {
                 if (status === 'SUBSCRIBED') {
-                    console.log('[DMScreen] Real-time channel subscribed.');
+                    // console.log('[DMScreen] Real-time channel subscribed.');
                 } else {
                     // Check if err object exists before logging details
                     if (err) {
@@ -87,7 +87,7 @@ const DirectMessagesScreen = ({ navigation }) => {
                          console.warn(`[DMScreen] Real-time subscription CLOSED. Attempting reconnect or will reconnect on next interaction.`);
                          // Optionally, implement an automatic reconnect strategy here if needed.
                       } else {
-                         console.log(`[DMScreen] Real-time subscription status: ${status}`);
+                         // console.log(`[DMScreen] Real-time subscription status: ${status}`);
                       }
                     }
                 }
@@ -97,7 +97,7 @@ const DirectMessagesScreen = ({ navigation }) => {
     return () => {
       unsubscribeFocus();
       if (conversationChangesChannel) {
-         console.log('[DMScreen] Removing real-time channel.');
+         // console.log('[DMScreen] Removing real-time channel.');
          supabase.removeChannel(conversationChangesChannel);
       }
     };
@@ -109,7 +109,7 @@ const DirectMessagesScreen = ({ navigation }) => {
     if (loading && conversations.length > 0) {
       // Only prevent refetch if already loading AND we already have some data
       // This allows the initial load to proceed even if the subscription triggers early.
-      console.log("[DMScreen] Fetch already in progress, skipping duplicate call.");
+      // console.log("[DMScreen] Fetch already in progress, skipping duplicate call.");
       return; 
     } 
 
@@ -123,12 +123,12 @@ const DirectMessagesScreen = ({ navigation }) => {
 
       // Apply context-based filtering
       if (isOrganizationActive && activeOrganizationId) {
-        console.log(`[DMScreen] Fetching in Org Context for Org ID: ${activeOrganizationId}`);
+        // console.log(`[DMScreen] Fetching in Org Context for Org ID: ${activeOrganizationId}`);
         // In Org context, ONLY show conversations FOR THIS specific organization
         query = query.eq('is_org_conversation', true)
                      .eq('organization_id', activeOrganizationId);
       } else {
-        console.log("[DMScreen] Fetching in Personal Context (excluding Org DMs)");
+        // console.log("[DMScreen] Fetching in Personal Context (excluding Org DMs)");
         // In Personal context, show ALL conversations (user and org)
         // No additional server-side filter needed here as the view returns everything relevant.
       }
@@ -144,14 +144,14 @@ const DirectMessagesScreen = ({ navigation }) => {
         setError('Konversationen konnten nicht geladen werden.');
         setConversations([]);
       } else if (data) {
-          console.log('[DMScreen] Fetched conversations:', data.length);
+          // console.log('[DMScreen] Fetched conversations:', data.length);
           
           // Apply client-side filtering for Personal Context
           if (!isOrganizationActive) {
              const filteredData = data.filter(conv => 
                 !conv.is_org_conversation || (conv.is_org_conversation && conv.initiator_id === user?.id)
              );
-             console.log(`[DMScreen] Personal context: Filtered ${data.length} down to ${filteredData.length} conversations.`);
+             // console.log(`[DMScreen] Personal context: Filtered ${data.length} down to ${filteredData.length} conversations.`);
              setConversations(filteredData);
           } else {
              // Org Context: Show all fetched (already filtered by Org ID server-side)

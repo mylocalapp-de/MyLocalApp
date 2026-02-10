@@ -65,7 +65,7 @@ const OrganizationProfileViewScreen = ({ route, navigation }) => {
         if (user && userOrganizations) {
             membershipCheck = userOrganizations.some(org => org.id === organizationId);
             setIsMember(membershipCheck);
-            console.log(`[OrgProfileView] Is User Member? ${membershipCheck}`);
+            // console.log(`[OrgProfileView] Is User Member? ${membershipCheck}`);
         } else {
             setIsMember(false);
         }
@@ -74,7 +74,7 @@ const OrganizationProfileViewScreen = ({ route, navigation }) => {
         if (currentUserProfile && currentUserProfile.blocked && !membershipCheck) {
             const blockedCheck = currentUserProfile.blocked.includes(organizationId);
             setIsBlocked(blockedCheck);
-            console.log(`[OrgProfileView] Is Org Blocked? ${blockedCheck}`);
+            // console.log(`[OrgProfileView] Is Org Blocked? ${blockedCheck}`);
         }
 
         if (isOfflineMode) {
@@ -320,7 +320,7 @@ const OrganizationProfileViewScreen = ({ route, navigation }) => {
 
         setLoadingConversation(true);
         try {
-            console.log(`Calling RPC find_or_create_org_dm_conversation for org: ${organizationProfile.id}`);
+            // console.log(`Calling RPC find_or_create_org_dm_conversation for org: ${organizationProfile.id}`);
             const { data: conversationId, error: rpcError } = await supabase.rpc(
                 'find_or_create_org_dm_conversation',
                 { p_organization_id: organizationProfile.id } 
@@ -360,11 +360,11 @@ const OrganizationProfileViewScreen = ({ route, navigation }) => {
         if (isBlocked) {
             // Unblock: Remove the org ID
             updatedBlockedList = currentlyBlocked.filter(id => id !== targetOrgId);
-            console.log(`[OrgProfileView] Unblocking organization ${targetOrgId}`);
+            // console.log(`[OrgProfileView] Unblocking organization ${targetOrgId}`);
         } else {
             // Block: Add the org ID
             updatedBlockedList = [...currentlyBlocked, targetOrgId];
-            console.log(`[OrgProfileView] Blocking organization ${targetOrgId}`);
+            // console.log(`[OrgProfileView] Blocking organization ${targetOrgId}`);
         }
 
         try {

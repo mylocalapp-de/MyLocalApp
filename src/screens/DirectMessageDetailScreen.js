@@ -84,7 +84,7 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'direct_messages', filter: `conversation_id=eq.${conversationId}` },
         (payload) => {
-          console.log('New DM received:', payload.new);
+          // console.log('New DM received:', payload.new);
           const newMessage = payload.new;
 
           // Use a function to get sender name to keep it DRY
@@ -134,7 +134,7 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
                             console.error("Error fetching sender profile for new message:", profileError);
                             return getSenderName(newMessage.sender_id, null); // Fallback on error
                         } else {
-                             console.log("Fetched profile for new message:", profileData);
+                             // console.log("Fetched profile for new message:", profileData);
                             return getSenderName(newMessage.sender_id, profileData); // Use fetched data
                         }
                     });
@@ -171,9 +171,9 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
       )
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
-          console.log(`Subscribed to DM conversation ${conversationId}`);
+          // console.log(`Subscribed to DM conversation ${conversationId}`);
         } else {
-           console.log(`Subscription status: ${status}`);
+           // console.log(`Subscription status: ${status}`);
         }
       });
 
@@ -417,7 +417,7 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
         // Remove the optimistic message on error
         setMessages(prev => prev.filter(msg => msg.id !== optimisticMessage.id));
       } else {
-        console.log('Direct message sent successfully to DB:', data);
+        // console.log('Direct message sent successfully to DB:', data);
          // Clear input fields AFTER successful DB insert
          setMessage(''); 
          setImageAsset(null);

@@ -92,7 +92,7 @@ const ArticleDetailScreen = ({ route, navigation }) => {
 
   // Load article data from storage
   const loadArticleFromStorage = async () => {
-    console.log(`[ArticleDetailScreen] Loading article ${articleId} from offline storage...`);
+    // console.log(`[ArticleDetailScreen] Loading article ${articleId} from offline storage...`);
     setLoading(true);
     setError(null);
     setArticle(null);
@@ -115,14 +115,14 @@ const ArticleDetailScreen = ({ route, navigation }) => {
           setAuthorName(articleFromList.author_name || 'Redaktion');
           setCanEditDelete(false);
           setIsFullArticleAvailable(false);
-          console.log(`[ArticleDetailScreen] Found partial article ${articleId} in offline list.`);
+          // console.log(`[ArticleDetailScreen] Found partial article ${articleId} in offline list.`);
         } else {
           setError('Artikel offline nicht gefunden.');
-          console.log(`[ArticleDetailScreen] Article ${articleId} not found in offline list.`);
+          // console.log(`[ArticleDetailScreen] Article ${articleId} not found in offline list.`);
         }
       } else {
         setError('Offline-Daten nicht verfügbar. Bitte gehe online und speichere Daten.');
-        console.log('[ArticleDetailScreen] Offline articles list not found.');
+        // console.log('[ArticleDetailScreen] Offline articles list not found.');
       }
     } catch (err) {
       console.error('[ArticleDetailScreen] Error loading article from storage:', err);

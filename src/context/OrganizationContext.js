@@ -54,7 +54,7 @@ const orgReducer = (state, action) => {
     case ORG_ACTIONS.SWITCH_SUCCESS:
       // Guard: only accept if requestId matches (latest request wins)
       if (state.switchRequestId !== action.requestId) {
-        console.log(`OrgReducer: Ignoring stale SWITCH_SUCCESS (expected ${state.switchRequestId}, got ${action.requestId})`);
+        // console.log(`OrgReducer: Ignoring stale SWITCH_SUCCESS (expected ${state.switchRequestId}, got ${action.requestId})`);
         return state;
       }
       return {
@@ -68,7 +68,7 @@ const orgReducer = (state, action) => {
     case ORG_ACTIONS.SWITCH_FAIL:
       // Guard: only accept if requestId matches
       if (state.switchRequestId !== action.requestId) {
-        console.log(`OrgReducer: Ignoring stale SWITCH_FAIL (expected ${state.switchRequestId}, got ${action.requestId})`);
+        // console.log(`OrgReducer: Ignoring stale SWITCH_FAIL (expected ${state.switchRequestId}, got ${action.requestId})`);
         return state;
       }
       return {
@@ -154,7 +154,7 @@ export const OrganizationProvider = ({ children }) => {
   useEffect(() => {
     // REMOVED THE AUTOMATIC SWITCH LOGIC - Let UI handle redirection
     if (user && initialLoadComplete) { 
-        console.log('OrgContext: Detected change in userOrganizations:', userOrganizations);
+        // console.log('OrgContext: Detected change in userOrganizations:', userOrganizations);
         // NO LONGER attempting switchOrganizationContext(null) from here
     }
     // Keep dependencies
@@ -173,7 +173,7 @@ export const OrganizationProvider = ({ children }) => {
         
         // Update the activeOrganization state ONLY if the *current user's* role has changed
         if (newRoleForCurrentUser && newRoleForCurrentUser !== activeOrganization.currentUserRole) {
-            console.log(`OrgContext: Detected role change for CURRENT USER (${user.id}) in active org ${activeOrganizationId}. Updating role from ${activeOrganization.currentUserRole} to ${newRoleForCurrentUser}.`);
+            // console.log(`OrgContext: Detected role change for CURRENT USER (${user.id}) in active org ${activeOrganizationId}. Updating role from ${activeOrganization.currentUserRole} to ${newRoleForCurrentUser}.`);
             dispatch({
                 type: ORG_ACTIONS.UPDATE_ORG_DETAILS,
                 orgId: activeOrganizationId,
@@ -218,7 +218,7 @@ export const OrganizationProvider = ({ children }) => {
   // Function to switch the active organization context (uses reducer with request ID guard)
   const switchOrganizationContext = async (organizationId) => {
     const requestId = generateRequestId();
-    console.log(`%%%% OrgContext: switchOrganizationContext CALLED with ID: ${organizationId}, requestId: ${requestId} %%%%`);
+    // console.log(`%%%% OrgContext: switchOrganizationContext CALLED with ID: ${organizationId}, requestId: ${requestId} %%%%`);
 
     // Signal that we're starting a switch
     dispatch({ type: ORG_ACTIONS.START_SWITCH, requestId });
@@ -230,20 +230,20 @@ export const OrganizationProvider = ({ children }) => {
         dispatch({ type: ORG_ACTIONS.SWITCH_FAIL, requestId, error: 'User not logged in.' });
         return { success: false, error: 'User not logged in.' };
     }
-    console.log(`OrgContext: [${requestId}] Current logged in user ID: ${user.id}`);
+    // console.log(`OrgContext: [${requestId}] Current logged in user ID: ${user.id}`);
 
     try {
       if (!organizationId) {
         // Switching back to personal context
-        console.log(`OrgContext: [${requestId}] Switching back to personal context.`);
+        // console.log(`OrgContext: [${requestId}] Switching back to personal context.`);
         await AsyncStorage.removeItem(ACTIVE_ORG_STORAGE_KEY);
         dispatch({ type: ORG_ACTIONS.SWITCH_SUCCESS, requestId, orgId: null, orgData: null });
-        console.log(`OrgContext: [${requestId}] Successfully switched back to personal context.`);
+        // console.log(`OrgContext: [${requestId}] Successfully switched back to personal context.`);
         return { success: true };
       }
       
       // Fetch organization details from Supabase
-      console.log(`OrgContext: [${requestId}] Fetching details for organization ID: ${organizationId}`);
+      // console.log(`OrgContext: [${requestId}] Fetching details for organization ID: ${organizationId}`);
       const { data, error } = await supabase
         .from('organizations')
         .select('id, name, logo_url, invite_code, admin_id, about_me')
@@ -255,10 +255,10 @@ export const OrganizationProvider = ({ children }) => {
         throw new Error(`Error fetching organization details: ${error.message}`);
       }
 
-      console.log(`OrgContext: [${requestId}] Fetched org details result for ID ${organizationId}:`, data);
+      // console.log(`OrgContext: [${requestId}] Fetched org details result for ID ${organizationId}:`, data);
 
       if (data) {
-         console.log(`OrgContext: [${requestId}] Checking membership for user ${user?.id} in organization ${organizationId}...`);
+         // console.log(`OrgContext: [${requestId}] Checking membership for user ${user?.id} in organization ${organizationId}...`);
          const { data: memberData, error: memberError } = await supabase
            .from('organization_members')
            .select('role')
@@ -271,7 +271,7 @@ export const OrganizationProvider = ({ children }) => {
              throw new Error(`Error checking membership: ${memberError.message}`);
          }
 
-         console.log(`OrgContext: [${requestId}] Membership check result for user ${user?.id} in org ${organizationId}:`, memberData);
+         // console.log(`OrgContext: [${requestId}] Membership check result for user ${user?.id} in org ${organizationId}:`, memberData);
 
          if (!memberData) {
              console.warn(`OrgContext: [${requestId}] User ${user?.id} is NOT a member of organization ${organizationId}. Cannot switch context.`);
@@ -280,7 +280,7 @@ export const OrganizationProvider = ({ children }) => {
              return { success: false, error: 'User is not a member of this organization.' };
          }
 
-         console.log(`OrgContext: [${requestId}] User ${user?.id} IS a member (Role: ${memberData.role}). Proceeding with switch to org ${organizationId}.`);
+         // console.log(`OrgContext: [${requestId}] User ${user?.id} IS a member (Role: ${memberData.role}). Proceeding with switch to org ${organizationId}.`);
          const orgDetails = {
              ...data,
              invite_code: data.invite_code, // All members can see invite code
@@ -293,7 +293,7 @@ export const OrganizationProvider = ({ children }) => {
         
         // Dispatch success - the reducer will guard against stale results
         dispatch({ type: ORG_ACTIONS.SWITCH_SUCCESS, requestId, orgId: organizationId, orgData: orgDetails });
-        console.log(`OrgContext: [${requestId}] Successfully switched context to organization:`, orgDetails);
+        // console.log(`OrgContext: [${requestId}] Successfully switched context to organization:`, orgDetails);
         return { success: true, data: orgDetails };
       } else {
         console.warn(`OrgContext: [${requestId}] Organization ${organizationId} not found or access denied by RLS.`);
@@ -313,7 +313,7 @@ export const OrganizationProvider = ({ children }) => {
   // Function to delete an organization (admin only)
   const deleteOrganization = async (organizationId) => {
     dispatch({ type: ORG_ACTIONS.START_MUTATION });
-    console.log(`OrgContext: Starting deleteOrganization for ID: ${organizationId}`);
+    // console.log(`OrgContext: Starting deleteOrganization for ID: ${organizationId}`);
 
     if (!user) {
       console.error("OrgContext: Cannot delete organization - User is not logged in.");
@@ -360,9 +360,9 @@ export const OrganizationProvider = ({ children }) => {
       
       // Remove org from local list instead of full refetch
       removeUserOrganization(organizationId);
-      console.log("Removed organization from local list after deletion");
+      // console.log("Removed organization from local list after deletion");
 
-      console.log(`OrgContext: Successfully deleted organization: ${organizationId}`);
+      // console.log(`OrgContext: Successfully deleted organization: ${organizationId}`);
       return { success: true };
     } catch (error) {
       console.error("Unexpected error in deleteOrganization:", error);
@@ -380,7 +380,7 @@ export const OrganizationProvider = ({ children }) => {
 
     setLoadingOrgLogo(true);
     const timestamp = Date.now();
-    console.log(`[${timestamp}] OrgContext: Starting logo upload for org ${organizationId}. Image URI: ${imageUri}`);
+    // console.log(`[${timestamp}] OrgContext: Starting logo upload for org ${organizationId}. Image URI: ${imageUri}`);
 
     try {
       // Verify user is a member of this organization (RLS handles authorization)
@@ -396,11 +396,11 @@ export const OrganizationProvider = ({ children }) => {
       const fileType = `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`;
 
       // Read file as base64
-      console.log(`[${timestamp}] OrgContext: Reading image file as base64...`);
+      // console.log(`[${timestamp}] OrgContext: Reading image file as base64...`);
       const base64 = await FileSystem.readAsStringAsync(imageUri, {
         encoding: FileSystem.EncodingType.Base64,
       });
-      console.log(`[${timestamp}] OrgContext: Image read. Uploading to storage... Path: ${filePath}, Type: ${fileType}`);
+      // console.log(`[${timestamp}] OrgContext: Image read. Uploading to storage... Path: ${filePath}, Type: ${fileType}`);
 
       // Upload to Supabase Storage (use profile_images bucket)
       const { data: uploadData, error: uploadError } = await supabase.storage
@@ -416,7 +416,7 @@ export const OrganizationProvider = ({ children }) => {
         return { success: false, error: { message: uploadError.message || 'Fehler beim Hochladen des Logos.' } };
       }
 
-      console.log(`[${timestamp}] OrgContext: Storage upload successful for org ${organizationId}:`, uploadData);
+      // console.log(`[${timestamp}] OrgContext: Storage upload successful for org ${organizationId}:`, uploadData);
 
       // Construct the public URL manually
       const storageBaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -428,10 +428,10 @@ export const OrganizationProvider = ({ children }) => {
       // Add timestamp query param to help bypass cache after update
       const publicUrl = `${storageBaseUrl}/storage/v1/object/public/profile_images/${imageUrlPath}?t=${new Date().getTime()}`;
 
-      console.log(`[${timestamp}] OrgContext: Generated public URL for org ${organizationId}:`, publicUrl);
+      // console.log(`[${timestamp}] OrgContext: Generated public URL for org ${organizationId}:`, publicUrl);
 
       // Update the logo_url in the organizations table
-      console.log(`[${timestamp}] OrgContext: Updating organizations table with logo_url for org ${organizationId}`);
+      // console.log(`[${timestamp}] OrgContext: Updating organizations table with logo_url for org ${organizationId}`);
       const { error: dbError } = await supabase
         .from('organizations')
         .update({ logo_url: publicUrl, updated_at: new Date() })
@@ -444,7 +444,7 @@ export const OrganizationProvider = ({ children }) => {
         return { success: false, error: { message: dbError.message || 'Fehler beim Speichern des Logo-Links.' } };
       }
 
-      console.log(`[${timestamp}] OrgContext: Organization logo_url updated successfully for org ${organizationId}.`);
+      // console.log(`[${timestamp}] OrgContext: Organization logo_url updated successfully for org ${organizationId}.`);
 
       // Update local activeOrganization state immediately if this is the active org via reducer
       if (activeOrganizationId === organizationId) {
@@ -453,12 +453,12 @@ export const OrganizationProvider = ({ children }) => {
              orgId: organizationId,
              updates: { logo_url: publicUrl },
          });
-         console.log(`[${timestamp}] OrgContext: Updated activeOrganization state with new logo_url.`);
+         // console.log(`[${timestamp}] OrgContext: Updated activeOrganization state with new logo_url.`);
       }
 
       // Patch user's org list locally instead of full refetch
       patchUserOrganization(organizationId, { logo_url: publicUrl });
-      console.log(`[${timestamp}] OrgContext: Patched org logo_url locally.`);
+      // console.log(`[${timestamp}] OrgContext: Patched org logo_url locally.`);
 
       return { success: true, data: { logoUrl: publicUrl } };
 
@@ -467,7 +467,7 @@ export const OrganizationProvider = ({ children }) => {
       return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
     } finally {
       setLoadingOrgLogo(false);
-      console.log(`[${timestamp}] OrgContext: Finished updateOrganizationLogo for org ${organizationId}. loadingOrgLogo set to false.`);
+      // console.log(`[${timestamp}] OrgContext: Finished updateOrganizationLogo for org ${organizationId}. loadingOrgLogo set to false.`);
     }
   };
 
@@ -487,7 +487,7 @@ export const OrganizationProvider = ({ children }) => {
       setLoadingMembers(true);
       setMembersError(null);
       
-      console.log(`[OrgContext] Fetching members for org ID: ${organizationId}, requestId: ${requestId}`);
+      // console.log(`[OrgContext] Fetching members for org ID: ${organizationId}, requestId: ${requestId}`);
       try {
           const { data, error } = await supabase.rpc('get_organization_members_with_names', {
               p_organization_id: organizationId
@@ -495,7 +495,7 @@ export const OrganizationProvider = ({ children }) => {
           
           // Guard against stale results
           if (membersRequestIdRef.current !== requestId) {
-              console.log(`[OrgContext] Ignoring stale members result (expected ${membersRequestIdRef.current}, got ${requestId})`);
+              // console.log(`[OrgContext] Ignoring stale members result (expected ${membersRequestIdRef.current}, got ${requestId})`);
               return { success: false, error: { message: 'Request superseded by newer request.' } };
           }
           
@@ -506,7 +506,7 @@ export const OrganizationProvider = ({ children }) => {
           }
           
           const memberData = data ?? [];
-          console.log(`[OrgContext] Member data received from RPC for org ${organizationId}:`, memberData);
+          // console.log(`[OrgContext] Member data received from RPC for org ${organizationId}:`, memberData);
           setOrganizationMembers(memberData);
           return { success: true, data: memberData };
       } catch (error) {
@@ -557,7 +557,7 @@ export const OrganizationProvider = ({ children }) => {
 
        // If no fields to update besides timestamp, return early (or decide if timestamp update is desired)
        if (Object.keys(updatePayload).length <= 1) {
-           console.log("OrgContext: No fields to update in updateOrganizationDetails.");
+           // console.log("OrgContext: No fields to update in updateOrganizationDetails.");
            return { success: true, data: activeOrganization }; // Nothing changed, return current data
        }
 
@@ -610,7 +610,7 @@ export const OrganizationProvider = ({ children }) => {
 
     dispatch({ type: ORG_ACTIONS.START_MUTATION });
     try {
-        console.log(`OrgContext: Attempting to update name for org ${organizationId} to "${newName.trim()}" by admin ${user.id}`);
+        // console.log(`OrgContext: Attempting to update name for org ${organizationId} to "${newName.trim()}" by admin ${user.id}`);
         // RLS policy "Allow admin to manage their organization" handles authorization
         const { data, error } = await supabase
             .from('organizations')
@@ -629,7 +629,7 @@ export const OrganizationProvider = ({ children }) => {
             return { success: false, error: { message } };
         }
 
-        console.log(`OrgContext: Successfully updated org name to "${data.name}"`);
+        // console.log(`OrgContext: Successfully updated org name to "${data.name}"`);
         // Refresh the active org state if this is the active org via reducer
         if (activeOrganizationId === organizationId) {
             dispatch({
@@ -658,7 +658,7 @@ export const OrganizationProvider = ({ children }) => {
 
     dispatch({ type: ORG_ACTIONS.START_MUTATION });
     try {
-        console.log(`OrgContext: Attempting to remove member ${memberUserId} from org ${organizationId} by admin ${user.id}`);
+        // console.log(`OrgContext: Attempting to remove member ${memberUserId} from org ${organizationId} by admin ${user.id}`);
         // RLS policy "prevent_last_admin_leave_or_remove_others" handles authorization
         const { error } = await supabase
             .from('organization_members')
@@ -674,7 +674,7 @@ export const OrganizationProvider = ({ children }) => {
             return { success: false, error: { message } };
         }
 
-        console.log(`OrgContext: Successfully removed member ${memberUserId} from org ${organizationId}`);
+        // console.log(`OrgContext: Successfully removed member ${memberUserId} from org ${organizationId}`);
         // ProfileScreen will need to refetch members after this succeeds using fetchOrganizationMembers
         return { success: true };
 
@@ -692,7 +692,7 @@ export const OrganizationProvider = ({ children }) => {
 
     dispatch({ type: ORG_ACTIONS.START_MUTATION });
     try {
-      console.log(`OrgContext: Attempting to transfer admin role in org ${organizationId} to user ${newAdminUserId} by current admin ${user.id}`);
+      // console.log(`OrgContext: Attempting to transfer admin role in org ${organizationId} to user ${newAdminUserId} by current admin ${user.id}`);
       const { data, error } = await supabase.rpc('set_organization_admin', {
         p_organization_id: organizationId,
         p_new_admin_user_id: newAdminUserId
@@ -708,7 +708,7 @@ export const OrganizationProvider = ({ children }) => {
         return { success: false, error: { message: 'Admin-Übertragung fehlgeschlagen (RPC).' } };
       }
 
-      console.log(`OrgContext: Successfully transferred admin role in org ${organizationId} to user ${newAdminUserId}`);
+      // console.log(`OrgContext: Successfully transferred admin role in org ${organizationId} to user ${newAdminUserId}`);
       // Patch the current user's role locally (they become 'member')
       patchUserOrganization(organizationId, { role: 'member' });
       
@@ -742,7 +742,7 @@ export const OrganizationProvider = ({ children }) => {
 
       setLoadingOrgAboutMe(true);
       const timestamp = Date.now();
-      console.log(`[${timestamp}] OrgContext: Starting about_me update for org ${organizationId}.`);
+      // console.log(`[${timestamp}] OrgContext: Starting about_me update for org ${organizationId}.`);
 
       try {
           // RLS policy "Allow admin to manage their organization" should handle authorization
@@ -761,7 +761,7 @@ export const OrganizationProvider = ({ children }) => {
               return { success: false, error: { message } };
           }
 
-          console.log(`[${timestamp}] OrgContext: Successfully updated org about_me for org ${organizationId}.`);
+          // console.log(`[${timestamp}] OrgContext: Successfully updated org about_me for org ${organizationId}.`);
 
           // Update local activeOrganization state if this is the active org via reducer
           if (activeOrganizationId === organizationId) {
@@ -770,7 +770,7 @@ export const OrganizationProvider = ({ children }) => {
                   orgId: organizationId,
                   updates: { about_me: data.about_me },
               });
-              console.log(`[${timestamp}] OrgContext: Updated activeOrganization state with new about_me.`);
+              // console.log(`[${timestamp}] OrgContext: Updated activeOrganization state with new about_me.`);
           }
           // Note: about_me is not stored in userOrganizations list, no patching needed
 
@@ -781,7 +781,7 @@ export const OrganizationProvider = ({ children }) => {
           return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
       } finally {
           setLoadingOrgAboutMe(false);
-          console.log(`[${timestamp}] OrgContext: Finished updateOrganizationAboutMe for org ${organizationId}. loadingOrgAboutMe set to false.`);
+          // console.log(`[${timestamp}] OrgContext: Finished updateOrganizationAboutMe for org ${organizationId}. loadingOrgAboutMe set to false.`);
       }
   };
   // --- END NEW FUNCTION ---

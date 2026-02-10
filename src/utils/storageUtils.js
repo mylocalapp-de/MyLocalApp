@@ -13,7 +13,7 @@ export const saveOfflineData = async (key, data) => {
   try {
     const storageKey = `${OFFLINE_DATA_PREFIX}${key}`;
     await AsyncStorage.setItem(storageKey, JSON.stringify(data));
-    console.log(`[StorageUtils] Offline data saved for key: ${key}`);
+    // console.log(`[StorageUtils] Offline data saved for key: ${key}`);
   } catch (error) {
     console.error(`[StorageUtils] Error saving offline data for key ${key}:`, error);
   }
@@ -29,10 +29,10 @@ export const loadOfflineData = async (key) => {
     const storageKey = `${OFFLINE_DATA_PREFIX}${key}`;
     const jsonData = await AsyncStorage.getItem(storageKey);
     if (jsonData !== null) {
-      console.log(`[StorageUtils] Offline data loaded for key: ${key}`);
+      // console.log(`[StorageUtils] Offline data loaded for key: ${key}`);
       return JSON.parse(jsonData);
     }
-    console.log(`[StorageUtils] No offline data found for key: ${key}`);
+    // console.log(`[StorageUtils] No offline data found for key: ${key}`);
     return null;
   } catch (error) {
     console.error(`[StorageUtils] Error loading offline data for key ${key}:`, error);

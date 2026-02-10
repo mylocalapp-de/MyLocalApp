@@ -188,7 +188,7 @@ const ChatScreen = ({ navigation, route }) => {
   // Fetch on focus
   useEffect(() => {
       const unsubscribeFocus = navigation.addListener('focus', () => {
-          console.log('[ChatScreen] Focused, refetching data...');
+          // console.log('[ChatScreen] Focused, refetching data...');
           if (!isOfflineMode && user) {
               fetchData(); // Use the combined fetch function
           } else {
@@ -201,7 +201,7 @@ const ChatScreen = ({ navigation, route }) => {
   // --- Internal Fetch Functions ---
 
   const fetchChatGroupsInternal = async () => {
-    console.log("[ChatScreen] Fetching chat groups...");
+    // console.log("[ChatScreen] Fetching chat groups...");
     try {
       const { data, error: fetchError } = await supabase
         .from('chat_group_listings')
@@ -213,7 +213,7 @@ const ChatScreen = ({ navigation, route }) => {
         setError('Chat-Gruppen konnten nicht geladen werden.');
         return []; // Return empty array on error
       }
-      console.log(`[ChatScreen] Fetched ${data?.length || 0} chat groups.`);
+      // console.log(`[ChatScreen] Fetched ${data?.length || 0} chat groups.`);
       setChatGroups(data || []); // Update specific state if needed
       return data || [];
     } catch (err) {
@@ -224,14 +224,14 @@ const ChatScreen = ({ navigation, route }) => {
   };
 
   const fetchDirectMessagesInternal = async () => {
-    console.log("[ChatScreen] Fetching direct messages...");
+    // console.log("[ChatScreen] Fetching direct messages...");
     if (!user) {
-        console.log("[ChatScreen] No user, skipping DM fetch.");
+        // console.log("[ChatScreen] No user, skipping DM fetch.");
         setDmError("Bitte anmelden.");
         return [];
     }
     if (isOfflineMode) {
-        console.log("[ChatScreen] Offline mode, skipping DM fetch.");
+        // console.log("[ChatScreen] Offline mode, skipping DM fetch.");
         setDmError("DMs offline nicht verfügbar.");
         return [];
     }
@@ -242,11 +242,11 @@ const ChatScreen = ({ navigation, route }) => {
             .select('*');
 
         if (isOrganizationActive && activeOrganizationId) {
-            console.log(`[ChatScreen] Fetching DMs in Org Context for Org ID: ${activeOrganizationId}`);
+            // console.log(`[ChatScreen] Fetching DMs in Org Context for Org ID: ${activeOrganizationId}`);
             query = query.eq('is_org_conversation', true)
                          .eq('organization_id', activeOrganizationId);
         } else {
-            console.log("[ChatScreen] Fetching DMs in Personal Context");
+            // console.log("[ChatScreen] Fetching DMs in Personal Context");
         }
 
         query = query.order('last_message_at', { ascending: false });
@@ -258,9 +258,9 @@ const ChatScreen = ({ navigation, route }) => {
             return [];
         }
 
-        console.log(`[ChatScreen] Fetched ${data?.length || 0} DM conversations.`);
+        // console.log(`[ChatScreen] Fetched ${data?.length || 0} DM conversations.`);
         if (data && data.length > 0) {
-            console.log('[ChatScreen] First DM data:', data[0]);
+            // console.log('[ChatScreen] First DM data:', data[0]);
         }
         setDmConversations(data || []);
         return data || [];
@@ -275,7 +275,7 @@ const ChatScreen = ({ navigation, route }) => {
   // --- Data Processing and Filtering ---
 
   const processAndCombineData = (groups, dms, blockedIds) => {
-      console.log(`[ChatScreen] Processing ${groups.length} groups and ${dms.length} DMs for context: ${isOrganizationActive ? 'Organization' : 'Personal'}`);
+      // console.log(`[ChatScreen] Processing ${groups.length} groups and ${dms.length} DMs for context: ${isOrganizationActive ? 'Organization' : 'Personal'}`);
       let combined = [];
 
       // --- Context-Specific Group Filtering ---
@@ -285,9 +285,9 @@ const ChatScreen = ({ navigation, route }) => {
           filteredGroupsForContext = groups.filter(group => 
               group.type === 'broadcast' && group.organization_id === activeOrganizationId
           );
-          console.log(`[ChatScreen] Organization context group filter applied: ${initialGroupCount} -> ${filteredGroupsForContext.length}`);
+          // console.log(`[ChatScreen] Organization context group filter applied: ${initialGroupCount} -> ${filteredGroupsForContext.length}`);
       } else {
-           console.log(`[ChatScreen] Personal context, keeping all ${groups.length} fetched groups.`);
+           // console.log(`[ChatScreen] Personal context, keeping all ${groups.length} fetched groups.`);
       }
       // --- End Context-Specific Group Filtering ---
 
@@ -343,7 +343,7 @@ const ChatScreen = ({ navigation, route }) => {
          filteredDmsForContext = dms.filter(dm => 
             !dm.is_org_conversation || (dm.is_org_conversation && dm.initiator_id === user?.id)
          );
-         console.log(`[ChatScreen] Personal context DM filter applied: ${initialDmCount} -> ${filteredDmsForContext.length}`);
+         // console.log(`[ChatScreen] Personal context DM filter applied: ${initialDmCount} -> ${filteredDmsForContext.length}`);
       }
 
       // Filter out blocked DMs
@@ -355,7 +355,7 @@ const ChatScreen = ({ navigation, route }) => {
               return !blockedSet.has(dm.other_user_id);
           }
       });
-      console.log(`[ChatScreen] Filtering blocked DMs: ${filteredDmsForContext.length} -> ${unblockedDms.length}`);
+      // console.log(`[ChatScreen] Filtering blocked DMs: ${filteredDmsForContext.length} -> ${unblockedDms.length}`);
 
       const processedDms = unblockedDms.map(dm => {
            const isOrg = dm.is_org_conversation;
@@ -404,7 +404,7 @@ const ChatScreen = ({ navigation, route }) => {
           return (b.lastTimestamp || 0) - (a.lastTimestamp || 0);
       });
 
-      console.log(`[ChatScreen] Combined list size after sorting and blocking filter: ${combined.length}`);
+      // console.log(`[ChatScreen] Combined list size after sorting and blocking filter: ${combined.length}`);
       return combined;
   };
 
@@ -570,7 +570,7 @@ const ChatScreen = ({ navigation, route }) => {
 
   // Filter combined list based on selected filter
   const filterCombinedList = (filter, listToFilter) => {
-      console.log(`[ChatScreen] Filtering list by: ${filter}`);
+      // console.log(`[ChatScreen] Filtering list by: ${filter}`);
       let resultList = [];
       if (filter === 'Alle') {
           resultList = listToFilter;
@@ -893,7 +893,7 @@ const ChatScreen = ({ navigation, route }) => {
       }
 
       const userIdsToFetch = [...new Set(userDmsNeedingAvatars.map(dm => dm.otherUserId))];
-      console.log(`[ChatScreen] Fetching avatars for ${userIdsToFetch.length} other users.`);
+      // console.log(`[ChatScreen] Fetching avatars for ${userIdsToFetch.length} other users.`);
 
       try {
           const { data: profilesData, error: profilesError } = await supabase

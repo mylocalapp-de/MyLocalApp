@@ -70,12 +70,12 @@ const OrganizationSetupScreen = ({ navigation }) => {
     const apiKey = Platform.OS === 'ios' ? revenueCatApiKeyIos : revenueCatApiKeyAndroid;
     
     // --- Add logging to verify the loaded API key ---
-    console.log(`[RevenueCat Config] Platform: ${Platform.OS}, API Key loaded: ${apiKey ? '******' + apiKey.substring(apiKey.length - 5) : 'NOT FOUND'}`);
+    // console.log(`[RevenueCat Config] Platform: ${Platform.OS}, API Key loaded: ${apiKey ? '******' + apiKey.substring(apiKey.length - 5) : 'NOT FOUND'}`);
     // --- End logging ---
 
     if (apiKey) {
       Purchases.configure({ apiKey });
-      console.log('RevenueCat SDK configured in OrganizationSetupScreen.');
+      // console.log('RevenueCat SDK configured in OrganizationSetupScreen.');
       // Optional: Set log level for debugging - uncomment if needed
       // Purchases.setLogLevel(LOG_LEVEL.DEBUG); 
     } else {
@@ -88,7 +88,7 @@ const OrganizationSetupScreen = ({ navigation }) => {
   // --- Listen for changes after code redemption ---
   useEffect(() => {
     const unsubscribe = Purchases.addCustomerInfoUpdateListener((customerInfo) => {
-      console.log('CustomerInfo updated after code redemption:', customerInfo);
+      // console.log('CustomerInfo updated after code redemption:', customerInfo);
       // Optionally handle entitlement activation or UI update here
     });
     return () => {
@@ -111,17 +111,17 @@ const OrganizationSetupScreen = ({ navigation }) => {
 
           try {
               // 1. Check for existing active entitlement first
-              console.log('[RevenueCat Check] Fetching customer info to check for active subscription...');
+              // console.log('[RevenueCat Check] Fetching customer info to check for active subscription...');
               const customerInfo = await Purchases.getCustomerInfo();
-              console.log('[RevenueCat Check] Fetched customer info:', JSON.stringify(customerInfo.entitlements, null, 2));
+              // console.log('[RevenueCat Check] Fetched customer info:', JSON.stringify(customerInfo.entitlements, null, 2));
 
               if (customerInfo.entitlements?.active?.[requiredEntitlement]) {
-                  console.log(`[RevenueCat Check] Active entitlement '${requiredEntitlement}' found. Skipping purchase flow.`);
+                  // console.log(`[RevenueCat Check] Active entitlement '${requiredEntitlement}' found. Skipping purchase flow.`);
                   setHasActiveSubscription(true);
                   setIsFetchingOfferings(false); // No need to fetch offerings
                   return; // Exit early
               } else {
-                  console.log(`[RevenueCat Check] Active entitlement '${requiredEntitlement}' not found. Proceeding to fetch offerings.`);
+                  // console.log(`[RevenueCat Check] Active entitlement '${requiredEntitlement}' not found. Proceeding to fetch offerings.`);
                   setHasActiveSubscription(false);
               }
 
@@ -129,11 +129,11 @@ const OrganizationSetupScreen = ({ navigation }) => {
               const fetchedOfferings = await Purchases.getOfferings();
               if (fetchedOfferings.current !== null && fetchedOfferings.current.availablePackages.length > 0) {
                   setOfferings(fetchedOfferings.current);
-                  console.log('[RevenueCat] Available packages identifiers:', fetchedOfferings.current.availablePackages.map(pkg => pkg.identifier));
+                  // console.log('[RevenueCat] Available packages identifiers:', fetchedOfferings.current.availablePackages.map(pkg => pkg.identifier));
                   
                   // Use static weekly subscription package identifier
                   const targetPackageId = '$rc_weekly'; // KEEP this identifier
-                  console.log('[RevenueCat] Selecting package with identifier:', targetPackageId);
+                  // console.log('[RevenueCat] Selecting package with identifier:', targetPackageId);
                   const targetPackage = fetchedOfferings.current.availablePackages.find(
                       pkg => pkg.identifier === targetPackageId
                   );
@@ -176,15 +176,15 @@ const OrganizationSetupScreen = ({ navigation }) => {
     setPurchaseError(null);
 
     try {
-        console.log('[Restore] Attempting to restore purchases...');
+        // console.log('[Restore] Attempting to restore purchases...');
         const customerInfo = await Purchases.restorePurchases();
-        console.log('[Restore] Restore completed. Customer Info:', JSON.stringify(customerInfo, null, 2));
+        // console.log('[Restore] Restore completed. Customer Info:', JSON.stringify(customerInfo, null, 2));
 
         const requiredEntitlement = 'organization_admin';
 
         // Check if the entitlement is now active after restoring
         if (customerInfo.entitlements?.active?.[requiredEntitlement]) {
-            console.log(`[Restore] Entitlement '${requiredEntitlement}' found after restore.`);
+            // console.log(`[Restore] Entitlement '${requiredEntitlement}' found after restore.`);
             Alert.alert('Erfolg', 'Deine früheren Käufe wurden erfolgreich wiederhergestellt.');
             // Update state to reflect active subscription which triggers UI update
             setHasActiveSubscription(true);
@@ -193,7 +193,7 @@ const OrganizationSetupScreen = ({ navigation }) => {
                 setMode('create');
             }
         } else {
-            console.log(`[Restore] Entitlement '${requiredEntitlement}' not found after restore.`);
+            // console.log(`[Restore] Entitlement '${requiredEntitlement}' not found after restore.`);
             Alert.alert('Keine Käufe gefunden', 'Es wurden keine aktiven Abonnements zum Wiederherstellen für dieses Konto gefunden.');
         }
 
@@ -277,7 +277,7 @@ const OrganizationSetupScreen = ({ navigation }) => {
 
     try {
         // Directly create the organization as the user already has the entitlement
-        console.log('[handleCreateWithActiveSubscription] User has active subscription. Creating organization...');
+        // console.log('[handleCreateWithActiveSubscription] User has active subscription. Creating organization...');
         const result = await createOrganization(orgName.trim());
 
         if (result.success) {
@@ -316,12 +316,12 @@ const OrganizationSetupScreen = ({ navigation }) => {
 
     try {
         // 1. Initiate purchase
-        console.log('[handlePurchaseAndCreate] Attempting purchase with package:', JSON.stringify(selectedPackage, null, 2));
+        // console.log('[handlePurchaseAndCreate] Attempting purchase with package:', JSON.stringify(selectedPackage, null, 2));
         const purchaseResult = await Purchases.purchasePackage(selectedPackage);
-        console.log('[handlePurchaseAndCreate] Purchase attempt finished. Result:', JSON.stringify(purchaseResult, null, 2));
+        // console.log('[handlePurchaseAndCreate] Purchase attempt finished. Result:', JSON.stringify(purchaseResult, null, 2));
 
         // DEBUG: log entitlement state after purchase
-        console.log('[handlePurchaseAndCreate] customerInfo.entitlements after purchase:', purchaseResult.customerInfo?.entitlements);
+        // console.log('[handlePurchaseAndCreate] customerInfo.entitlements after purchase:', purchaseResult.customerInfo?.entitlements);
 
         // --- Add check for valid result before destructuring ---
         if (!purchaseResult || typeof purchaseResult !== 'object') {
@@ -332,9 +332,9 @@ const OrganizationSetupScreen = ({ navigation }) => {
 
         const { customerInfo, productIdentifier } = purchaseResult;
         // DEBUG: log all entitlements objects
-        console.log('[handlePurchaseAndCreate] Full entitlements object:', JSON.stringify(customerInfo.entitlements, null, 2));
+        // console.log('[handlePurchaseAndCreate] Full entitlements object:', JSON.stringify(customerInfo.entitlements, null, 2));
         // DEBUG: log active entitlement keys
-        console.log('[handlePurchaseAndCreate] Active entitlement identifiers:', Object.keys(customerInfo.entitlements.active || {}));
+        // console.log('[handlePurchaseAndCreate] Active entitlement identifiers:', Object.keys(customerInfo.entitlements.active || {}));
 
         // --- Add check for customerInfo before accessing entitlements ---
         if (!customerInfo || typeof customerInfo !== 'object') {
@@ -352,7 +352,7 @@ const OrganizationSetupScreen = ({ navigation }) => {
         // Ensure entitlements.active exists and is an object before checking the specific entitlement
         if (customerInfo.entitlements?.active && typeof customerInfo.entitlements.active === 'object' && typeof customerInfo.entitlements.active[requiredEntitlement] !== 'undefined') {
             // 3. Purchase successful and entitlement active, proceed with organization creation
-            console.log(`Purchase successful for ${productIdentifier}, entitlement '${requiredEntitlement}' active.`);
+            // console.log(`Purchase successful for ${productIdentifier}, entitlement '${requiredEntitlement}' active.`);
             
             const result = await createOrganization(orgName.trim());
             
@@ -365,7 +365,7 @@ const OrganizationSetupScreen = ({ navigation }) => {
                 console.error(`CRITICAL: Payment successful (Product: ${productIdentifier}, Entitlement: ${requiredEntitlement}) but org creation failed for user ${user?.id}:`, result.error);
                 setError(String(result.error?.message || 'Dein Abo ist aktiv, aber die Organisation konnte nicht erstellt werden. Bitte kontaktiere den Support.'));
                 // Keep user on this screen to see the error
-                console.log('[handlePurchaseAndCreate] Org creation failed after payment.');
+                // console.log('[handlePurchaseAndCreate] Org creation failed after payment.');
             }
         } else {
             // Entitlement missing: attempt to sync and refetch customer info before erroring
@@ -374,7 +374,7 @@ const OrganizationSetupScreen = ({ navigation }) => {
                 await Purchases.syncPurchases();
                 const refreshedInfo = await Purchases.getCustomerInfo();
                 if (refreshedInfo.entitlements.active?.[requiredEntitlement]) {
-                    console.log('[handlePurchaseAndCreate] Entitlement found after refresh. Proceeding to create organization.');
+                    // console.log('[handlePurchaseAndCreate] Entitlement found after refresh. Proceeding to create organization.');
                     const resultAfterRefresh = await createOrganization(orgName.trim());
                     if (resultAfterRefresh.success) {
                         Alert.alert('Erfolg', `Organisation "${resultAfterRefresh.data.name}" wurde erstellt und dein Abo ist aktiv!`);
@@ -384,8 +384,8 @@ const OrganizationSetupScreen = ({ navigation }) => {
                         setError(String(resultAfterRefresh.error?.message || 'Dein Abo ist aktiv, aber die Organisation konnte nicht erstellt werden. Bitte kontaktiere den Support.'));
                     }
                     // DEBUG: log refreshed entitlements
-                    console.log('[handlePurchaseAndCreate] Refreshed full entitlements object:', JSON.stringify(refreshedInfo.entitlements, null, 2));
-                    console.log('[handlePurchaseAndCreate] Refreshed active entitlement identifiers:', Object.keys(refreshedInfo.entitlements.active || {}));
+                    // console.log('[handlePurchaseAndCreate] Refreshed full entitlements object:', JSON.stringify(refreshedInfo.entitlements, null, 2));
+                    // console.log('[handlePurchaseAndCreate] Refreshed active entitlement identifiers:', Object.keys(refreshedInfo.entitlements.active || {}));
                 } else {
                     throw new Error('Entitlement not found after refresh');
                 }
@@ -403,12 +403,12 @@ const OrganizationSetupScreen = ({ navigation }) => {
             Alert.alert('Kauf fehlgeschlagen', e.message);
         } else {
             setError('Kauf abgebrochen.'); // Optional: inform user about cancellation
-            console.log('[handlePurchaseAndCreate] Purchase cancelled by user.');
+            // console.log('[handlePurchaseAndCreate] Purchase cancelled by user.');
         }
     } finally {
-        console.log('[handlePurchaseAndCreate] Entering finally block.');
+        // console.log('[handlePurchaseAndCreate] Entering finally block.');
         setIsLoading(false);
-        console.log('[handlePurchaseAndCreate] setIsLoading(false) executed.');
+        // console.log('[handlePurchaseAndCreate] setIsLoading(false) executed.');
     }
   };
 
