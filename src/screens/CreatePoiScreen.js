@@ -15,7 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
-import { supabase } from '../lib/supabase';
+import { fetchMapConfig, createPoi } from '../services/poiService';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import Constants from 'expo-constants'; // To access app.config extra
@@ -48,11 +48,7 @@ const CreatePoiScreen = ({ navigation }) => {
     const fetchCategories = async () => {
       setLoadingCategories(true);
       try {
-        const { data, error } = await supabase
-          .from('map_config')
-          .select('map_filters')
-          .eq('id', 1)
-          .single();
+        const { data, error } = await fetchMapConfig();
 
         if (error) throw error;
 
@@ -150,11 +146,9 @@ const CreatePoiScreen = ({ navigation }) => {
 
     setIsSaving(true);
     try {
-      const { error } = await supabase
-        .from('map_pois')
-        .insert({
+      const { error } = await createPoi({
           title: title.trim(),
-          description: description.trim() || null, // Allow empty description
+          description: description.trim() || null,
           latitude: latitude,
           longitude: longitude,
           category: category,

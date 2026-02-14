@@ -6,7 +6,12 @@ import { useOrganization } from '../context/OrganizationContext';
 import { useAuth } from '../context/AuthContext';
 import { useNetwork } from '../context/NetworkContext';
 import { loadOfflineData } from '../utils/storageUtils';
-import { supabase } from '../lib/supabase';
+import {
+  fetchArticleFilters,
+  fetchArticleListings,
+  fetchVereinOrganizations as fetchVereinOrgsService,
+  fetchPinnedArticles as fetchPinnedArticlesService,
+} from '../services/articleService';
 
 // Helper function to transform Supabase Storage URLs
 const getTransformedImageUrl = (originalUrl) => {
@@ -147,10 +152,7 @@ const HomeScreen = ({ navigation }) => {
 
     setIsLoadingFilters(true);
     try {
-      const { data, error } = await supabase
-        .from('article_filters')
-        .select('name, is_highlighted, enable_personal, is_admin_only')
-        .order('display_order', { ascending: true });
+      const { data, error } = await fetchArticleFilters();
 
       if (error) {
         console.error('Error fetching filters:', error);
@@ -191,10 +193,7 @@ const HomeScreen = ({ navigation }) => {
       setError(null);
       
       // Fetch articles from the articles table directly with author info
-      const { data, error } = await supabase
-        .from('article_listings') // Query the VIEW instead of the table
-        .select('*') // Select all columns from the view
-        .order('published_at', { ascending: false }); // Order by the original timestamp
+      const { data, error } = await fetchArticleListings();
       
       if (error) {
         console.error('Error fetching articles:', error);
@@ -221,11 +220,7 @@ const HomeScreen = ({ navigation }) => {
       setIsLoading(true);
       setError(null);
 
-      const { data, error } = await supabase
-        .from('organizations')
-        .select('id, name, logo_url')
-        .eq('is_verein', true)
-        .order('name', { ascending: true });
+      const { data, error } = await fetchVereinOrgsService();
 
       if (error) {
         console.error('Error fetching Verein organizations:', error);
@@ -251,10 +246,7 @@ const HomeScreen = ({ navigation }) => {
       return;
     }
     try {
-      const { data, error } = await supabase
-        .from('pinned_articles')
-        .select('article_id')
-        .eq('filter_name', filter);
+      const { data, error } = await fetchPinnedArticlesService(filter);
 
       if (error) {
         console.error(`Error fetching pinned articles for ${filter}:`, error);

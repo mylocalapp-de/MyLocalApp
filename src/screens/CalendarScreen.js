@@ -5,7 +5,7 @@ import { Calendar, LocaleConfig } from 'react-native-calendars';
 import ScreenHeader from '../components/common/ScreenHeader';
 import { Ionicons } from '@expo/vector-icons';
 import { RRule, RRuleSet, rrulestr } from 'rrule';
-import { supabase } from '../lib/supabase';
+import { fetchEventCategoriesForCalendar, fetchEventListings } from '../services/calendarService';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useNetwork } from '../context/NetworkContext';
@@ -171,10 +171,7 @@ const CalendarScreen = ({ navigation }) => {
 
     try {
       // Fetch event categories first
-      const { data: categoriesData, error: categoriesError } = await supabase
-        .from('event_categories')
-        .select('name, is_highlighted')
-        .order('display_order', { ascending: true });
+      const { data: categoriesData, error: categoriesError } = await fetchEventCategoriesForCalendar();
 
       if (categoriesError) {
         console.error('Error fetching event categories:', categoriesError);
@@ -191,9 +188,7 @@ const CalendarScreen = ({ navigation }) => {
       setLoadingFilters(false);
 
       // Fetch events including recurrence fields
-      const { data, error } = await supabase
-        .from('event_listings')
-        .select('*');
+      const { data, error } = await fetchEventListings();
       
       if (error) {
         console.error('Error fetching events:', error);

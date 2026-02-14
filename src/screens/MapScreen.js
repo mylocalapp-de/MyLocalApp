@@ -3,7 +3,7 @@ import { View, StyleSheet, TouchableOpacity, Text, Platform, ActivityIndicator, 
 import ScreenHeader from '../components/common/ScreenHeader';
 import { Ionicons } from '@expo/vector-icons';
 import MapView, { Marker, Callout, PROVIDER_GOOGLE } from 'react-native-maps';
-import { supabase } from '../lib/supabase'; // Adjust path if necessary
+import { fetchMapConfig, fetchMapPois, deletePoi as deletePoiService } from '../services/poiService';
 import { useOrganization } from '../context/OrganizationContext'; // Import Organization context
 import { useAuth } from '../context/AuthContext'; // Import Auth context
 import Constants from 'expo-constants';
@@ -35,30 +35,14 @@ const MapScreen = ({ navigation }) => {
 
     try {
       // Fetch Map Config (remains the same)
-      const { data: configData, error: configError } = await supabase
-        .from('map_config')
-        .select('*')
-        .eq('id', 1)
-        .maybeSingle();
+      const { data: configData, error: configError } = await fetchMapConfig();
 
       if (configError) throw configError;
       if (!configData) throw new Error("Map configuration not found.");
       setMapConfig(configData);
 
       // Fetch POIs based on organization context -- REMOVED CONDITIONAL LOGIC
-      let query = supabase.from('map_pois').select('*');
-
-      /* // REMOVED Client-side filtering - RLS policy now handles visibility
-      if (isOrganizationActive && activeOrganizationId && user) {
-          // Fetch public POIs OR POIs belonging to the active organization
-          query = query.or(`organization_id.is.null,organization_id.eq.${activeOrganizationId}`);
-      } else {
-          // Fetch only public POIs if no org context or user not logged in
-          query = query.is('organization_id', null);
-      }
-      */
-
-      const { data: poisData, error: poisError } = await query;
+      const { data: poisData, error: poisError } = await fetchMapPois();
 
       if (poisError) throw poisError;
       setPois(poisData || []);
@@ -109,12 +93,7 @@ const MapScreen = ({ navigation }) => {
                   text: 'Löschen', style: 'destructive', onPress: async () => {
                       setIsDeleting(true);
                       try {
-                          const { error: deleteError } = await supabase
-                              .from('map_pois')
-                              .delete()
-                              .eq('id', poiId)
-                              // RLS ensures only authorized members can delete
-                              .eq('organization_id', activeOrganizationId);
+                          const { error: deleteError } = await deletePoiService(poiId, activeOrganizationId);
 
                           if (deleteError) {
                               throw deleteError;
