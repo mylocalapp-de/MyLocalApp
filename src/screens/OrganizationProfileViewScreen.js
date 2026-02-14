@@ -13,7 +13,13 @@ import {
     Dimensions
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../lib/supabase';
+import {
+  fetchOrganizationProfile,
+  fetchOrgArticleListings,
+  fetchOrgPublishedEvents,
+  updateProfileBlocked,
+} from '../services/profileService';
+import { findOrCreateOrgDmConversation } from '../services/dmService';
 import { useAuth } from '../context/AuthContext'; // To check if user is member for potential actions
 import { useNetwork } from '../context/NetworkContext';
 import ScreenHeader from '../components/common/ScreenHeader'; 
@@ -93,11 +99,7 @@ const OrganizationProfileViewScreen = ({ route, navigation }) => {
         setError(null);
         let orgData = null; // Declare orgData outside try block
         try {
-            const { data, error: orgError } = await supabase // <-- Changed variable name to avoid conflict
-                .from('organizations')
-                .select('id, name, logo_url, about_me, admin_id') // Include admin_id if needed
-                .eq('id', organizationId)
-                .single();
+            const { data, error: orgError } = await fetchOrganizationProfile(organizationId);
 
             if (orgError) throw orgError;
             if (!data) throw new Error('Organisation nicht gefunden.'); // <-- Check data
@@ -122,22 +124,7 @@ const OrganizationProfileViewScreen = ({ route, navigation }) => {
     const fetchOrganizationArticles = async (orgIdToFetch, orgNameToFormat) => {
         setLoadingArticles(true);
         try {
-            const { data: articlesData, error: articlesError } = await supabase
-                .from('articles')
-                .select(`
-                    id,
-                    title,
-                    content,
-                    created_at,
-                    author_id,
-                    organization_id,
-                    linked_event_id,
-                    tags,
-                    profiles ( display_name ) 
-                `)
-                .eq('organization_id', orgIdToFetch)
-                .eq('is_published', true)
-                .order('created_at', { ascending: false });
+            const { data: articlesData, error: articlesError } = await fetchOrgArticleListings(orgIdToFetch);
 
             if (articlesError) throw articlesError;
 
@@ -163,12 +150,7 @@ const OrganizationProfileViewScreen = ({ route, navigation }) => {
     const fetchOrganizationEvents = async (orgIdToFetch) => {
         setLoadingEvents(true);
         try {
-            const { data: eventsData, error: eventsError } = await supabase
-                .from('events')
-                .select('*')
-                .eq('organization_id', orgIdToFetch)
-                .eq('is_published', true)
-                .order('date', { ascending: false });
+            const { data: eventsData, error: eventsError } = await fetchOrgPublishedEvents(orgIdToFetch);
 
             if (eventsError) throw eventsError;
 
@@ -321,10 +303,7 @@ const OrganizationProfileViewScreen = ({ route, navigation }) => {
         setLoadingConversation(true);
         try {
             // console.log(`Calling RPC find_or_create_org_dm_conversation for org: ${organizationProfile.id}`);
-            const { data: conversationId, error: rpcError } = await supabase.rpc(
-                'find_or_create_org_dm_conversation',
-                { p_organization_id: organizationProfile.id } 
-            );
+            const { data: conversationId, error: rpcError } = await findOrCreateOrgDmConversation(organizationProfile.id);
 
             if (rpcError || !conversationId) {
                 console.error('Error finding/creating Org DM conversation:', rpcError);
@@ -368,12 +347,7 @@ const OrganizationProfileViewScreen = ({ route, navigation }) => {
         }
 
         try {
-            const { data, error: updateError } = await supabase
-                .from('profiles')
-                .update({ blocked: updatedBlockedList })
-                .eq('id', user.id)
-                .select('blocked')
-                .single();
+            const { data, error: updateError } = await updateProfileBlocked(user.id, updatedBlockedList);
 
             if (updateError) throw updateError;
 

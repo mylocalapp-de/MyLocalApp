@@ -17,7 +17,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext'; // To switch context after success
-import { supabase } from '../lib/supabase'; // Import supabase client
+import { useOrganizationVoucher, checkOrganizationVoucher } from '../services/profileService';
 import Purchases, { PurchasesOffering, PurchasesPackage, LOG_LEVEL } from 'react-native-purchases';
 import Constants from 'expo-constants'; // Import Constants
 import { useAppConfig } from '../context/AppConfigContext';
@@ -218,15 +218,7 @@ const OrganizationSetupScreen = ({ navigation }) => {
     
     // Important: Mark the voucher as used in the database BEFORE creating the org
     try {
-      const { error: updateError } = await supabase
-        .from('organization_vouchers')
-        .update({ 
-          is_used: true, 
-          used_at: new Date().toISOString(),
-          user_id: user?.id // Record who used it
-        })
-        .eq('code', voucherCode)
-        .is('is_used', false); // Only update if not already used
+      const { error: updateError } = await useOrganizationVoucher(voucherCode, user?.id);
 
       if (updateError) {
         console.error("Error marking voucher as used:", updateError);
@@ -457,11 +449,7 @@ const OrganizationSetupScreen = ({ navigation }) => {
     setVoucherError('');
     
     try {
-      const { data, error: dbError } = await supabase
-        .from('organization_vouchers')
-        .select('id, is_used, expires_at')
-        .eq('code', voucherCode.trim())
-        .maybeSingle(); // Use maybeSingle to handle non-existent codes gracefully
+      const { data, error: dbError } = await checkOrganizationVoucher(voucherCode);
 
       if (dbError) {
         console.error("Error fetching voucher:", dbError);

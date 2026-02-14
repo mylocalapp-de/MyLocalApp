@@ -17,7 +17,26 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../lib/supabase';
+import {
+  fetchEventWithOrganizer,
+  fetchLinkedArticle,
+  fetchEventCommentsWithUsers,
+  addEventComment,
+  deleteEventComment,
+  getEventAttendeesRpc,
+  getEventReactionsRpc,
+  fetchUserAttendanceStatus as fetchUserStatusService,
+  fetchAttendeesWithUsers,
+  checkEventReaction,
+  deleteEventReaction,
+  insertEventReaction,
+  deleteEventAttendee,
+  upsertEventAttendee,
+  deleteEvent as deleteEventService,
+  deleteEventRpc,
+  deleteEventDirect,
+} from '../services/eventService';
+import { checkOrgMembership } from '../services/profileService';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useNetwork } from '../context/NetworkContext';
@@ -202,33 +221,7 @@ const EventDetailScreen = ({ route, navigation }) => {
       setError(null);
       
       // Fetch the event with organizer and recurrence info
-      const { data: eventData, error: eventError } = await supabase
-        .from('events') // Query the base table
-        .select(`
-          id,
-          title,
-          description,
-          date,
-          time,
-          end_time,
-          location,
-          category,
-          image_url,
-          organizer_id,
-          organization_id,
-          is_published,
-          created_at,
-          profiles:organizer_id (
-            display_name
-          ),
-          organizations:organization_id (
-            name
-          ),
-          recurrence_rule,
-          recurrence_end_date
-        `)
-        .eq('id', eventId)
-        .single();
+      const { data: eventData, error: eventError } = await fetchEventWithOrganizer(eventId);
       
       if (eventError) {
         console.error('Error fetching event:', eventError);
@@ -262,11 +255,7 @@ const EventDetailScreen = ({ route, navigation }) => {
       
       // Check if this event has a linked article (is an Event-Article)
       try {
-        const { data: linkedArticle } = await supabase
-          .from('articles')
-          .select('id')
-          .eq('linked_event_id', eventId)
-          .maybeSingle();
+        const { data: linkedArticle } = await fetchLinkedArticle(eventId);
         setHasLinkedArticle(!!linkedArticle);
       } catch (e) {
         console.error('Error checking linked article:', e);
@@ -313,12 +302,7 @@ const EventDetailScreen = ({ route, navigation }) => {
         }
         // User is in the correct org context, now check membership
         try {
-            const { data: membership, error } = await supabase
-                .from('organization_members')
-                .select('user_id') // Just need to check if a row exists
-                .eq('organization_id', eventData.organization_id)
-                .eq('user_id', user.id)
-                .maybeSingle();
+            const { data: membership, error } = await checkOrgMembership(eventData.organization_id, user.id);
 
             if (error) {
                 console.error("Error checking org membership:", error);
@@ -340,11 +324,7 @@ const EventDetailScreen = ({ route, navigation }) => {
     try {
       setLoadingComments(true);
       
-      const { data, error } = await supabase
-        .from('event_comments_with_users')
-        .select('*')
-        .eq('event_id', eventId)
-        .order('created_at', { ascending: false });
+      const { data, error } = await fetchEventCommentsWithUsers(eventId);
       
       if (error) {
         console.error('Error fetching comments:', error);
@@ -364,8 +344,7 @@ const EventDetailScreen = ({ route, navigation }) => {
     if (isOfflineMode) return; // Prevent fetch if offline
 
     try {
-      const { data, error } = await supabase
-        .rpc('get_event_reactions', { event_uuid: eventId });
+      const { data, error } = await getEventReactionsRpc(eventId);
       
       if (error) {
         console.error('Error fetching reactions:', error);
@@ -383,8 +362,7 @@ const EventDetailScreen = ({ route, navigation }) => {
     if (isOfflineMode) return; // Prevent fetch if offline
 
     try {
-      const { data, error } = await supabase
-        .rpc('get_event_attendees', { event_uuid: eventId });
+      const { data, error } = await getEventAttendeesRpc(eventId);
 
       if (error) {
         console.error('Error fetching attendee counts:', error);
@@ -403,12 +381,7 @@ const EventDetailScreen = ({ route, navigation }) => {
       return;
     }
     try {
-      const { data, error } = await supabase
-        .from('event_attendees')
-        .select('status')
-        .eq('event_id', eventId)
-        .eq('user_id', user.id)
-        .maybeSingle();
+      const { data, error } = await fetchUserStatusService(eventId, user.id);
 
       if (error) {
         console.error('Error fetching user status:', error);
@@ -426,11 +399,7 @@ const EventDetailScreen = ({ route, navigation }) => {
 
     try {
       setLoadingAttendeesList(true);
-      const { data, error } = await supabase
-        .from('event_attendees_with_users') // Use the view with user info
-        .select('user_id, user_name, status') // Removed avatar_url from select
-        .eq('event_id', eventId)
-        .order('created_at', { ascending: false });
+      const { data, error } = await fetchAttendeesWithUsers(eventId);
 
       if (error) {
         console.error('Error fetching attendees list:', error);
@@ -485,17 +454,11 @@ const EventDetailScreen = ({ route, navigation }) => {
 
       if (newStatus === null && currentStatus) {
         // Delete the attendance record
-        const { error } = await supabase
-          .from('event_attendees')
-          .delete()
-          .eq('event_id', eventId)
-          .eq('user_id', user.id);
+        const { error } = await deleteEventAttendee(eventId, user.id);
         if (error) throw error;
       } else if (newStatus) {
         // Upsert the attendance record (insert or update)
-        const { error } = await supabase
-          .from('event_attendees')
-          .upsert({ event_id: eventId, user_id: user.id, status: newStatus }, { onConflict: 'event_id, user_id' });
+        const { error } = await upsertEventAttendee({ eventId, userId: user.id, status: newStatus });
         if (error) throw error;
       }
 
@@ -538,11 +501,7 @@ const EventDetailScreen = ({ route, navigation }) => {
               setIsDeleting(true);
 
               // Use RPC to delete the event, passing the organizer ID
-              const { data, error } = await supabase
-                .rpc('delete_event', {
-                  p_event_id: eventId,
-                  p_organizer_id: user.id
-                });
+              const { data, error } = await deleteEventRpc(eventId, user.id);
 
               if (error || data === false) {
                 console.error('Error deleting event with RPC:', error);
@@ -626,12 +585,10 @@ const EventDetailScreen = ({ route, navigation }) => {
     try {
       setAddingComment(true);
       
-      const { data, error } = await supabase
-        .from('event_comments')
-        .insert({
-          event_id: eventId,
-          user_id: user.id,
-          text: comment
+      const { data, error } = await addEventComment({
+          eventId,
+          userId: user.id,
+          text: comment,
         });
       
       if (error) {
@@ -666,13 +623,7 @@ const EventDetailScreen = ({ route, navigation }) => {
       setAddingReaction(true);
       
       // First check if user already reacted with this emoji
-      const { data: existingReaction, error: checkError } = await supabase
-        .from('event_reactions')
-        .select('id')
-        .eq('event_id', eventId)
-        .eq('user_id', user.id)
-        .eq('emoji', emoji)
-        .maybeSingle();
+      const { data: existingReaction, error: checkError } = await checkEventReaction(eventId, user.id);
       
       if (checkError) {
         console.error('Error checking reaction:', checkError);
@@ -681,10 +632,7 @@ const EventDetailScreen = ({ route, navigation }) => {
       
       if (existingReaction) {
         // User already reacted with this emoji, so remove the reaction
-        const { error: deleteError } = await supabase
-          .from('event_reactions')
-          .delete()
-          .eq('id', existingReaction.id);
+        const { error: deleteError } = await deleteEventReaction(existingReaction.id);
           
         if (deleteError) {
           console.error('Error removing reaction:', deleteError);
@@ -692,12 +640,10 @@ const EventDetailScreen = ({ route, navigation }) => {
         }
       } else {
         // Add new reaction
-        const { error: insertError } = await supabase
-          .from('event_reactions')
-          .insert({
-            event_id: eventId,
-            user_id: user.id,
-            emoji: emoji
+        const { error: insertError } = await insertEventReaction({
+            eventId,
+            userId: user.id,
+            emoji,
           });
           
         if (insertError) {

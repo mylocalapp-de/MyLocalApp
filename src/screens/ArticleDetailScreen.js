@@ -21,7 +21,20 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../lib/supabase';
+import {
+  fetchArticleDetail,
+  fetchArticleImages as fetchArticleImagesService,
+  fetchArticleAttachments as fetchArticleAttachmentsService,
+  fetchArticleComments as fetchArticleCommentsService,
+  addArticleComment as addArticleCommentService,
+  fetchArticleReactions as fetchArticleReactionsService,
+  checkArticleReaction,
+  deleteArticleReaction,
+  insertArticleReaction,
+  deleteArticleViaRpc,
+  deleteArticleDirect,
+} from '../services/articleService';
+import { checkOrgMembership } from '../services/profileService';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useNetwork } from '../context/NetworkContext';
@@ -141,19 +154,7 @@ const ArticleDetailScreen = ({ route, navigation }) => {
       setError(null);
       
       // Fetch the article with author info
-      const { data: articleData, error: articleError } = await supabase
-        .from('articles')
-        .select(`
-          *,
-          profiles:author_id (
-            display_name
-          ),
-          organizations:organization_id (
-            name
-          )
-        `)
-        .eq('id', articleId)
-        .single();
+      const { data: articleData, error: articleError } = await fetchArticleDetail(articleId);
       
       if (articleError) {
         console.error('Error fetching article:', articleError);
@@ -231,12 +232,7 @@ const ArticleDetailScreen = ({ route, navigation }) => {
         }
         // User is in the correct org context, now check membership
         try {
-            const { data: membership, error } = await supabase
-                .from('organization_members')
-                .select('user_id') // Just need to check if a row exists
-                .eq('organization_id', articleData.organization_id)
-                .eq('user_id', user.id)
-                .maybeSingle();
+            const { data: membership, error } = await checkOrgMembership(articleData.organization_id, user.id);
 
             if (error) {
                 console.error("Error checking org membership:", error);
@@ -254,11 +250,7 @@ const ArticleDetailScreen = ({ route, navigation }) => {
   // Fetch article images from article_images table
   const fetchArticleImages = async (artId, legacyImageUrl) => {
     try {
-      const { data: imagesData, error: imagesError } = await supabase
-        .from('article_images')
-        .select('id, image_url, display_order')
-        .eq('article_id', artId)
-        .order('display_order', { ascending: true });
+      const { data: imagesData, error: imagesError } = await fetchArticleImagesService(artId);
 
       if (imagesError) {
         console.error('Error fetching article images:', imagesError);
@@ -288,11 +280,7 @@ const ArticleDetailScreen = ({ route, navigation }) => {
   // Fetch article attachments from article_attachments table
   const fetchArticleAttachments = async (artId) => {
     try {
-      const { data: attachmentsData, error: attachmentsError } = await supabase
-        .from('article_attachments')
-        .select('id, file_url, file_name, file_size, mime_type, display_order')
-        .eq('article_id', artId)
-        .order('display_order', { ascending: true });
+      const { data: attachmentsData, error: attachmentsError } = await fetchArticleAttachmentsService(artId);
 
       if (attachmentsError) {
         console.error('Error fetching article attachments:', attachmentsError);
@@ -349,16 +337,7 @@ const ArticleDetailScreen = ({ route, navigation }) => {
       setLoadingComments(true);
       
       // Updated query to explicitly join profiles and select display_name
-      const { data, error } = await supabase
-        .from('article_comments') // Query the base table directly
-        .select(`
-          *,
-          profiles:user_id (
-            display_name
-          )
-        `) // Explicitly select display_name from joined profiles table
-        .eq('article_id', articleId)
-        .order('created_at', { ascending: false });
+      const { data, error } = await fetchArticleCommentsService(articleId);
       
       if (error) {
         console.error('Error fetching comments:', error);
@@ -378,8 +357,7 @@ const ArticleDetailScreen = ({ route, navigation }) => {
     if (isOfflineMode) return;
 
     try {
-      const { data, error } = await supabase
-        .rpc('get_article_reactions', { article_uuid: articleId });
+      const { data, error } = await fetchArticleReactionsService(articleId);
       
       if (error) {
         console.error('Error fetching reactions:', error);
@@ -419,12 +397,10 @@ const ArticleDetailScreen = ({ route, navigation }) => {
     try {
       setAddingComment(true);
       
-      const { data, error } = await supabase
-        .from('article_comments')
-        .insert({
-          article_id: articleId,
-          user_id: user.id,
-          text: comment
+      const { data, error } = await addArticleCommentService({
+          articleId,
+          userId: user.id,
+          text: comment,
         });
       
       if (error) {
@@ -473,13 +449,7 @@ const ArticleDetailScreen = ({ route, navigation }) => {
       setAddingReaction(true);
       
       // First check if user already reacted with this emoji
-      const { data: existingReaction, error: checkError } = await supabase
-        .from('article_reactions')
-        .select('id')
-        .eq('article_id', articleId)
-        .eq('user_id', user.id)
-        .eq('emoji', emoji)
-        .maybeSingle();
+      const { data: existingReaction, error: checkError } = await checkArticleReaction(articleId, user.id, emoji);
       
       if (checkError) {
         console.error('Error checking reaction:', checkError);
@@ -488,10 +458,7 @@ const ArticleDetailScreen = ({ route, navigation }) => {
       
       if (existingReaction) {
         // User already reacted with this emoji, so remove the reaction
-        const { error: deleteError } = await supabase
-          .from('article_reactions')
-          .delete()
-          .eq('id', existingReaction.id);
+        const { error: deleteError } = await deleteArticleReaction(existingReaction.id);
           
         if (deleteError) {
           console.error('Error removing reaction:', deleteError);
@@ -499,12 +466,10 @@ const ArticleDetailScreen = ({ route, navigation }) => {
         }
       } else {
         // Add new reaction
-        const { error: insertError } = await supabase
-          .from('article_reactions')
-          .insert({
-            article_id: articleId,
-            user_id: user.id,
-            emoji: emoji
+        const { error: insertError } = await insertArticleReaction({
+            articleId,
+            userId: user.id,
+            emoji,
           });
           
         if (insertError) {
@@ -550,21 +515,13 @@ const ArticleDetailScreen = ({ route, navigation }) => {
               setIsDeleting(true);
               
               // Use RPC to bypass RLS policies
-              const { data, error } = await supabase
-                .rpc('delete_article', {
-                  p_article_id: articleId,
-                  p_author_id: user.id
-                });
+              const { data, error } = await deleteArticleViaRpc(articleId, user.id);
               
               if (error) {
                 console.error('Error deleting article with RPC:', error);
                 
                 // Fallback to direct delete if RPC fails
-                const { error: directError } = await supabase
-                  .from('articles')
-                  .delete()
-                  .eq('id', articleId)
-                  .eq('author_id', user.id);
+                const { error: directError } = await deleteArticleDirect(articleId, user.id);
                 
                 if (directError) {
                   console.error('Error with direct delete:', directError);

@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, SafeAreaView, Acti
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { useAuth } from '../context/AuthContext';
-import { supabase } from '../lib/supabase';
+import { markProfileVerified } from '../services/profileService';
 import { useAppConfig } from '../context/AppConfigContext';
 
 const API_BASE = 'https://admin.mylocalapp.de/api/verification';
@@ -143,10 +143,7 @@ const VerificationScreen = () => {
       // After successful verification, explicitly set is_verified=true in profile
       if (user?.id) {
         try {
-          const { error: updateError } = await supabase
-            .from('profiles')
-            .update({ is_verified: true })
-            .eq('id', user.id);
+          const { error: updateError } = await markProfileVerified(user.id);
           if (updateError) {
             console.warn('[Verification] profile update failed, will refetch profile:', updateError);
           }

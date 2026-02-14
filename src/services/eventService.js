@@ -153,3 +153,61 @@ export async function upsertEventAttendee({ eventId, userId, status }) {
       { onConflict: 'event_id,user_id' }
     );
 }
+
+export async function deleteEventAttendee(eventId, userId) {
+  return supabase
+    .from('event_attendees')
+    .delete()
+    .eq('event_id', eventId)
+    .eq('user_id', userId);
+}
+
+// ─── Event Detail Views & RPCs ───────────────────────────────────────────────
+
+export async function fetchEventCommentsWithUsers(eventId) {
+  return supabase
+    .from('event_comments_with_users')
+    .select('*')
+    .eq('event_id', eventId)
+    .order('created_at', { ascending: false });
+}
+
+export async function getEventReactionsRpc(eventId) {
+  return supabase.rpc('get_event_reactions', { event_uuid: eventId });
+}
+
+export async function getEventAttendeesRpc(eventId) {
+  return supabase.rpc('get_event_attendees', { event_uuid: eventId });
+}
+
+export async function fetchUserAttendanceStatus(eventId, userId) {
+  return supabase
+    .from('event_attendees')
+    .select('status')
+    .eq('event_id', eventId)
+    .eq('user_id', userId)
+    .maybeSingle();
+}
+
+export async function fetchAttendeesWithUsers(eventId) {
+  return supabase
+    .from('event_attendees_with_users')
+    .select('user_id, user_name, status')
+    .eq('event_id', eventId)
+    .order('created_at', { ascending: false });
+}
+
+export async function deleteEventRpc(eventId, organizerId) {
+  return supabase.rpc('delete_event', {
+    p_event_id: eventId,
+    p_organizer_id: organizerId,
+  });
+}
+
+export async function deleteEventDirect(eventId, organizerId) {
+  return supabase
+    .from('events')
+    .delete()
+    .eq('id', eventId)
+    .eq('organizer_id', organizerId);
+}

@@ -7,7 +7,7 @@ import * as ImagePicker from 'expo-image-picker'; // Import ImagePicker
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useNetwork } from '../context/NetworkContext';
-import { supabase } from '../lib/supabase';
+// supabase import removed — use services instead
 import Constants from 'expo-constants'; // Import Constants to access env vars
 import { useAppConfig } from '../context/AppConfigContext';
 
