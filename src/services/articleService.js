@@ -93,3 +93,112 @@ export async function fetchArticleAttachments(articleId) {
     .eq('article_id', articleId)
     .order('display_order', { ascending: true });
 }
+
+// ─── Article Listings (HomeScreen) ───────────────────────────────────────────
+
+export async function fetchArticleListings() {
+  return supabase
+    .from('article_listings')
+    .select('*')
+    .order('published_at', { ascending: false });
+}
+
+export async function fetchArticleFilters() {
+  return supabase
+    .from('article_filters')
+    .select('name, is_highlighted, enable_personal, is_admin_only')
+    .order('display_order', { ascending: true });
+}
+
+export async function fetchPinnedArticles(filterName) {
+  return supabase
+    .from('pinned_articles')
+    .select('article_id')
+    .eq('filter_name', filterName);
+}
+
+export async function fetchVereinOrganizations() {
+  return supabase
+    .from('organizations')
+    .select('id, name, logo_url')
+    .eq('is_verein', true)
+    .order('name', { ascending: true });
+}
+
+// ─── Article Detail ──────────────────────────────────────────────────────────
+
+export async function fetchArticleDetail(articleId) {
+  return supabase
+    .from('articles')
+    .select(`
+      *,
+      author:profiles ( display_name, avatar_url ),
+      organization:organizations ( name, logo_url )
+    `)
+    .eq('id', articleId)
+    .single();
+}
+
+// ─── Article Comments ────────────────────────────────────────────────────────
+
+export async function fetchArticleComments(articleId) {
+  return supabase
+    .from('article_comments')
+    .select(`
+      *,
+      profiles:user_id (
+        display_name
+      )
+    `)
+    .eq('article_id', articleId)
+    .order('created_at', { ascending: false });
+}
+
+export async function addArticleComment({ articleId, userId, text }) {
+  return supabase
+    .from('article_comments')
+    .insert({ article_id: articleId, user_id: userId, text });
+}
+
+// ─── Article Reactions ───────────────────────────────────────────────────────
+
+export async function fetchArticleReactions(articleId) {
+  return supabase.rpc('get_article_reactions', { article_uuid: articleId });
+}
+
+export async function checkArticleReaction(articleId, userId, emoji) {
+  return supabase
+    .from('article_reactions')
+    .select('id')
+    .eq('article_id', articleId)
+    .eq('user_id', userId)
+    .eq('emoji', emoji)
+    .maybeSingle();
+}
+
+export async function deleteArticleReaction(reactionId) {
+  return supabase.from('article_reactions').delete().eq('id', reactionId);
+}
+
+export async function insertArticleReaction({ articleId, userId, emoji }) {
+  return supabase
+    .from('article_reactions')
+    .insert({ article_id: articleId, user_id: userId, emoji });
+}
+
+// ─── Article Deletion ────────────────────────────────────────────────────────
+
+export async function deleteArticleViaRpc(articleId, authorId) {
+  return supabase.rpc('delete_article', {
+    p_article_id: articleId,
+    p_author_id: authorId,
+  });
+}
+
+export async function deleteArticleDirect(articleId, authorId) {
+  return supabase
+    .from('articles')
+    .delete()
+    .eq('id', articleId)
+    .eq('author_id', authorId);
+}
