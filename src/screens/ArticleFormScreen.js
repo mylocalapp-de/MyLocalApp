@@ -30,10 +30,9 @@ import {
   fetchArticleAttachments as fetchArticleAttachmentsService,
 } from '../services/articleService';
 import { checkOrgMembership } from '../services/profileService';
-import { uploadImage, uploadImages, uploadFile, uploadFiles } from '../services/uploadService';
+import { uploadImage, uploadImages, uploadFile, uploadFiles, getFileIcon, formatFileSize } from '../services/uploadService';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
-import { uploadImages, uploadFiles, getFileIcon, formatFileSize } from '../services/uploadService';
 import { LinearGradient } from 'expo-linear-gradient';
 import { RichEditor, RichToolbar, actions } from 'react-native-pell-rich-editor';
 import 'react-native-get-random-values';
