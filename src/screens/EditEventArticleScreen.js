@@ -20,12 +20,12 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import { Picker } from '@react-native-picker/picker';
 import { RRule, rrulestr } from 'rrule';
-import { supabase } from '../lib/supabase';
+import { fetchEventCategories as fetchEventCategoriesService, fetchEvent } from '../services/eventService';
+import { checkOrgMembership, fetchLinkedArticleId, updateEventArticle } from '../services/eventArticleService';
+import { uploadImage as uploadImageService } from '../services/uploadService';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
-import 'react-native-get-random-values';
-import { v4 as uuidv4 } from 'uuid';
-import { decode } from 'base64-arraybuffer';
+// uuid and base64-arraybuffer now handled by uploadService
 import { LinearGradient } from 'expo-linear-gradient';
 
 const { height } = Dimensions.get('window');
@@ -82,10 +82,7 @@ const EditEventArticleScreen = ({ navigation, route }) => {
   const fetchEventCategories = async () => {
     setLoadingCategories(true);
     try {
-      const { data, error } = await supabase
-        .from('event_categories')
-        .select('name, is_highlighted, is_admin_only')
-        .order('display_order', { ascending: true });
+      const { data, error } = await fetchEventCategoriesService();
 
       if (error) {
         console.error('Error fetching event categories:', error);
@@ -114,11 +111,7 @@ const EditEventArticleScreen = ({ navigation, route }) => {
 
     try {
       // Fetch the event
-      const { data: eventData, error: eventError } = await supabase
-        .from('events')
-        .select('*')
-        .eq('id', eventId)
-        .single();
+      const { data: eventData, error: eventError } = await fetchEvent(eventId);
 
       if (eventError) {
         console.error('Error fetching event:', eventError);
@@ -139,12 +132,7 @@ const EditEventArticleScreen = ({ navigation, route }) => {
           canEdit = false;
         } else {
           try {
-            const { data: membership, error: memberError } = await supabase
-              .from('organization_members')
-              .select('user_id')
-              .eq('organization_id', eventData.organization_id)
-              .eq('user_id', user?.id)
-              .maybeSingle();
+            const { data: membership, error: memberError } = await checkOrgMembership(eventData.organization_id, user?.id);
             if (!memberError && membership) {
               canEdit = true;
             }
@@ -162,11 +150,7 @@ const EditEventArticleScreen = ({ navigation, route }) => {
       }
 
       // Fetch linked article
-      const { data: articleData, error: articleError } = await supabase
-        .from('articles')
-        .select('id')
-        .eq('linked_event_id', eventId)
-        .maybeSingle();
+      const { data: articleData, error: articleError } = await fetchLinkedArticleId(eventId);
 
       if (!articleError && articleData) {
         setLinkedArticleId(articleData.id);
@@ -308,10 +292,10 @@ const EditEventArticleScreen = ({ navigation, route }) => {
       const formattedDate = date.toISOString().split('T')[0];
       const formattedTime = time.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', hour12: false });
 
-      // Update the event
-      const { error: eventError } = await supabase
-        .from('events')
-        .update({
+      const { error: updateError } = await updateEventArticle({
+        eventId,
+        linkedArticleId,
+        eventUpdates: {
           title: title,
           description: description,
           date: formattedDate,
@@ -321,34 +305,22 @@ const EditEventArticleScreen = ({ navigation, route }) => {
           image_url: finalImageUrl,
           recurrence_rule: rruleString,
           recurrence_end_date: recurrenceEnd,
-          tags: tags
-        })
-        .eq('id', eventId);
+          tags: tags,
+        },
+        articleUpdates: linkedArticleId ? {
+          title: title,
+          content: description,
+          image_url: finalImageUrl,
+          preview_image_url: finalImageUrl,
+          tags: tags,
+        } : null,
+      });
 
-      if (eventError) {
-        console.error('Error updating event:', eventError);
-        Alert.alert('Fehler', 'Event konnte nicht aktualisiert werden.');
+      if (updateError) {
+        console.error('Error updating event article:', updateError);
+        Alert.alert('Fehler', 'Veranstaltung konnte nicht aktualisiert werden.');
         setIsSaving(false);
         return;
-      }
-
-      // Update the linked article if exists
-      if (linkedArticleId) {
-        const { error: articleError } = await supabase
-          .from('articles')
-          .update({
-            title: title,
-            content: description,
-            image_url: finalImageUrl,
-            preview_image_url: finalImageUrl,
-            tags: tags
-          })
-          .eq('id', linkedArticleId);
-
-        if (articleError) {
-          console.error('Error updating linked article:', articleError);
-          // Don't fail completely, event is updated
-        }
       }
 
       Alert.alert(
@@ -483,15 +455,7 @@ const EditEventArticleScreen = ({ navigation, route }) => {
     if (!asset || !asset.base64) return null;
     setIsUploading(true);
     try {
-        const fileExt = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
-        const fileName = `${uuidv4()}.${fileExt}`;
-        const filePath = `${fileName}`;
-        const { data, error: uploadError } = await supabase.storage
-            .from('event_images')
-            .upload(filePath, decode(asset.base64), { contentType: asset.mimeType ?? `image/${fileExt}` });
-        if (uploadError) throw uploadError;
-        const { data: urlData } = supabase.storage.from('event_images').getPublicUrl(filePath);
-        return urlData?.publicUrl;
+        return await uploadImageService(asset, 'event_images');
     } catch (error) {
         console.error('Error uploading image:', error);
         Alert.alert('Upload Fehler', 'Das Bild konnte nicht hochgeladen werden.');

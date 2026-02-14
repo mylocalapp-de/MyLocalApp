@@ -32,12 +32,13 @@ const { height } = Dimensions.get('window');
 const androidPaddingTop = height * 0.03;
 
 /**
- * Unified Event Form Screen — handles both create and edit modes.
+ * Unified Event Article Form Screen — handles both create and edit modes.
+ * Creates/updates both an event AND a linked article simultaneously.
  *
  * Route params:
  *   - eventId (optional): when present, operates in edit mode
  */
-const EventFormScreen = ({ navigation, route }) => {
+const EventArticleFormScreen = ({ navigation, route }) => {
   const eventId = route.params?.eventId;
   const isEditMode = !!eventId;
 
@@ -60,11 +61,16 @@ const EventFormScreen = ({ navigation, route }) => {
   const [imageAsset, setImageAsset] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
 
+  // Tags state
+  const [tags, setTags] = useState([]);
+  const [tagInput, setTagInput] = useState('');
+
   // Edit-only state
   const [isLoading, setIsLoading] = useState(isEditMode);
   const [error, setError] = useState(null);
   const [imageUrl, setImageUrl] = useState('');
   const [removeCurrentImage, setRemoveCurrentImage] = useState(false);
+  const [linkedArticleId, setLinkedArticleId] = useState(null);
 
   // Recurrence state
   const [isRecurring, setIsRecurring] = useState(false);
@@ -118,26 +124,26 @@ const EventFormScreen = ({ navigation, route }) => {
     setIsLoading(true);
     setError(null);
     try {
-      const { data, error } = await supabase
+      const { data: eventData, error: eventError } = await supabase
         .from('events')
         .select('*')
         .eq('id', eventId)
         .single();
 
-      if (error) { setError('Could not load event. Please try again later.'); return; }
-      if (!data) { setError('Event not found.'); return; }
+      if (eventError) { setError('Could not load event. Please try again later.'); return; }
+      if (!eventData) { setError('Event not found.'); return; }
 
       // Authorization check
       let canEdit = false;
-      if (!data.organization_id) {
-        canEdit = data.organizer_id === user?.id && !activeOrganizationId;
+      if (!eventData.organization_id) {
+        canEdit = eventData.organizer_id === user?.id && !activeOrganizationId;
       } else {
-        if (activeOrganizationId === data.organization_id) {
+        if (activeOrganizationId === eventData.organization_id) {
           try {
             const { data: membership, error: memberError } = await supabase
               .from('organization_members')
               .select('user_id')
-              .eq('organization_id', data.organization_id)
+              .eq('organization_id', eventData.organization_id)
               .eq('user_id', user?.id)
               .maybeSingle();
             if (!memberError && membership) canEdit = true;
@@ -146,27 +152,39 @@ const EventFormScreen = ({ navigation, route }) => {
       }
       if (!canEdit) {
         setError('You are not authorized to edit this event.');
-        Alert.alert('Fehler', 'Du bist nicht berechtigt, dieses Event zu bearbeiten.');
+        Alert.alert('Fehler', 'Du bist nicht berechtigt, diese Veranstaltung zu bearbeiten.');
         navigation.goBack();
         return;
       }
 
+      // Fetch linked article
+      const { data: articleData, error: articleError } = await supabase
+        .from('articles')
+        .select('id')
+        .eq('linked_event_id', eventId)
+        .maybeSingle();
+      if (!articleError && articleData) {
+        setLinkedArticleId(articleData.id);
+      }
+
       // Populate form
-      setTitle(data.title || '');
-      setDescription(data.description || '');
-      setLocation(data.location || '');
-      setCategory(data.category || '');
-      setInitialCategory(data.category || '');
-      setImageUrl(data.image_url || '');
+      setTitle(eventData.title || '');
+      setDescription(eventData.description || '');
+      setLocation(eventData.location || '');
+      setCategory(eventData.category || '');
+      setInitialCategory(eventData.category || '');
+      setImageUrl(eventData.image_url || '');
       setImageAsset(null);
       setRemoveCurrentImage(false);
+      setTags(eventData.tags || []);
+      setTagInput('');
 
       // Parse recurrence
-      if (data.recurrence_rule) {
+      if (eventData.recurrence_rule) {
         setIsRecurring(true);
         try {
-          const ruleOptions = RRule.parseString(data.recurrence_rule);
-          const dtstart = new Date(data.date + 'T00:00:00Z');
+          const ruleOptions = RRule.parseString(eventData.recurrence_rule);
+          const dtstart = new Date(eventData.date + 'T00:00:00Z');
           const rule = new RRule({ ...ruleOptions, dtstart });
           setRecurrenceFreq(rule.options.freq);
           setRecurrenceInterval(rule.options.interval.toString());
@@ -195,8 +213,8 @@ const EventFormScreen = ({ navigation, route }) => {
       }
 
       // Parse date/time
-      setDate(new Date(data.date));
-      const timeMatch = data.time?.match(/(\d{2}):(\d{2})/);
+      setDate(new Date(eventData.date));
+      const timeMatch = eventData.time?.match(/(\d{2}):(\d{2})/);
       if (timeMatch) {
         const t = new Date();
         t.setHours(parseInt(timeMatch[1], 10), parseInt(timeMatch[2], 10), 0, 0);
@@ -214,7 +232,7 @@ const EventFormScreen = ({ navigation, route }) => {
 
   // ─── Validation ─────────────────────────────────────────────
   const validateForm = () => {
-    if (!title.trim()) { Alert.alert('Fehler', 'Bitte gib einen Titel für das Event ein.'); return false; }
+    if (!title.trim()) { Alert.alert('Fehler', 'Bitte gib einen Titel ein.'); return false; }
     if (!description.trim()) { Alert.alert('Fehler', 'Bitte gib eine Beschreibung ein.'); return false; }
     if (!location.trim()) { Alert.alert('Fehler', 'Bitte gib einen Ort ein.'); return false; }
     if (!category) { Alert.alert('Fehler', 'Bitte wähle eine Kategorie aus.'); return false; }
@@ -271,6 +289,19 @@ const EventFormScreen = ({ navigation, route }) => {
     setRemoveCurrentImage(true);
   };
 
+  // ─── Tag management ─────────────────────────────────────────
+  const addTag = () => {
+    const trimmedTag = tagInput.trim();
+    if (trimmedTag && !tags.includes(trimmedTag)) {
+      setTags(prev => [...prev, trimmedTag]);
+      setTagInput('');
+    }
+  };
+
+  const removeTag = (index) => {
+    setTags(prev => prev.filter((_, i) => i !== index));
+  };
+
   // ─── Recurrence helpers ─────────────────────────────────────
   const buildRruleString = () => {
     if (!isRecurring) return null;
@@ -300,15 +331,13 @@ const EventFormScreen = ({ navigation, route }) => {
   };
 
   const onDateChange = (event, selectedDate) => {
-    const currentDate = selectedDate || date;
     setShowDatePicker(Platform.OS === 'ios');
-    setDate(currentDate);
+    if (selectedDate) setDate(selectedDate);
   };
 
   const onTimeChange = (event, selectedTime) => {
-    const currentTime = selectedTime || time;
     setShowTimePicker(Platform.OS === 'ios');
-    setTime(currentTime);
+    if (selectedTime) setTime(selectedTime);
   };
 
   const onRecurrenceEndDateChange = (event, selectedDate) => {
@@ -340,7 +369,7 @@ const EventFormScreen = ({ navigation, route }) => {
 
   // ─── Submit handlers ────────────────────────────────────────
   const handlePublish = async () => {
-    if (!user) { Alert.alert('Fehler', 'Du musst angemeldet sein, um ein Event zu erstellen.'); return; }
+    if (!user) { Alert.alert('Fehler', 'Du musst angemeldet sein, um eine Veranstaltung zu erstellen.'); return; }
     if (!validateForm()) return;
 
     setIsSubmitting(true);
@@ -363,24 +392,47 @@ const EventFormScreen = ({ navigation, route }) => {
         if (rruleString && recurrenceEndDate) recurrenceEnd = recurrenceEndDate.toISOString().split('T')[0];
       }
 
-      const { error } = await supabase
+      // Step 1: Insert event
+      const { data: eventData, error: eventError } = await supabase
         .from('events')
         .insert({
           title, description, date: formattedDate, time: `Um ${formattedTime}`,
           location, category, image_url: finalImageUrl,
           organizer_id: user.id, organization_id: activeOrganizationId,
-          is_published: true, recurrence_rule: rruleString, recurrence_end_date: recurrenceEnd
+          is_published: true, recurrence_rule: rruleString,
+          recurrence_end_date: recurrenceEnd, tags
         })
         .select()
         .single();
 
-      if (error) {
-        console.error('Error publishing event:', error);
+      if (eventError) {
+        console.error('Error publishing event:', eventError);
         Alert.alert('Fehler', 'Event konnte nicht veröffentlicht werden.');
+        setIsSubmitting(false);
         return;
       }
 
-      Alert.alert('Erfolg', 'Dein Event wurde erfolgreich veröffentlicht!',
+      // Step 2: Insert linked article
+      const { data: articleData, error: articleError } = await supabase
+        .from('articles')
+        .insert({
+          title, content: description, type: 'Veranstaltungen',
+          author_id: user.id, organization_id: activeOrganizationId,
+          is_published: true, image_url: finalImageUrl,
+          preview_image_url: finalImageUrl, linked_event_id: eventData.id, tags
+        })
+        .select()
+        .single();
+
+      if (articleError) {
+        console.error('Error creating linked article:', articleError);
+        await supabase.from('events').delete().eq('id', eventData.id);
+        Alert.alert('Fehler', 'Artikel konnte nicht erstellt werden.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      Alert.alert('Erfolg', 'Deine Veranstaltung wurde erfolgreich veröffentlicht!',
         [{ text: 'OK', onPress: () => navigation.goBack() }]);
     } catch (err) {
       console.error('Unexpected error:', err);
@@ -417,22 +469,36 @@ const EventFormScreen = ({ navigation, route }) => {
       const formattedDate = date.toISOString().split('T')[0];
       const formattedTime = time.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', hour12: false });
 
-      const { error } = await supabase
+      // Update event
+      const { error: eventError } = await supabase
         .from('events')
         .update({
           title, description, date: formattedDate, time: `Um ${formattedTime}`,
           location, category, image_url: finalImageUrl,
-          recurrence_rule: rruleString, recurrence_end_date: recurrenceEnd
+          recurrence_rule: rruleString, recurrence_end_date: recurrenceEnd, tags
         })
         .eq('id', eventId);
 
-      if (error) {
-        console.error('Error updating event:', error);
-        Alert.alert('Fehler', 'Event konnte nicht aktualisiert werden. Prüfe die RLS Policies oder Datenbankverbindung.');
+      if (eventError) {
+        console.error('Error updating event:', eventError);
+        Alert.alert('Fehler', 'Event konnte nicht aktualisiert werden.');
+        setIsSubmitting(false);
         return;
       }
 
-      Alert.alert('Erfolg', 'Dein Event wurde erfolgreich aktualisiert!',
+      // Update linked article
+      if (linkedArticleId) {
+        const { error: articleError } = await supabase
+          .from('articles')
+          .update({
+            title, content: description,
+            image_url: finalImageUrl, preview_image_url: finalImageUrl, tags
+          })
+          .eq('id', linkedArticleId);
+        if (articleError) console.error('Error updating linked article:', articleError);
+      }
+
+      Alert.alert('Erfolg', 'Deine Veranstaltung wurde erfolgreich aktualisiert!',
         [{ text: 'OK', onPress: () => {
           navigation.navigate('CalendarList');
           setTimeout(() => navigation.navigate('EventDetail', { eventId }), 100);
@@ -504,7 +570,7 @@ const EventFormScreen = ({ navigation, route }) => {
     return (
       <SafeAreaView style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#4285F4" />
-        <Text style={styles.loadingText}>Event wird geladen...</Text>
+        <Text style={styles.loadingText}>Veranstaltung wird geladen...</Text>
       </SafeAreaView>
     );
   }
@@ -514,8 +580,8 @@ const EventFormScreen = ({ navigation, route }) => {
       <SafeAreaView style={styles.errorContainer}>
         <Ionicons name="alert-circle-outline" size={40} color="#ff3b30" />
         <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity style={styles.backButtonStyle} onPress={() => navigation.goBack()}>
-          <Text style={styles.backButtonTextStyle}>Zurück</Text>
+        <TouchableOpacity style={styles.backButtonError} onPress={() => navigation.goBack()}>
+          <Text style={styles.backButtonText}>Zurück</Text>
         </TouchableOpacity>
       </SafeAreaView>
     );
@@ -531,7 +597,7 @@ const EventFormScreen = ({ navigation, route }) => {
           <Ionicons name="close" size={24} color="#333" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>
-          {isEditMode ? 'Event bearbeiten' : 'Neues Event erstellen'}
+          {isEditMode ? 'Veranstaltung bearbeiten' : 'Neue Veranstaltung'}
         </Text>
         <View style={styles.headerRight}>
           {(isSubmitting || isUploading) ? (
@@ -553,14 +619,40 @@ const EventFormScreen = ({ navigation, route }) => {
           <Text style={styles.inputLabel}>Kategorie</Text>
           {renderCategoryButtons()}
 
+          <Text style={styles.inputLabel}>Schlagwörter (Optional)</Text>
+          {tags.length > 0 && (
+            <View style={styles.tagsContainer}>
+              {tags.map((tag, index) => (
+                <TouchableOpacity key={index} style={styles.tagChip} onPress={() => removeTag(index)}>
+                  <Text style={styles.tagChipText}>{tag}</Text>
+                  <Ionicons name="close-circle" size={16} color="#666" style={styles.tagRemoveIcon} />
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+          <View style={styles.tagInputContainer}>
+            <TextInput
+              style={styles.tagInput}
+              placeholder="Schlagwort eingeben und Enter drücken..."
+              value={tagInput}
+              onChangeText={setTagInput}
+              onSubmitEditing={addTag}
+              returnKeyType="done"
+              blurOnSubmit={false}
+            />
+            <TouchableOpacity style={styles.tagAddButton} onPress={addTag}>
+              <Ionicons name="add" size={20} color="#4285F4" />
+            </TouchableOpacity>
+          </View>
+
           <Text style={styles.inputLabel}>Titel</Text>
-          <TextInput style={styles.textInput} placeholder="Titel des Events..." value={title} onChangeText={setTitle} maxLength={100} />
+          <TextInput style={styles.textInput} placeholder="Titel der Veranstaltung..." value={title} onChangeText={setTitle} maxLength={100} />
 
           <Text style={styles.inputLabel}>Beschreibung</Text>
-          <TextInput style={styles.descriptionInput} placeholder="Beschreibung des Events..." value={description} onChangeText={setDescription} multiline textAlignVertical="top" />
+          <TextInput style={styles.descriptionInput} placeholder="Beschreibung der Veranstaltung..." value={description} onChangeText={setDescription} multiline textAlignVertical="top" />
 
           <Text style={styles.inputLabel}>Ort</Text>
-          <TextInput style={styles.textInput} placeholder="Ort des Events..." value={location} onChangeText={setLocation} maxLength={100} />
+          <TextInput style={styles.textInput} placeholder="Ort der Veranstaltung..." value={location} onChangeText={setLocation} maxLength={100} />
 
           <Text style={styles.inputLabel}>Datum</Text>
           <TouchableOpacity onPress={() => setShowDatePicker(true)} style={styles.datePickerButton}>
@@ -582,7 +674,7 @@ const EventFormScreen = ({ navigation, route }) => {
 
           {/* Recurrence Section */}
           <View style={styles.recurrenceToggleContainer}>
-            <Text style={styles.inputLabel}>Event wiederholen?</Text>
+            <Text style={styles.inputLabel}>{isEditMode ? 'Veranstaltung wiederholen?' : 'Veranstaltung wiederholen?'}</Text>
             <Switch
               trackColor={{ false: '#767577', true: '#81b0ff' }}
               thumbColor={isRecurring ? '#4285F4' : '#f4f3f4'}
@@ -669,8 +761,8 @@ const styles = StyleSheet.create({
   loadingText: { marginTop: 10, color: '#666' },
   errorContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20, backgroundColor: '#fff' },
   errorText: { marginTop: 10, color: '#666', textAlign: 'center', marginBottom: 20 },
-  backButtonStyle: { backgroundColor: '#eee', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 5 },
-  backButtonTextStyle: { color: '#4285F4', fontWeight: 'bold', fontSize: 16 },
+  backButtonError: { padding: 10 },
+  backButtonText: { color: '#4285F4', fontWeight: 'bold', fontSize: 16 },
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingHorizontal: 15, paddingVertical: 10,
@@ -722,6 +814,13 @@ const styles = StyleSheet.create({
   weekdaySelectedText: { color: '#fff', fontWeight: 'bold' },
   clearDateButton: { marginTop: -5, marginBottom: 15, alignSelf: 'flex-start' },
   clearDateButtonText: { color: '#ff3b30', fontSize: 13 },
+  tagsContainer: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 8 },
+  tagChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e7f0fe', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 16, marginRight: 8, marginBottom: 8 },
+  tagChipText: { color: '#4285F4', fontSize: 13, marginRight: 4 },
+  tagRemoveIcon: { marginLeft: 2 },
+  tagInputContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  tagInput: { flex: 1, backgroundColor: '#f8f8f8', padding: 12, borderRadius: 8, fontSize: 14 },
+  tagAddButton: { padding: 12, marginLeft: 8, backgroundColor: '#eef4ff', borderRadius: 8 },
 });
 
-export default EventFormScreen;
+export default EventArticleFormScreen;
