@@ -20,13 +20,13 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import { Picker } from '@react-native-picker/picker';
 import { RRule, RRuleSet, rrulestr, Weekday } from 'rrule';
-import { supabase } from '../lib/supabase';
+import { fetchEventCategories as fetchEventCategoriesService, fetchEvent, updateEvent } from '../services/eventService';
+import { checkOrgMembership } from '../services/eventArticleService';
+import { uploadImage as uploadImageService } from '../services/uploadService';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
-import 'react-native-get-random-values';
-import { v4 as uuidv4 } from 'uuid';
-import { decode } from 'base64-arraybuffer';
+// uuid and base64-arraybuffer now handled by uploadService
 import { LinearGradient } from 'expo-linear-gradient';
 
 const { height } = Dimensions.get('window');
@@ -78,10 +78,7 @@ const EditEventScreen = ({ navigation, route }) => {
   const fetchEventCategories = async () => {
     setLoadingCategories(true);
     try {
-      const { data, error } = await supabase
-        .from('event_categories')
-        .select('name, is_highlighted, is_admin_only')
-        .order('display_order', { ascending: true });
+      const { data, error } = await fetchEventCategoriesService();
 
       if (error) {
         console.error('Error fetching event categories:', error);
@@ -109,11 +106,7 @@ const EditEventScreen = ({ navigation, route }) => {
     setError(null);
 
     try {
-      const { data, error } = await supabase
-        .from('events')
-        .select('*')
-        .eq('id', eventId)
-        .single();
+      const { data, error } = await fetchEvent(eventId);
 
       if (error) {
         console.error('Error fetching event:', error);
@@ -134,12 +127,7 @@ const EditEventScreen = ({ navigation, route }) => {
           canEdit = false;
         } else {
           try {
-            const { data: membership, error: memberError } = await supabase
-              .from('organization_members')
-              .select('user_id')
-              .eq('organization_id', data.organization_id)
-              .eq('user_id', user?.id)
-              .maybeSingle();
+            const { data: membership, error: memberError } = await checkOrgMembership(data.organization_id, user?.id);
             if (!memberError && membership) {
               canEdit = true;
             }
@@ -300,9 +288,7 @@ const EditEventScreen = ({ navigation, route }) => {
       const formattedTime = time.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', hour12: false });
 
       // Directly update the event including image_url and recurrence
-      const { error } = await supabase
-        .from('events')
-        .update({
+      const { error } = await updateEvent(eventId, {
           title: title,
           description: description,
           date: formattedDate,
@@ -311,9 +297,8 @@ const EditEventScreen = ({ navigation, route }) => {
           category: category,
           image_url: finalImageUrl,
           recurrence_rule: rruleString,
-          recurrence_end_date: recurrenceEnd
-        })
-        .eq('id', eventId);
+          recurrence_end_date: recurrenceEnd,
+        });
 
       if (error) {
         console.error('Error updating event:', error);
@@ -458,15 +443,7 @@ const EditEventScreen = ({ navigation, route }) => {
     if (!asset || !asset.base64) return null;
     setIsUploading(true);
     try {
-        const fileExt = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
-        const fileName = `${uuidv4()}.${fileExt}`;
-        const filePath = `${fileName}`;
-        const { data, error: uploadError } = await supabase.storage
-            .from('event_images')
-            .upload(filePath, decode(asset.base64), { contentType: asset.mimeType ?? `image/${fileExt}` });
-        if (uploadError) throw uploadError;
-        const { data: urlData } = supabase.storage.from('event_images').getPublicUrl(filePath);
-        return urlData?.publicUrl;
+        return await uploadImageService(asset, 'event_images');
     } catch (error) {
         console.error('Error uploading image:', error);
         Alert.alert('Upload Fehler', 'Das Bild konnte nicht hochgeladen werden.');

@@ -20,12 +20,12 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import { Picker } from '@react-native-picker/picker';
 import { RRule } from 'rrule';
-import { supabase } from '../lib/supabase';
+import { fetchEventCategories as fetchEventCategoriesService } from '../services/eventService';
+import { createEventArticle } from '../services/eventArticleService';
+import { uploadImage as uploadImageService } from '../services/uploadService';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
-import 'react-native-get-random-values';
-import { v4 as uuidv4 } from 'uuid';
-import { decode } from 'base64-arraybuffer';
+// uuid and base64-arraybuffer now handled by uploadService
 import { LinearGradient } from 'expo-linear-gradient';
 
 const { height } = Dimensions.get('window');
@@ -70,10 +70,7 @@ const CreateEventArticleScreen = ({ navigation }) => {
   const fetchEventCategories = async () => {
     setLoadingCategories(true);
     try {
-      const { data, error } = await supabase
-        .from('event_categories')
-        .select('name, is_highlighted, is_admin_only')
-        .order('display_order', { ascending: true });
+      const { data, error } = await fetchEventCategoriesService();
 
       if (error) {
         console.error('Error fetching event categories:', error);
@@ -124,15 +121,7 @@ const CreateEventArticleScreen = ({ navigation }) => {
     if (!asset || !asset.base64) return null;
     setIsUploading(true);
     try {
-        const fileExt = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
-        const fileName = `${uuidv4()}.${fileExt}`;
-        const filePath = `${fileName}`;
-        const { data, error: uploadError } = await supabase.storage
-            .from('event_images')
-            .upload(filePath, decode(asset.base64), { contentType: asset.mimeType ?? `image/${fileExt}` });
-        if (uploadError) throw uploadError;
-        const { data: urlData } = supabase.storage.from('event_images').getPublicUrl(filePath);
-        return urlData?.publicUrl;
+        return await uploadImageService(asset, 'event_images');
     } catch (error) {
         console.error('Error uploading image:', error);
         Alert.alert('Upload Fehler', 'Das Bild konnte nicht hochgeladen werden.');
@@ -254,10 +243,8 @@ const CreateEventArticleScreen = ({ navigation }) => {
           }
       }
 
-      // Step 1: Insert new event
-      const { data: eventData, error: eventError } = await supabase
-        .from('events')
-        .insert({
+      const { data: resultData, error: createError } = await createEventArticle({
+        eventData: {
           title: title,
           description: description,
           date: formattedDate,
@@ -270,22 +257,9 @@ const CreateEventArticleScreen = ({ navigation }) => {
           is_published: true,
           recurrence_rule: rruleString,
           recurrence_end_date: recurrenceEnd,
-          tags: tags
-        })
-        .select()
-        .single();
-
-      if (eventError) {
-        console.error('Error publishing event:', eventError);
-        Alert.alert('Fehler', 'Event konnte nicht veröffentlicht werden.');
-        setIsPublishing(false);
-        return;
-      }
-
-      // Step 2: Insert linked article with linked_event_id
-      const { data: articleData, error: articleError } = await supabase
-        .from('articles')
-        .insert({
+          tags: tags,
+        },
+        articleData: {
           title: title,
           content: description,
           type: 'Veranstaltungen',
@@ -294,17 +268,13 @@ const CreateEventArticleScreen = ({ navigation }) => {
           is_published: true,
           image_url: finalImageUrl,
           preview_image_url: finalImageUrl,
-          linked_event_id: eventData.id,
-          tags: tags
-        })
-        .select()
-        .single();
+          tags: tags,
+        },
+      });
 
-      if (articleError) {
-        console.error('Error creating linked article:', articleError);
-        // Event was created but article failed - try to clean up
-        await supabase.from('events').delete().eq('id', eventData.id);
-        Alert.alert('Fehler', 'Artikel konnte nicht erstellt werden.');
+      if (createError) {
+        console.error('Error publishing event article:', createError);
+        Alert.alert('Fehler', 'Veranstaltung konnte nicht veröffentlicht werden.');
         setIsPublishing(false);
         return;
       }

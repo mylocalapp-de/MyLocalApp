@@ -20,12 +20,11 @@ import DateTimePicker from '@react-native-community/datetimepicker'; // For date
 import * as ImagePicker from 'expo-image-picker'; // Import ImagePicker
 import { Picker } from '@react-native-picker/picker'; // Import Picker
 import { RRule, RRuleSet, rrulestr, Weekday } from 'rrule'; // Import RRule and Weekday
-import { supabase } from '../lib/supabase';
+import { fetchEventCategories as fetchEventCategoriesService, createEvent } from '../services/eventService';
+import { uploadImage as uploadImageService } from '../services/uploadService';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
-import 'react-native-get-random-values'; // Import for uuid
-import { v4 as uuidv4 } from 'uuid'; // Import uuid
-import { decode } from 'base64-arraybuffer'; // Import decode
+// uuid and base64-arraybuffer now handled by uploadService
 import { LinearGradient } from 'expo-linear-gradient'; // Import LinearGradient
 
 const { height } = Dimensions.get('window');
@@ -70,10 +69,7 @@ const CreateEventScreen = ({ navigation }) => {
   const fetchEventCategories = async () => {
     setLoadingCategories(true);
     try {
-      const { data, error } = await supabase
-        .from('event_categories')
-        .select('name, is_highlighted, is_admin_only') // Select new flags
-        .order('display_order', { ascending: true });
+      const { data, error } = await fetchEventCategoriesService();
 
       if (error) {
         console.error('Error fetching event categories:', error);
@@ -126,15 +122,8 @@ const CreateEventScreen = ({ navigation }) => {
     if (!asset || !asset.base64) return null;
     setIsUploading(true);
     try {
-        const fileExt = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
-        const fileName = `${uuidv4()}.${fileExt}`;
-        const filePath = `${fileName}`; // Store in the root of event_images bucket
-        const { data, error: uploadError } = await supabase.storage
-            .from('event_images') // Corrected bucket name
-            .upload(filePath, decode(asset.base64), { contentType: asset.mimeType ?? `image/${fileExt}` });
-        if (uploadError) throw uploadError;
-        const { data: urlData } = supabase.storage.from('event_images').getPublicUrl(filePath);
-        return urlData?.publicUrl;
+        const url = await uploadImageService(asset, 'event_images');
+        return url;
     } catch (error) {
         console.error('Error uploading image:', error);
         Alert.alert('Upload Fehler', 'Das Bild konnte nicht hochgeladen werden.');
@@ -250,12 +239,10 @@ const CreateEventScreen = ({ navigation }) => {
       }
 
       // Insert new event with image_url and recurrence fields
-      const { data, error } = await supabase
-        .from('events')
-        .insert({
+      const { data, error } = await createEvent({
           title: title,
           description: description,
-          date: formattedDate, // Start date of the series
+          date: formattedDate,
           time: `Um ${formattedTime}`,
           location: location,
           category: category,
@@ -263,11 +250,9 @@ const CreateEventScreen = ({ navigation }) => {
           organizer_id: user.id,
           organization_id: activeOrganizationId,
           is_published: true,
-          recurrence_rule: rruleString, // Add recurrence rule
-          recurrence_end_date: recurrenceEnd // Add recurrence end date
-        })
-        .select()
-        .single();
+          recurrence_rule: rruleString,
+          recurrence_end_date: recurrenceEnd,
+        });
 
       if (error) {
         console.error('Error publishing event:', error);
