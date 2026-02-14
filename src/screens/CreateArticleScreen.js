@@ -19,9 +19,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
-import 'react-native-get-random-values';
-import { v4 as uuidv4 } from 'uuid';
-import { decode } from 'base64-arraybuffer';
+import { uploadImages, uploadFiles, getFileIcon, formatFileSize } from '../services/uploadService';
 import { LinearGradient } from 'expo-linear-gradient';
 import { RichEditor, RichToolbar, actions } from 'react-native-pell-rich-editor';
 
@@ -157,51 +155,7 @@ const CreateArticleScreen = ({ navigation, route }) => {
     setTags(prev => prev.filter((_, i) => i !== index));
   };
   
-  // Image picking is handled by ImagePickerButton component
-
-  // Function to upload a single image and return URL
-  const uploadSingleImage = async (asset) => {
-    if (!asset || !asset.base64) return null;
-
-    const fileExt = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
-    const fileName = `${uuidv4()}.${fileExt}`;
-    const filePath = `${fileName}`;
-
-    const { data, error: uploadError } = await supabase.storage
-        .from('article_images')
-        .upload(filePath, decode(asset.base64), {
-            contentType: asset.mimeType ?? `image/${fileExt}`
-        });
-
-    if (uploadError) {
-        throw uploadError;
-    }
-
-    const { data: urlData } = supabase.storage
-        .from('article_images')
-        .getPublicUrl(filePath);
-
-    return urlData?.publicUrl;
-  };
-
-  // Function to upload multiple images and return array of URLs
-  const uploadImages = async (assets) => {
-    if (!assets || assets.length === 0) return [];
-
-    setIsUploading(true);
-    try {
-      const uploadPromises = assets.map(asset => uploadSingleImage(asset));
-      const urls = await Promise.all(uploadPromises);
-      // Filter out any null values from failed uploads
-      return urls.filter(url => url !== null);
-    } catch (error) {
-      console.error('Error uploading images:', error);
-      Alert.alert('Upload Fehler', 'Ein oder mehrere Bilder konnten nicht hochgeladen werden.');
-      return [];
-    } finally {
-      setIsUploading(false);
-    }
-  };
+  // Image picking handled by ImagePickerButton; uploads by uploadService
 
   // Function to pick files
   const pickFile = async () => {
@@ -211,95 +165,16 @@ const CreateArticleScreen = ({ navigation, route }) => {
         multiple: true,
         copyToCacheDirectory: true,
       });
-
       if (!result.canceled && result.assets) {
         setFileAssets(prev => [...prev, ...result.assets]);
       }
-    } catch (error) {
-      console.error('Error picking file:', error);
+    } catch {
       Alert.alert('Fehler', 'Datei konnte nicht ausgewählt werden.');
     }
   };
 
-  // Function to remove a file from selection
   const removeFile = (index) => {
     setFileAssets(prev => prev.filter((_, i) => i !== index));
-  };
-
-  // Function to upload a single file and return URL + metadata
-  const uploadSingleFile = async (asset) => {
-    if (!asset || !asset.uri) return null;
-
-    try {
-      const fileExt = asset.name?.split('.').pop()?.toLowerCase() ?? 'bin';
-      const fileName = `${uuidv4()}.${fileExt}`;
-      const filePath = `attachments/${fileName}`;
-
-      // Fetch the file as blob
-      const response = await fetch(asset.uri);
-      const blob = await response.blob();
-
-      // Convert blob to array buffer
-      const arrayBuffer = await new Response(blob).arrayBuffer();
-
-      const { data, error: uploadError } = await supabase.storage
-        .from('article_images')
-        .upload(filePath, arrayBuffer, {
-          contentType: asset.mimeType ?? 'application/octet-stream'
-        });
-
-      if (uploadError) throw uploadError;
-
-      const { data: urlData } = supabase.storage
-        .from('article_images')
-        .getPublicUrl(filePath);
-
-      return {
-        url: urlData?.publicUrl,
-        name: asset.name || fileName,
-        size: asset.size || 0,
-        mimeType: asset.mimeType || 'application/octet-stream'
-      };
-    } catch (error) {
-      console.error('Error uploading file:', error);
-      return null;
-    }
-  };
-
-  // Function to upload multiple files and return array of metadata
-  const uploadFiles = async (assets) => {
-    if (!assets || assets.length === 0) return [];
-
-    try {
-      const uploadPromises = assets.map(asset => uploadSingleFile(asset));
-      const results = await Promise.all(uploadPromises);
-      return results.filter(result => result !== null);
-    } catch (error) {
-      console.error('Error uploading files:', error);
-      Alert.alert('Upload Fehler', 'Ein oder mehrere Dateien konnten nicht hochgeladen werden.');
-      return [];
-    }
-  };
-
-  // Helper to get file icon based on mime type
-  const getFileIcon = (mimeType) => {
-    if (!mimeType) return 'document-outline';
-    if (mimeType.includes('pdf')) return 'document-text-outline';
-    if (mimeType.includes('word') || mimeType.includes('document')) return 'document-outline';
-    if (mimeType.includes('sheet') || mimeType.includes('excel')) return 'grid-outline';
-    if (mimeType.includes('presentation') || mimeType.includes('powerpoint')) return 'easel-outline';
-    if (mimeType.includes('zip') || mimeType.includes('archive')) return 'archive-outline';
-    if (mimeType.includes('audio')) return 'musical-notes-outline';
-    if (mimeType.includes('video')) return 'videocam-outline';
-    return 'document-outline';
-  };
-
-  // Helper to format file size
-  const formatFileSize = (bytes) => {
-    if (!bytes) return '';
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
   // Handle article publishing
@@ -317,25 +192,27 @@ const CreateArticleScreen = ({ navigation, route }) => {
     let htmlContent = contentRef.current || '';
 
     try {
-      // Upload all selected images
-      if (imageAssets.length > 0) {
-        imageUrls = await uploadImages(imageAssets);
-        if (imageUrls.length === 0 && imageAssets.length > 0) {
-          // All uploads failed
-          setIsPublishing(false);
-          return;
+      // Upload all selected images via service
+      setIsUploading(true);
+      try {
+        if (imageAssets.length > 0) {
+          imageUrls = await uploadImages(imageAssets);
+          if (imageUrls.length === 0 && imageAssets.length > 0) {
+            setIsPublishing(false);
+            setIsUploading(false);
+            Alert.alert('Upload Fehler', 'Bilder konnten nicht hochgeladen werden.');
+            return;
+          }
         }
+        if (fileAssets.length > 0) {
+          uploadedFiles = await uploadFiles(fileAssets);
+        }
+      } finally {
+        setIsUploading(false);
       }
 
-      // Upload all selected files
-      if (fileAssets.length > 0) {
-        uploadedFiles = await uploadFiles(fileAssets);
-      }
-
-      // First image is the cover image
       const coverImageUrl = imageUrls.length > 0 ? imageUrls[0] : null;
 
-      // Insert new article
       const { data, error } = await supabase
         .from('articles')
         .insert({
