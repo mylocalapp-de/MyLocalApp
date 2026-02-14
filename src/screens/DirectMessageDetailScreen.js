@@ -15,14 +15,19 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../lib/supabase';
+import {
+  fetchDirectMessages,
+  sendDirectMessage,
+  subscribeToDmConversation,
+  removeChannel,
+} from '../services/dmService';
+import { fetchOrganizationLogo, fetchProfile } from '../services/profileService';
+import { uploadImage as uploadImageService } from '../services/uploadService';
 import { useAuth } from '../context/AuthContext';
 import { useNetwork } from '../context/NetworkContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
-import 'react-native-get-random-values';
-import { v4 as uuidv4 } from 'uuid';
-import { decode } from 'base64-arraybuffer';
+// uuid and base64-arraybuffer now handled by uploadService
 import { useOrganization } from '../context/OrganizationContext';
 
 const { height } = Dimensions.get('window');
@@ -78,12 +83,7 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
   useEffect(() => {
     if (isOfflineMode || !conversationId) return;
 
-    const channel = supabase
-      .channel(`public:direct_messages:conversation_id=eq.${conversationId}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'direct_messages', filter: `conversation_id=eq.${conversationId}` },
-        (payload) => {
+    const channel = subscribeToDmConversation(conversationId, (payload) => {
           // console.log('New DM received:', payload.new);
           const newMessage = payload.new;
 
@@ -124,18 +124,13 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
 
              // Only fetch if not me and not easily found (this is a simplification)
             if (newMessage.sender_id !== user?.id && !existingSenderData?.includes(':')) { // Avoid fetching if name seems resolved
-                senderNamePromise = supabase
-                    .from('profiles')
-                    .select('display_name')
-                    .eq('id', newMessage.sender_id)
-                    .single()
+                senderNamePromise = fetchProfile(newMessage.sender_id)
                     .then(({ data: profileData, error: profileError }) => {
                         if (profileError) {
                             console.error("Error fetching sender profile for new message:", profileError);
-                            return getSenderName(newMessage.sender_id, null); // Fallback on error
+                            return getSenderName(newMessage.sender_id, null);
                         } else {
-                             // console.log("Fetched profile for new message:", profileData);
-                            return getSenderName(newMessage.sender_id, profileData); // Use fetched data
+                            return getSenderName(newMessage.sender_id, profileData);
                         }
                     });
             } else if (newMessage.sender_id === user?.id) {
@@ -167,18 +162,10 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
             return updatedMessages; // Return the list with the immediately added message
           });
           setTimeout(() => flatListRef.current?.scrollToEnd(), 100);
-        }
-      )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          // console.log(`Subscribed to DM conversation ${conversationId}`);
-        } else {
-           // console.log(`Subscription status: ${status}`);
-        }
-      });
+        });
 
     return () => {
-      supabase.removeChannel(channel);
+      removeChannel(channel);
     };
     // Dependencies: include isOrgConversation and recipientName for sender resolution
   }, [conversationId, isOfflineMode, user, displayName, recipientName, isOrgConversation]);
@@ -190,19 +177,11 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
         let imageUrl = null;
         try {
             if (isOrgConversation && organizationId) {
-                const { data, error } = await supabase
-                    .from('organizations')
-                    .select('logo_url')
-                    .eq('id', organizationId)
-                    .single();
+                const { data, error } = await fetchOrganizationLogo(organizationId);
                 if (error) throw error;
                 imageUrl = data?.logo_url;
             } else if (!isOrgConversation && recipientId) {
-                const { data, error } = await supabase
-                    .from('profiles')
-                    .select('avatar_url')
-                    .eq('id', recipientId)
-                    .single();
+                const { data, error } = await fetchProfile(recipientId);
                 if (error) throw error;
                 imageUrl = data?.avatar_url;
             }
@@ -225,22 +204,7 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
       setLoading(true);
       setError(null);
 
-      let query = supabase
-        .from('direct_messages')
-        .select(`
-          id,
-          sender_id,
-          text,
-          image_url,
-          created_at,
-          sender:profiles ( display_name )
-        `)
-        .eq('conversation_id', conversationId); // Base condition
-
-      // The query now only filters by conversation_id. RLS MUST handle visibility.
-      query = query.order('created_at', { ascending: true });
-
-      const { data, error: fetchError } = await query;
+      const { data, error: fetchError } = await fetchDirectMessages(conversationId);
 
       if (fetchError) {
         console.error('Error fetching direct messages:', fetchError);
@@ -323,26 +287,7 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
 
     setIsUploading(true);
     try {
-      const fileExt = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
-      const fileName = `${uuidv4()}.${fileExt}`;
-      // Use a dedicated bucket for DM images if preferred
-      const bucketName = 'images';
-      const filePath = `${fileName}`;
-
-      const { data, error: uploadError } = await supabase.storage
-        .from(bucketName)
-        .upload(filePath, decode(asset.base64), {
-          contentType: asset.mimeType ?? `image/${fileExt}`
-        });
-
-      if (uploadError) throw uploadError;
-
-      const { data: urlData } = supabase.storage
-        .from(bucketName)
-        .getPublicUrl(filePath);
-
-      return urlData?.publicUrl;
-
+      return await uploadImageService(asset, 'images');
     } catch (error) {
       console.error('Error uploading DM image:', error);
       Alert.alert('Upload Fehler', 'Bild konnte nicht hochgeladen werden.');
@@ -401,15 +346,12 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
       }
 
       // 4. Send the actual data to Supabase
-      const { data, error: insertError } = await supabase
-        .from('direct_messages')
-        .insert({
-          conversation_id: conversationId,
-          sender_id: user.id,
+      const { data, error: insertError } = await sendDirectMessage({
+          conversationId,
+          senderId: user.id,
           text: message.trim() || null,
-          image_url: imageUrl, // Use the uploaded URL here
-        })
-        .select(); 
+          imageUrl,
+        });
 
       if (insertError) {
         console.error('Error sending direct message:', insertError);

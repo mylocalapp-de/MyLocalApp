@@ -15,7 +15,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ScreenHeader from '../components/common/ScreenHeader'; // Reuse if applicable
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../lib/supabase';
+import {
+  getOrganizationsWithMembers,
+  getPublicUsers,
+  searchUsersByDisplayName,
+  findOrCreateUserDmConversation,
+  findOrCreateOrgDmConversation,
+} from '../services/dmService';
+import { fetchProfileAvatars } from '../services/profileService';
 import { useAuth } from '../context/AuthContext';
 import { useNetwork } from '../context/NetworkContext';
 
@@ -60,7 +67,7 @@ const NewDirectMessageScreen = ({ navigation }) => {
       setLoadingOrganizations(true);
       setOrgError(null);
       try {
-        const { data, error } = await supabase.rpc('get_organizations_with_members');
+        const { data, error } = await getOrganizationsWithMembers();
         if (error) {
           console.error('Error fetching organizations with members:', error);
           setOrgError('Organisationen konnten nicht geladen werden.');
@@ -91,9 +98,7 @@ const NewDirectMessageScreen = ({ navigation }) => {
       setLoadingPublicUsers(true);
       setPublicUsersError(null);
       try {
-        const { data, error } = await supabase.rpc('get_public_users', {
-          p_exclude_user_id: user.id,
-        });
+        const { data, error } = await getPublicUsers(user.id);
         if (error) {
           console.error('Error fetching public users:', error);
           setPublicUsersError('Benutzer konnten nicht geladen werden.');
@@ -129,10 +134,7 @@ const NewDirectMessageScreen = ({ navigation }) => {
       // console.log(`[NewDM] Fetching avatars for ${userIdsToFetch.length} search results.`);
 
       try {
-          const { data: profilesData, error: profilesError } = await supabase
-              .from('profiles')
-              .select('id, avatar_url')
-              .in('id', userIdsToFetch);
+          const { data: profilesData, error: profilesError } = await fetchProfileAvatars(userIdsToFetch);
 
           if (profilesError) {
               console.error('[NewDM] Error fetching profiles for avatars:', profilesError);
@@ -180,9 +182,7 @@ const NewDirectMessageScreen = ({ navigation }) => {
     // console.log(`Searching for users with display name like: %${query}%`);
 
     try {
-      const { data, error: rpcError } = await supabase.rpc('search_users_by_display_name', {
-        p_search_query: query.trim()
-      });
+      const { data, error: rpcError } = await searchUsersByDisplayName(query.trim());
 
       if (rpcError) {
         console.error('Error searching users via RPC:', rpcError);
@@ -218,7 +218,9 @@ const NewDirectMessageScreen = ({ navigation }) => {
 
       try {
           // console.log(`Calling RPC ${rpcName} with params:`, params);
-          const { data: conversationId, error: rpcError } = await supabase.rpc(rpcName, params);
+          const { data: conversationId, error: rpcError } = isOrg
+              ? await findOrCreateOrgDmConversation(target.id)
+              : await findOrCreateUserDmConversation(target.id);
 
           if (rpcError || !conversationId) {
               console.error(`Error finding/creating ${isOrg ? 'Org' : 'User'} DM conversation:`, rpcError);
