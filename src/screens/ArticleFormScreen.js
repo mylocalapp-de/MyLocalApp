@@ -17,15 +17,27 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ImagePickerButton } from '../components/common';
 import * as DocumentPicker from 'expo-document-picker';
-import { supabase } from '../lib/supabase';
+import {
+  fetchArticleTypes as fetchArticleTypesService,
+  fetchArticleRaw,
+  createArticle,
+  updateArticle,
+  saveArticleImages,
+  deleteArticleImages,
+  saveArticleAttachments,
+  deleteArticleAttachments,
+  fetchArticleImages as fetchArticleImagesService,
+  fetchArticleAttachments as fetchArticleAttachmentsService,
+} from '../services/articleService';
+import { checkOrgMembership } from '../services/profileService';
+import { uploadImage, uploadImages, uploadFile, uploadFiles } from '../services/uploadService';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { uploadImages, uploadFiles, getFileIcon, formatFileSize } from '../services/uploadService';
 import { LinearGradient } from 'expo-linear-gradient';
 import { RichEditor, RichToolbar, actions } from 'react-native-pell-rich-editor';
 import 'react-native-get-random-values';
-import { v4 as uuidv4 } from 'uuid';
-import { decode } from 'base64-arraybuffer';
+// uuid and decode moved to uploadService
 
 const { height, width } = Dimensions.get('window');
 const androidPaddingTop = height * 0.03;
@@ -100,21 +112,14 @@ const ArticleFormScreen = ({ navigation, route }) => {
   const fetchArticleTypes = async () => {
     setLoadingTypes(true);
     try {
-      const { data, error } = await supabase
-        .from('article_filters')
-        .select('name, is_highlighted, is_admin_only, enable_personal')
-        .order('display_order', { ascending: true });
+      const { data, error } = await fetchArticleTypesService({ isPersonal: isPersonal && !activeOrganizationId });
 
       if (error) {
         console.error('Error fetching article types:', error);
         if (!isEditMode) Alert.alert('Fehler', 'Artikel-Kategorien konnten nicht geladen werden.');
         setAvailableArticleTypes([]);
       } else {
-        const inPersonalContext = !activeOrganizationId;
-        const userVisibleTypes = data
-          .filter(item => !item.is_admin_only && (!inPersonalContext || !isPersonal || item.enable_personal))
-          .map(item => ({ name: item.name, is_highlighted: item.is_highlighted || false }));
-        setAvailableArticleTypes(userVisibleTypes);
+        setAvailableArticleTypes(data);
       }
     } catch (err) {
       console.error('Unexpected error fetching article types:', err);
@@ -130,11 +135,7 @@ const ArticleFormScreen = ({ navigation, route }) => {
       setIsLoading(true);
       setError(null);
 
-      const { data, error } = await supabase
-        .from('articles')
-        .select('*')
-        .eq('id', articleId)
-        .single();
+      const { data, error } = await fetchArticleRaw(articleId);
 
       if (error) {
         console.error('Error fetching article:', error);
@@ -155,12 +156,7 @@ const ArticleFormScreen = ({ navigation, route }) => {
           canEdit = false;
         } else {
           try {
-            const { data: membership, error: memberError } = await supabase
-              .from('organization_members')
-              .select('user_id')
-              .eq('organization_id', data.organization_id)
-              .eq('user_id', user?.id)
-              .maybeSingle();
+            const { data: membership, error: memberError } = await checkOrgMembership(data.organization_id, user?.id);
             if (!memberError && membership) canEdit = true;
           } catch (e) {
             console.error("Unexpected error checking membership:", e);
@@ -191,11 +187,7 @@ const ArticleFormScreen = ({ navigation, route }) => {
       setEditorKey(prev => prev + 1);
 
       // Fetch existing images
-      const { data: imagesData, error: imagesError } = await supabase
-        .from('article_images')
-        .select('id, image_url, display_order')
-        .eq('article_id', articleId)
-        .order('display_order', { ascending: true });
+      const { data: imagesData, error: imagesError } = await fetchArticleImagesService(articleId);
 
       if (imagesError) {
         console.error('Error fetching article images:', imagesError);
@@ -213,11 +205,7 @@ const ArticleFormScreen = ({ navigation, route }) => {
       }
 
       // Fetch existing attachments
-      const { data: attachmentsData, error: attachmentsError } = await supabase
-        .from('article_attachments')
-        .select('id, file_url, file_name, file_size, mime_type, display_order')
-        .eq('article_id', articleId)
-        .order('display_order', { ascending: true });
+      const { data: attachmentsData, error: attachmentsError } = await fetchArticleAttachmentsService(articleId);
 
       if (attachmentsError) {
         console.error('Error fetching article attachments:', attachmentsError);
@@ -320,25 +308,12 @@ const ArticleFormScreen = ({ navigation, route }) => {
     }
   };
 
-  // Edit-mode upload helpers (inline, not using uploadService)
-  const uploadSingleImageEdit = async (asset) => {
-    if (!asset || !asset.base64) return null;
-    const fileExt = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
-    const fileName = `${uuidv4()}.${fileExt}`;
-    const { error: uploadError } = await supabase.storage
-      .from('article_images')
-      .upload(fileName, decode(asset.base64), { contentType: asset.mimeType ?? `image/${fileExt}` });
-    if (uploadError) throw uploadError;
-    const { data: urlData } = supabase.storage.from('article_images').getPublicUrl(fileName);
-    return urlData?.publicUrl;
-  };
-
+  // Edit-mode upload helpers (delegated to uploadService)
   const uploadImagesEdit = async (assets) => {
     if (!assets || assets.length === 0) return [];
     setIsUploading(true);
     try {
-      const urls = await Promise.all(assets.map(a => uploadSingleImageEdit(a)));
-      return urls.filter(url => url !== null);
+      return await uploadImages(assets, 'article_images');
     } catch (error) {
       console.error('Error uploading images:', error);
       Alert.alert('Upload Fehler', 'Ein oder mehrere Bilder konnten nicht hochgeladen werden.');
@@ -348,37 +323,10 @@ const ArticleFormScreen = ({ navigation, route }) => {
     }
   };
 
-  const uploadSingleFileEdit = async (asset) => {
-    if (!asset || !asset.uri) return null;
-    try {
-      const fileExt = asset.name?.split('.').pop()?.toLowerCase() ?? 'bin';
-      const fileName = `${uuidv4()}.${fileExt}`;
-      const filePath = `attachments/${fileName}`;
-      const response = await fetch(asset.uri);
-      const blob = await response.blob();
-      const arrayBuffer = await new Response(blob).arrayBuffer();
-      const { error: uploadError } = await supabase.storage
-        .from('article_images')
-        .upload(filePath, arrayBuffer, { contentType: asset.mimeType ?? 'application/octet-stream' });
-      if (uploadError) throw uploadError;
-      const { data: urlData } = supabase.storage.from('article_images').getPublicUrl(filePath);
-      return {
-        url: urlData?.publicUrl,
-        name: asset.name || fileName,
-        size: asset.size || 0,
-        mimeType: asset.mimeType || 'application/octet-stream'
-      };
-    } catch (error) {
-      console.error('Error uploading file:', error);
-      return null;
-    }
-  };
-
   const uploadFilesEdit = async (assets) => {
     if (!assets || assets.length === 0) return [];
     try {
-      const results = await Promise.all(assets.map(a => uploadSingleFileEdit(a)));
-      return results.filter(r => r !== null);
+      return await uploadFiles(assets, 'article_images', 'attachments/');
     } catch (error) {
       console.error('Error uploading files:', error);
       Alert.alert('Upload Fehler', 'Ein oder mehrere Dateien konnten nicht hochgeladen werden.');
@@ -434,9 +382,7 @@ const ArticleFormScreen = ({ navigation, route }) => {
 
       const coverImageUrl = imageUrls.length > 0 ? imageUrls[0] : null;
 
-      const { data, error } = await supabase
-        .from('articles')
-        .insert({
+      const { data, error } = await createArticle({
           title: title || (isDraft ? 'Unbenannter Entwurf' : title),
           content: htmlContent,
           type: type || (isDraft ? 'Vereine' : type),
@@ -446,9 +392,7 @@ const ArticleFormScreen = ({ navigation, route }) => {
           image_url: coverImageUrl,
           preview_image_url: coverImageUrl,
           tags: tags
-        })
-        .select()
-        .single();
+        });
 
       if (error) {
         console.error('Error saving article:', error);
@@ -465,7 +409,7 @@ const ArticleFormScreen = ({ navigation, route }) => {
           image_url: url,
           display_order: index
         }));
-        const { error: imagesError } = await supabase.from('article_images').insert(imageRecords);
+        const { error: imagesError } = await saveArticleImages(imageRecords);
         if (imagesError) console.error('Error saving article images:', imagesError);
       }
 
@@ -479,7 +423,7 @@ const ArticleFormScreen = ({ navigation, route }) => {
           mime_type: file.mimeType,
           display_order: index
         }));
-        const { error: attachmentsError } = await supabase.from('article_attachments').insert(attachmentRecords);
+        const { error: attachmentsError } = await saveArticleAttachments(attachmentRecords);
         if (attachmentsError) console.error('Error saving article attachments:', attachmentsError);
       }
 
@@ -506,10 +450,7 @@ const ArticleFormScreen = ({ navigation, route }) => {
     try {
       // 1. Delete images marked for removal
       if (imagesToDelete.length > 0) {
-        const { error: deleteError } = await supabase
-          .from('article_images')
-          .delete()
-          .in('id', imagesToDelete);
+        const { error: deleteError } = await deleteArticleImages(imagesToDelete);
         if (deleteError) console.error('Error deleting images:', deleteError);
       }
 
@@ -549,24 +490,19 @@ const ArticleFormScreen = ({ navigation, route }) => {
           image_url: url,
           display_order: maxOrder + index
         }));
-        const { error: insertError } = await supabase.from('article_images').insert(imageRecords);
+        const { error: insertError } = await saveArticleImages(imageRecords);
         if (insertError) console.error('Error inserting new images:', insertError);
       }
 
       // 6. Migrate legacy image if needed
       if (legacyImage && remainingExisting.length === 0 && !imagesToDelete.includes(null)) {
-        const { error: migrationError } = await supabase
-          .from('article_images')
-          .insert({ article_id: articleId, image_url: legacyImage.image_url, display_order: 0 });
+        const { error: migrationError } = await saveArticleImages([{ article_id: articleId, image_url: legacyImage.image_url, display_order: 0 }]);
         if (migrationError) console.error('Error migrating legacy image:', migrationError);
       }
 
       // 7. Delete attachments marked for removal
       if (attachmentsToDelete.length > 0) {
-        const { error: deleteAttError } = await supabase
-          .from('article_attachments')
-          .delete()
-          .in('id', attachmentsToDelete);
+        const { error: deleteAttError } = await deleteArticleAttachments(attachmentsToDelete);
         if (deleteAttError) console.error('Error deleting attachments:', deleteAttError);
       }
 
@@ -590,22 +526,19 @@ const ArticleFormScreen = ({ navigation, route }) => {
           mime_type: file.mimeType,
           display_order: maxAttOrder + index
         }));
-        const { error: insertAttError } = await supabase.from('article_attachments').insert(attachmentRecords);
+        const { error: insertAttError } = await saveArticleAttachments(attachmentRecords);
         if (insertAttError) console.error('Error inserting new attachments:', insertAttError);
       }
 
       // 10. Update article
-      const { error: updateError } = await supabase
-        .from('articles')
-        .update({
+      const { error: updateError } = await updateArticle(articleId, {
           title,
           content: htmlContent,
           type,
           image_url: coverImageUrl,
           preview_image_url: coverImageUrl,
           tags
-        })
-        .eq('id', articleId);
+        });
 
       if (updateError) {
         console.error('Error updating article:', updateError);

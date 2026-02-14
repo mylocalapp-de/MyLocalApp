@@ -35,6 +35,10 @@ export async function createArticle(articleData) {
 /**
  * Update an existing article.
  */
+export async function fetchArticleRaw(articleId) {
+  return supabase.from('articles').select('*').eq('id', articleId).single();
+}
+
 export async function updateArticle(articleId, updates) {
   return supabase.from('articles').update(updates).eq('id', articleId).select().single();
 }
