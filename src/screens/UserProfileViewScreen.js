@@ -13,7 +13,13 @@ import {
     Dimensions
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../lib/supabase';
+import {
+  fetchUserProfileView,
+  fetchUserArticleListings,
+  fetchUserPersonalEvents,
+  updateProfileBlocked,
+} from '../services/profileService';
+import { findOrCreateUserDmConversation } from '../services/dmService';
 import { useAuth } from '../context/AuthContext';
 import { useNetwork } from '../context/NetworkContext';
 import ScreenHeader from '../components/common/ScreenHeader'; // Assuming this path is correct
@@ -76,11 +82,7 @@ const UserProfileViewScreen = ({ route, navigation }) => {
         setLoadingProfile(true);
         setError(null);
         try {
-            const { data: profileData, error: profileError } = await supabase
-                .from('profiles')
-                .select('id, display_name, avatar_url, about_me')
-                .eq('id', userId)
-                .single();
+            const { data: profileData, error: profileError } = await fetchUserProfileView(userId);
 
             if (profileError) throw profileError;
             if (!profileData) throw new Error('Profil nicht gefunden.');
@@ -99,12 +101,7 @@ const UserProfileViewScreen = ({ route, navigation }) => {
     const fetchUserArticles = async (profileUserId) => {
         setLoadingArticles(true);
         try {
-            const { data: articlesData, error: articlesError } = await supabase
-                .from('article_listings')
-                .select('*')
-                .eq('author_id', profileUserId)
-                .eq('is_organization_post', false)
-                .order('published_at', { ascending: false });
+            const { data: articlesData, error: articlesError } = await fetchUserArticleListings(profileUserId);
 
             if (articlesError) throw articlesError;
             const articles = articlesData || [];
@@ -122,13 +119,7 @@ const UserProfileViewScreen = ({ route, navigation }) => {
     const fetchUserEvents = async (profileUserId) => {
         setLoadingEvents(true);
         try {
-            const { data: eventsData, error: eventsError } = await supabase
-                .from('events')
-                .select('*')
-                .eq('organizer_id', profileUserId)
-                .is('organization_id', null) // Only personal events
-                .eq('is_published', true)
-                .order('date', { ascending: false });
+            const { data: eventsData, error: eventsError } = await fetchUserPersonalEvents(profileUserId);
 
             if (eventsError) throw eventsError;
 
@@ -195,10 +186,7 @@ const UserProfileViewScreen = ({ route, navigation }) => {
         try {
             // Call the RPC directly instead of using a context function
             // console.log(`Calling RPC find_or_create_user_dm_conversation for other user: ${viewedProfile.id}`);
-            const { data: conversationId, error: rpcError } = await supabase.rpc(
-                'find_or_create_user_dm_conversation',
-                { p_other_user_id: viewedProfile.id } 
-            );
+            const { data: conversationId, error: rpcError } = await findOrCreateUserDmConversation(viewedProfile.id);
 
             if (rpcError || !conversationId) {
                 console.error('Error finding/creating User DM conversation:', rpcError);
@@ -240,12 +228,7 @@ const UserProfileViewScreen = ({ route, navigation }) => {
         }
 
         try {
-            const { data, error: updateError } = await supabase
-                .from('profiles')
-                .update({ blocked: updatedBlockedList })
-                .eq('id', user.id)
-                .select('blocked') // Select the updated blocked array
-                .single();
+            const { data, error: updateError } = await updateProfileBlocked(user.id, updatedBlockedList);
 
             if (updateError) throw updateError;
 
