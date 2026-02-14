@@ -63,6 +63,10 @@ export async function deleteEvent(eventId) {
 
 // ─── Event Detail helpers ────────────────────────────────────────────────────
 
+export async function fetchEventRaw(eventId) {
+  return supabase.from('events').select('*').eq('id', eventId).single();
+}
+
 export async function fetchEventWithOrganizer(eventId) {
   return supabase
     .from('events')
