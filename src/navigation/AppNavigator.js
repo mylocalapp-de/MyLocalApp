@@ -78,8 +78,8 @@ const HomeStackNavigator = () => {
     >
       <HomeStack.Screen name="HomeList" component={HomeScreen} />
       <HomeStack.Screen name="ArticleDetail" component={ArticleDetailScreen} />
-      <HomeStack.Screen name="CreateArticle" component={CreateArticleScreen} />
-      <HomeStack.Screen name="EditArticle" component={EditArticleScreen} />
+      <HomeStack.Screen name="CreateArticle" component={ArticleFormScreen} />
+      <HomeStack.Screen name="EditArticle" component={ArticleFormScreen} />
     </HomeStack.Navigator>
   );
 };
@@ -94,8 +94,8 @@ const CalendarStackNavigator = () => {
     >
       <CalendarStack.Screen name="CalendarList" component={CalendarScreen} />
       <CalendarStack.Screen name="EventDetail" component={EventDetailScreen} />
-      <CalendarStack.Screen name="CreateEvent" component={CreateEventScreen} />
-      <CalendarStack.Screen name="EditEvent" component={EditEventScreen} />
+      <CalendarStack.Screen name="CreateEvent" component={EventFormScreen} />
+      <CalendarStack.Screen name="EditEvent" component={EventFormScreen} />
     </CalendarStack.Navigator>
   );
 };
@@ -276,10 +276,10 @@ const AppNavigator = () => {
             component={OrganizationSetupScreen}
         />
         <RootStack.Screen name="EventDetail" component={EventDetailScreen} options={{ headerShown: false }} />
-        <RootStack.Screen name="CreateEvent" component={CreateEventScreen} options={{ headerShown: false, presentation: 'modal' }} />
-        <RootStack.Screen name="EditEvent" component={EditEventScreen} options={{ headerShown: false, presentation: 'modal' }} />
-        <RootStack.Screen name="CreateEventArticle" component={CreateEventArticleScreen} options={{ headerShown: false, presentation: 'modal' }} />
-        <RootStack.Screen name="EditEventArticle" component={EditEventArticleScreen} options={{ headerShown: false, presentation: 'modal' }} />
+        <RootStack.Screen name="CreateEvent" component={EventFormScreen} options={{ headerShown: false, presentation: 'modal' }} />
+        <RootStack.Screen name="EditEvent" component={EventFormScreen} options={{ headerShown: false, presentation: 'modal' }} />
+        <RootStack.Screen name="CreateEventArticle" component={EventArticleFormScreen} options={{ headerShown: false, presentation: 'modal' }} />
+        <RootStack.Screen name="EditEventArticle" component={EventArticleFormScreen} options={{ headerShown: false, presentation: 'modal' }} />
         <RootStack.Screen name="CreatePoi" component={CreatePoiScreen} options={{ headerShown: false, presentation: 'modal' }} />
         <RootStack.Screen 
             name="ArticleDetail" 
@@ -288,12 +288,12 @@ const AppNavigator = () => {
         />
         <RootStack.Screen 
             name="CreateArticle" 
-            component={CreateArticleScreen} 
+            component={ArticleFormScreen} 
             options={{ headerShown: false, presentation: 'modal' }} 
         />
         <RootStack.Screen 
             name="EditArticle" 
-            component={EditArticleScreen} 
+            component={ArticleFormScreen} 
             options={{ headerShown: false, presentation: 'modal' }} 
         />
         <RootStack.Screen 

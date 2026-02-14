@@ -12,7 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ScreenHeader from '../components/common/ScreenHeader'; // Reuse if applicable
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../lib/supabase';
+import { fetchDmConversations, subscribeToDmListChanges, removeChannel } from '../services/dmService';
 import { useAuth } from '../context/AuthContext';
 import { useNetwork } from '../context/NetworkContext';
 import { useOrganization } from '../context/OrganizationContext'; // <-- Import useOrganization

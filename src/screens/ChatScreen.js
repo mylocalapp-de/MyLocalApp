@@ -5,7 +5,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { useOrganization } from '../context/OrganizationContext';
 import { useAuth } from '../context/AuthContext';
 import { useNetwork } from '../context/NetworkContext';
-import { supabase } from '../lib/supabase';
+import {
+  fetchChatGroupTags,
+  fetchChatGroupListings,
+} from '../services/chatService';
+import {
+  fetchDmConversations,
+  searchUsersByDisplayName,
+  findOrCreateUserDmConversation,
+} from '../services/dmService';
+import { fetchProfileAvatars } from '../services/profileService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { useAppConfig } from '../context/AppConfigContext';
@@ -98,10 +107,7 @@ const ChatScreen = ({ navigation, route }) => {
     const fetchFilters = async () => {
       setIsLoadingFilters(true);
       try {
-        const { data, error: filterError } = await supabase
-          .from('chat_group_tags')
-          .select('name, is_highlighted')
-          .order('display_order', { ascending: true });
+        const { data, error: filterError } = await fetchChatGroupTags();
 
         if (filterError) {
           console.error('[ChatScreen] Error fetching chat filters:', filterError);
@@ -203,10 +209,7 @@ const ChatScreen = ({ navigation, route }) => {
   const fetchChatGroupsInternal = async () => {
     // console.log("[ChatScreen] Fetching chat groups...");
     try {
-      const { data, error: fetchError } = await supabase
-        .from('chat_group_listings')
-        .select('*')
-        .neq('type', 'bot'); // Exclude bots from database query
+      const { data, error: fetchError } = await fetchChatGroupListings();
 
       if (fetchError) {
         console.error('[ChatScreen] Error fetching chat groups:', fetchError);
@@ -237,20 +240,10 @@ const ChatScreen = ({ navigation, route }) => {
     }
 
     try {
-        let query = supabase
-            .from('dm_conversation_list') // Use the view
-            .select('*');
-
-        if (isOrganizationActive && activeOrganizationId) {
-            // console.log(`[ChatScreen] Fetching DMs in Org Context for Org ID: ${activeOrganizationId}`);
-            query = query.eq('is_org_conversation', true)
-                         .eq('organization_id', activeOrganizationId);
-        } else {
-            // console.log("[ChatScreen] Fetching DMs in Personal Context");
-        }
-
-        query = query.order('last_message_at', { ascending: false });
-        const { data, error: fetchError } = await query;
+        const { data, error: fetchError } = await fetchDmConversations({
+            isOrgContext: isOrganizationActive && !!activeOrganizationId,
+            organizationId: activeOrganizationId,
+        });
 
         if (fetchError) {
             console.error('[ChatScreen] Error fetching DM conversations view:', fetchError);
@@ -448,10 +441,7 @@ const ChatScreen = ({ navigation, route }) => {
 
       const userIdsToFetch = results.map(user => user.id);
       try {
-          const { data: profilesData, error: profilesError } = await supabase
-              .from('profiles')
-              .select('id, avatar_url')
-              .in('id', userIdsToFetch);
+          const { data: profilesData, error: profilesError } = await fetchProfileAvatars(userIdsToFetch);
 
           if (profilesError) {
               console.error('[ChatScreen] Error fetching profiles for avatars (search results):', profilesError);
@@ -497,9 +487,7 @@ const ChatScreen = ({ navigation, route }) => {
       setIsSearchingUsers(true);
       setUserSearchError(null);
       try {
-          const { data, error: rpcError } = await supabase.rpc('search_users_by_display_name', {
-              p_search_query: q,
-          });
+          const { data, error: rpcError } = await searchUsersByDisplayName(q);
           if (rpcError) {
               console.error('[ChatScreen] Error searching users via RPC:', rpcError);
               setUserSearchError('Benutzer konnten nicht gesucht werden.');
@@ -532,9 +520,7 @@ const ChatScreen = ({ navigation, route }) => {
               Alert.alert('Hinweis', 'Nachrichten sind offline nicht verfügbar.');
               return;
           }
-          const { data: conversationId, error: rpcError } = await supabase.rpc('find_or_create_user_dm_conversation', {
-              p_other_user_id: target.id,
-          });
+          const { data: conversationId, error: rpcError } = await findOrCreateUserDmConversation(target.id);
           if (rpcError || !conversationId) {
               console.error('[ChatScreen] Error finding/creating user DM conversation:', rpcError);
               Alert.alert('Fehler', 'Konversation konnte nicht gestartet werden: ' + (rpcError?.message || 'Unbekannter RPC Fehler'));
@@ -896,10 +882,7 @@ const ChatScreen = ({ navigation, route }) => {
       // console.log(`[ChatScreen] Fetching avatars for ${userIdsToFetch.length} other users.`);
 
       try {
-          const { data: profilesData, error: profilesError } = await supabase
-              .from('profiles')
-              .select('id, avatar_url')
-              .in('id', userIdsToFetch);
+          const { data: profilesData, error: profilesError } = await fetchProfileAvatars(userIdsToFetch);
 
           if (profilesError) {
               console.error('[ChatScreen] Error fetching profiles for avatars:', profilesError);
