@@ -16,7 +16,7 @@ import HomeScreen from '../screens/HomeScreen';
 import ChatScreen from '../screens/ChatScreen';
 import CalendarScreen from '../screens/CalendarScreen';
 import MapScreen from '../screens/MapScreen';
-import ProfileScreen from '../screens/ProfileScreen';
+import ProfileScreen from '../screens/Profile';
 import ChatDetailScreen from '../screens/ChatDetailScreen';
 import DorfbotScreen from '../screens/DorfbotScreen';
 import ArticleDetailScreen from '../screens/ArticleDetailScreen';
