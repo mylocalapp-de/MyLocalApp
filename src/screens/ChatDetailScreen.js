@@ -683,14 +683,14 @@ const ChatDetailScreen = ({ route, navigation }) => {
     
     try {
       // console.log('Sending message:', {
-        chatGroupId: chatGroup.id,
-        chatGroupType: chatGroup.dbType,
-        userId: user?.id,
-        isAdmin: isOrgMember,
-        text: message.substring(0, 20) + (message.length > 20 ? '...' : ''),
-        hasImage: !!imageAsset,
-        commentingOn: commentingOnMessageId
-      });
+      //   chatGroupId: chatGroup.id,
+      //   chatGroupType: chatGroup.dbType,
+      //   userId: user?.id,
+      //   isAdmin: isOrgMember,
+      //   text: message.substring(0, 20) + (message.length > 20 ? '...' : ''),
+      //   hasImage: !!imageAsset,
+      //   commentingOn: commentingOnMessageId
+      // });
       
       // For comments, we currently only support text (no images)
       if (commentingOnMessageId !== null && !isOpenChat()) {
