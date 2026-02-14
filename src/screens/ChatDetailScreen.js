@@ -18,16 +18,28 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../lib/supabase';
+import {
+  fetchChatMessages,
+  sendChatMessage,
+  fetchMessageComments,
+  addMessageComment,
+  fetchReactionsForMessages,
+  addMessageReaction,
+  checkAnonymousSubscription,
+  checkAuthenticatedSubscription,
+  deleteAnonymousSubscription,
+  deleteAuthenticatedSubscription,
+  insertAuthenticatedSubscription,
+  insertAnonymousSubscription,
+} from '../services/chatService';
+import { uploadImage as uploadImageService } from '../services/uploadService';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useNetwork } from '../context/NetworkContext';
 import { loadOfflineData } from '../utils/storageUtils';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
-import 'react-native-get-random-values';
-import { v4 as uuidv4 } from 'uuid';
-import { decode } from 'base64-arraybuffer';
+// uuid and base64-arraybuffer now handled by uploadService
 // --- Push Notification Imports ---
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
@@ -150,11 +162,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
       
       try {
         // First check anonymous subscriptions table (works for both logged in and anonymous users)
-        let { data: anonData, error: anonError, count: anonCount } = await supabase
-          .from('anonymous_push_subscriptions')
-          .select('*', { count: 'exact', head: true })
-          .eq('chat_group_id', chatGroup.id)
-          .eq('expo_push_token', expoPushToken);
+        let { data: anonData, error: anonError, count: anonCount } = await checkAnonymousSubscription(chatGroup.id, expoPushToken);
 
         if (anonError) {
           console.error('Error checking anonymous subscription:', anonError);
@@ -168,11 +176,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
         
         // If no anonymous subscription found AND user is logged in, check authenticated subscriptions
         if (user) {
-          const { data, error, count } = await supabase
-            .from('push_notification_subscriptions')
-            .select('*', { count: 'exact', head: true })
-            .eq('user_id', user.id)
-            .eq('chat_group_id', chatGroup.id);
+          const { data, error, count } = await checkAuthenticatedSubscription(user.id, chatGroup.id);
 
           if (error) {
             console.error('Error checking authenticated subscription:', error);
@@ -233,11 +237,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
                 // UNSUBSCRIBE: Need to check both tables
                 
                 // First try anonymous_push_subscriptions
-                let { error: anonError } = await supabase
-                  .from('anonymous_push_subscriptions')
-                  .delete()
-                  .eq('chat_group_id', chatGroup.id)
-                  .eq('expo_push_token', expoPushToken);
+                let { error: anonError } = await deleteAnonymousSubscription(chatGroup.id, expoPushToken);
                 
                 if (anonError) {
                   console.error('Error deleting anonymous subscription:', anonError);
@@ -245,11 +245,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
                 
                 // Then try authenticated subscriptions if user exists
                 if (user) {
-                  const { error } = await supabase
-                    .from('push_notification_subscriptions')
-                    .delete()
-                    .eq('user_id', user.id)
-                    .eq('chat_group_id', chatGroup.id);
+                  const { error } = await deleteAuthenticatedSubscription(user.id, chatGroup.id);
                   
                   if (error) {
                     console.error('Error deleting authenticated subscription:', error);
@@ -262,12 +258,10 @@ const ChatDetailScreen = ({ route, navigation }) => {
                 // SUBSCRIBE: Use appropriate table based on login status
                 if (user) {
                   // Authenticated user: use push_notification_subscriptions
-                  const { error } = await supabase
-                    .from('push_notification_subscriptions')
-                    .insert({
-                      user_id: user.id,
-                      chat_group_id: chatGroup.id,
-                      expo_push_token: expoPushToken,
+                  const { error } = await insertAuthenticatedSubscription({
+                      userId: user.id,
+                      chatGroupId: chatGroup.id,
+                      expoPushToken,
                     });
 
                   if (error) {
@@ -284,11 +278,9 @@ const ChatDetailScreen = ({ route, navigation }) => {
                   }
                 } else {
                   // Anonymous user: use anonymous_push_subscriptions
-                  const { error } = await supabase
-                    .from('anonymous_push_subscriptions')
-                    .insert({
-                      chat_group_id: chatGroup.id,
-                      expo_push_token: expoPushToken,
+                  const { error } = await insertAnonymousSubscription({
+                      chatGroupId: chatGroup.id,
+                      expoPushToken,
                     });
 
                   if (error) {
@@ -423,26 +415,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
 
     setIsUploading(true);
     try {
-      const fileExt = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
-      const fileName = `${uuidv4()}.${fileExt}`;
-      const filePath = `${fileName}`; // Store directly in the root for simplicity
-
-      const { data, error: uploadError } = await supabase.storage
-        .from('article_images')
-        .upload(filePath, decode(asset.base64), { // Use decode here
-          contentType: asset.mimeType ?? `image/${fileExt}`
-        });
-
-      if (uploadError) {
-        throw uploadError;
-      }
-
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from('article_images')
-        .getPublicUrl(filePath);
-
-      return urlData?.publicUrl;
+      return await uploadImageService(asset, 'article_images');
 
     } catch (error) {
       console.error('Error uploading image:', error);
@@ -495,11 +468,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
       setError(null);
       
       // 1. Fetch messages for this chat group, joining with profiles
-      const { data: messagesData, error: messagesError } = await supabase
-        .from('chat_messages_with_users') // Query the VIEW
-        .select(`*`) // View already contains sender name
-        .eq('chat_group_id', chatGroup.id)
-        .order('created_at', { ascending: true });
+      const { data: messagesData, error: messagesError } = await fetchChatMessages(chatGroup.id);
       
       if (messagesError) {
         console.error('Error fetching messages:', messagesError);
@@ -517,18 +486,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
       const messageIds = messagesData.map(msg => msg.id);
       
       // 2. Fetch all comments for these messages in one go
-      const { data: commentsData, error: commentsError } = await supabase
-        .from('message_comments') // Query the base table
-        .select(`
-          id,
-          message_id,
-          user_id,
-          text,
-          created_at,
-          profiles ( display_name ) // Join profiles table
-        `)
-        .in('message_id', messageIds)
-        .order('created_at', { ascending: true });
+      const { data: commentsData, error: commentsError } = await fetchMessageComments(messageIds);
 
       if (commentsError) {
         console.error('Error fetching comments:', commentsError);
@@ -538,8 +496,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
       // 3. Fetch all reactions for these messages (using RPC for aggregation)
       // Assuming get_message_reactions_for_list exists and returns { message_id: { emoji: count, ... }, ... }
       // If not, this part needs adjustment or fallback to individual fetching.
-      const { data: reactionsData, error: reactionsError } = await supabase
-          .rpc('get_reactions_for_messages', { message_ids: messageIds });
+      const { data: reactionsData, error: reactionsError } = await fetchReactionsForMessages(messageIds);
 
       if (reactionsError) {
           console.error('Error fetching reactions:', reactionsError);
@@ -711,15 +668,12 @@ const ChatDetailScreen = ({ route, navigation }) => {
           }
         }
         
-        const { data, error } = await supabase
-          .from('chat_messages')
-          .insert({
-            chat_group_id: chatGroup.id,
-            text: message.trim() || null, // Use null for empty text
-            image_url: imageUrl,
-            user_id: user ? user.id : null
-          })
-          .select();
+        const { data, error } = await sendChatMessage({
+            chatGroupId: chatGroup.id,
+            text: message.trim() || null,
+            imageUrl,
+            userId: user ? user.id : null,
+          });
         
         if (error) {
           console.error('Error sending message:', error);
@@ -783,12 +737,10 @@ const ChatDetailScreen = ({ route, navigation }) => {
     }
 
     try {
-      const { data, error } = await supabase
-        .from('message_reactions')
-        .insert({
-          message_id: messageId,
-          user_id: user.id,
-          emoji
+      const { data, error } = await addMessageReaction({
+          messageId,
+          userId: user.id,
+          emoji,
         });
 
       if (error) {
@@ -834,12 +786,10 @@ const ChatDetailScreen = ({ route, navigation }) => {
     }
 
     try {
-      const { data, error } = await supabase
-        .from('message_comments')
-        .insert({
-          message_id: messageId,
-          user_id: user.id,
-          text: commentText
+      const { data, error } = await addMessageComment({
+          messageId,
+          userId: user.id,
+          text: commentText,
         });
 
       if (error) {

@@ -15,7 +15,14 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../lib/supabase';
+import {
+  fetchChatGroupTags,
+  fetchOrgBroadcastGroups,
+  createChatGroup,
+  updateChatGroup,
+  deleteChatGroup,
+  sendChatMessage,
+} from '../services/chatService';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { LinearGradient } from 'expo-linear-gradient'; // Import LinearGradient
@@ -62,11 +69,7 @@ const ManageBroadcastGroupsScreen = ({ navigation }) => {
 
     try {
       // Fetch existing groups for the organization
-      const { data: groupsData, error: groupsError } = await supabase
-        .from('chat_groups')
-        .select('id, name, description, tags, type, organization_id') // Select necessary fields
-        .eq('type', 'broadcast')
-        .eq('organization_id', activeOrganizationId);
+      const { data: groupsData, error: groupsError } = await fetchOrgBroadcastGroups(activeOrganizationId);
 
       if (groupsError) {
         console.error("Error fetching organization's broadcast groups:", groupsError);
@@ -77,10 +80,7 @@ const ManageBroadcastGroupsScreen = ({ navigation }) => {
       }
 
       // Fetch available tags (only user-selectable ones)
-      const { data: tagsData, error: tagsError } = await supabase
-        .from('chat_group_tags')
-        .select('name, is_highlighted, is_admin_only') // Fetch new flags
-        .order('display_order', { ascending: true });
+      const { data: tagsData, error: tagsError } = await fetchChatGroupTags();
 
       if (tagsError) {
         console.error('Error fetching chat tags:', tagsError);
@@ -170,18 +170,14 @@ const ManageBroadcastGroupsScreen = ({ navigation }) => {
 
     setIsSubmitting(true);
     try {
-      const { data, error } = await supabase
-        .from('chat_groups')
-        .insert({
+      const { data, error } = await createChatGroup({
           name: name.trim(),
           description: description.trim(),
           type: 'broadcast',
           tags: selectedTags,
           organization_id: activeOrganizationId,
-          is_active: true
-        })
-        .select()
-        .single();
+          is_active: true,
+        });
 
       if (error) {
         console.error('Error creating broadcast group:', error);
@@ -195,9 +191,9 @@ const ManageBroadcastGroupsScreen = ({ navigation }) => {
 
       // Add welcome message (optional, could be removed if not desired on creation)
       const welcomeMessage = `Willkommen in der Gruppe "${name.trim()}"!`;
-      await supabase.from('chat_messages').insert({
-        chat_group_id: data.id,
-        user_id: user.id, // Use logged-in user ID for the message
+      await sendChatMessage({
+        chatGroupId: data.id,
+        userId: user.id,
         text: welcomeMessage,
       });
 
@@ -223,16 +219,11 @@ const ManageBroadcastGroupsScreen = ({ navigation }) => {
 
     setIsSubmitting(true);
     try {
-      const { error } = await supabase
-        .from('chat_groups')
-        .update({
+      const { error } = await updateChatGroup(editingGroup.id, activeOrganizationId, {
           name: name.trim(),
           description: description.trim(),
           tags: selectedTags,
-          // Don't update type, organization_id, is_active here
-        })
-        .eq('id', editingGroup.id)
-        .eq('organization_id', activeOrganizationId); // Ensure we only update org's group
+        });
 
       if (error) {
         console.error('Error updating broadcast group:', error);
@@ -272,11 +263,7 @@ const ManageBroadcastGroupsScreen = ({ navigation }) => {
           text: 'Löschen', style: 'destructive', onPress: async () => {
             setIsSubmitting(true);
             try {
-              const { error } = await supabase
-                .from('chat_groups')
-                .delete()
-                .eq('id', groupToDelete.id)
-                .eq('organization_id', activeOrganizationId); // Ensure we only delete org's group
+              const { error } = await deleteChatGroup(groupToDelete.id, activeOrganizationId);
 
               if (error) {
                 console.error('Error deleting broadcast group:', error);

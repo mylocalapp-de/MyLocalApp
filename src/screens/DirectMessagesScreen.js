@@ -53,52 +53,18 @@ const DirectMessagesScreen = ({ navigation }) => {
     let conversationChangesChannel;
     if (!isOfflineMode && user) {
         // console.log('[DMScreen] Setting up real-time subscription...');
-        conversationChangesChannel = supabase
-            .channel('dm-list-changes')
-            .on(
-                'postgres_changes',
-                { 
-                    event: '*', // Listen to INSERT/UPDATE on conversations and messages
-                    schema: 'public',
-                    // We need to listen to both tables, but can filter more effectively
-                    // This might be overly broad and could be optimized with DB functions/triggers
-                    // table: 'dm_conversations' // Might miss new message updates
-                },
-                (payload) => {
-                    // console.log('[DMScreen] Real-time change received:', payload);
-                    // Basic approach: Refetch the list on any relevant change.
-                    // More advanced: Try to update the specific row in state.
+        conversationChangesChannel = subscribeToDmListChanges((payload) => {
                     if (payload.table === 'dm_conversations' || payload.table === 'direct_messages') {
-                        // console.log(`[DMScreen] Change detected in ${payload.table}, refetching conversations.`);
                         fetchConversations();
                     }
-                }
-            )
-            .subscribe((status, err) => {
-                if (status === 'SUBSCRIBED') {
-                    // console.log('[DMScreen] Real-time channel subscribed.');
-                } else {
-                    // Check if err object exists before logging details
-                    if (err) {
-                      console.error('[DMScreen] Real-time subscription error:', JSON.stringify(err, null, 2));
-                    } else {
-                      // Log non-subscribed statuses that aren't errors as info/warnings
-                      if (status === 'CLOSED') {
-                         console.warn(`[DMScreen] Real-time subscription CLOSED. Attempting reconnect or will reconnect on next interaction.`);
-                         // Optionally, implement an automatic reconnect strategy here if needed.
-                      } else {
-                         // console.log(`[DMScreen] Real-time subscription status: ${status}`);
-                      }
-                    }
-                }
-            });
+                });
     }
 
     return () => {
       unsubscribeFocus();
       if (conversationChangesChannel) {
          // console.log('[DMScreen] Removing real-time channel.');
-         supabase.removeChannel(conversationChangesChannel);
+         removeChannel(conversationChangesChannel);
       }
     };
 
@@ -116,28 +82,10 @@ const DirectMessagesScreen = ({ navigation }) => {
     setLoading(true);
     setError(null);
     try {
-      // Base query
-      let query = supabase
-        .from('dm_conversation_list') // Use the updated view
-        .select('*');
-
-      // Apply context-based filtering
-      if (isOrganizationActive && activeOrganizationId) {
-        // console.log(`[DMScreen] Fetching in Org Context for Org ID: ${activeOrganizationId}`);
-        // In Org context, ONLY show conversations FOR THIS specific organization
-        query = query.eq('is_org_conversation', true)
-                     .eq('organization_id', activeOrganizationId);
-      } else {
-        // console.log("[DMScreen] Fetching in Personal Context (excluding Org DMs)");
-        // In Personal context, show ALL conversations (user and org)
-        // No additional server-side filter needed here as the view returns everything relevant.
-      }
-
-      // Add sorting
-      query = query.order('last_message_at', { ascending: false });
-
-      // Execute the query
-      const { data, error: fetchError } = await query;
+      const { data, error: fetchError } = await fetchDmConversations({
+        isOrgContext: isOrganizationActive && !!activeOrganizationId,
+        organizationId: activeOrganizationId,
+      });
 
       if (fetchError) {
         console.error('Error fetching DM conversations view:', fetchError);
