@@ -10,13 +10,11 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
-  Dimensions,
-  Image,
-  Button
+  Dimensions
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
+import { ImagePickerButton } from '../components/common';
 import * as DocumentPicker from 'expo-document-picker';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -159,33 +157,7 @@ const CreateArticleScreen = ({ navigation, route }) => {
     setTags(prev => prev.filter((_, i) => i !== index));
   };
   
-  // Function to pick multiple images
-  const pickImage = async () => {
-    // Request permission
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Berechtigung benötigt', 'Sorry, wir benötigen die Berechtigung, um auf deine Fotos zugreifen zu können.');
-      return;
-    }
-
-    let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsMultipleSelection: true,
-      selectionLimit: 10,
-      quality: 0.8,
-      base64: true,
-    });
-
-    if (!result.canceled && result.assets) {
-      // Append new images to existing selection
-      setImageAssets(prev => [...prev, ...result.assets]);
-    }
-  };
-
-  // Function to remove an image from selection
-  const removeImage = (index) => {
-    setImageAssets(prev => prev.filter((_, i) => i !== index));
-  };
+  // Image picking is handled by ImagePickerButton component
 
   // Function to upload a single image and return URL
   const uploadSingleImage = async (asset) => {
@@ -743,44 +715,12 @@ const CreateArticleScreen = ({ navigation, route }) => {
           )}
 
           {/* Image Upload - Multiple images supported */}
-            <>
-              <Text style={styles.inputLabel}>Bilder (Optional, max. 10)</Text>
-              {imageAssets.length > 0 && (
-                <ScrollView 
-                  horizontal 
-                  showsHorizontalScrollIndicator={false}
-                  style={styles.imagePreviewScroll}
-                  contentContainerStyle={styles.imagePreviewScrollContent}
-                >
-                  {imageAssets.map((asset, index) => (
-                    <View key={index} style={styles.imagePreviewItem}>
-                      <Image source={{ uri: asset.uri }} style={styles.imagePreviewThumb} />
-                      <TouchableOpacity 
-                        onPress={() => removeImage(index)} 
-                        style={styles.removeImageButton}
-                      >
-                        <Ionicons name="close-circle" size={24} color="#ff3b30" />
-                      </TouchableOpacity>
-                      {index === 0 && (
-                        <View style={styles.coverBadge}>
-                          <Text style={styles.coverBadgeText}>Cover</Text>
-                        </View>
-                      )}
-                    </View>
-                  ))}
-                </ScrollView>
-              )}
-              <TouchableOpacity 
-                style={styles.imagePickerButton} 
-                onPress={pickImage} 
-                disabled={isUploading || imageAssets.length >= 10}
-              >
-                <Ionicons name="images" size={20} color="#4285F4" style={{marginRight: 10}} />
-                <Text style={styles.imagePickerButtonText}>
-                  {imageAssets.length > 0 ? `Weitere Bilder hinzufügen (${imageAssets.length}/10)` : 'Bilder auswählen'}
-                </Text>
-              </TouchableOpacity>
-            </>
+          <ImagePickerButton
+            images={imageAssets}
+            onImagesChange={setImageAssets}
+            maxImages={10}
+            disabled={isUploading}
+          />
 
           {/* File Attachments Upload */}
             <>
@@ -955,57 +895,7 @@ const styles = StyleSheet.create({
     color: '#4285F4',
     fontWeight: 'bold',
   },
-  imagePickerButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#eef4ff',
-    padding: 12,
-    borderRadius: 8,
-    justifyContent: 'center',
-    marginTop: 10,
-  },
-  imagePickerButtonText: {
-    color: '#4285F4',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  imagePreviewScroll: {
-    marginTop: 10,
-    marginBottom: 5,
-  },
-  imagePreviewScrollContent: {
-    paddingRight: 10,
-  },
-  imagePreviewItem: {
-    position: 'relative',
-    marginRight: 10,
-  },
-  imagePreviewThumb: {
-    width: 120,
-    height: 90,
-    borderRadius: 8,
-  },
-  removeImageButton: {
-    position: 'absolute',
-    top: -8,
-    right: -8,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    borderRadius: 12,
-  },
-  coverBadge: {
-    position: 'absolute',
-    bottom: 4,
-    left: 4,
-    backgroundColor: '#4285F4',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  coverBadgeText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: 'bold',
-  },
+  // Image picker styles moved to ImagePickerButton component
   loadingIndicator: {
     marginVertical: 10,
   },

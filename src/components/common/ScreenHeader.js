@@ -12,6 +12,8 @@ const androidPaddingTop = height * 0.03; // 3% of screen height for better scali
 
 const ScreenHeader = ({ 
   title, 
+  subtitle,
+  badge,
   filters = [], 
   onFilterChange, 
   initialFilter = 'Aktuell', 
@@ -23,6 +25,8 @@ const ScreenHeader = ({
   onBlockToggle,
   isBlocked = false,
   blockLoading = false,
+  // Generic right action: { icon, onPress, label?, loading? }
+  rightAction,
   // Search related props
   showSearch = false,
   searchQuery = '',
@@ -68,8 +72,18 @@ const ScreenHeader = ({
           <Ionicons name="options-outline" size={24} color="#4285F4" />
         </TouchableOpacity>
       );
+    } else if (rightAction) {
+      if (rightAction.loading) {
+        return <ActivityIndicator size="small" color="#4285F4" />;
+      }
+      return (
+        <TouchableOpacity onPress={rightAction.onPress} style={styles.filterIconContainer}>
+          <Ionicons name={rightAction.icon || 'ellipsis-horizontal'} size={24} color="#4285F4" />
+          {rightAction.label ? <Text style={{ color: '#4285F4', fontSize: 10 }}>{rightAction.label}</Text> : null}
+        </TouchableOpacity>
+      );
     }
-    return null; // No button if neither block nor filter is shown
+    return null;
   };
 
   const rightContent = renderRightContent();
@@ -83,17 +97,29 @@ const ScreenHeader = ({
         ) : (
           <View style={styles.iconPlaceholder} />
         )}
-        <Text 
-          style={[
-            styles.titleText,
-            fontsLoaded && { fontFamily: 'Lobster_400Regular' },
-            !title && styles.appNameStyle
-          ]}
-          numberOfLines={1}
-          ellipsizeMode="tail"
-        >
-          {title || appName}
-        </Text>
+        <View style={styles.titleContainer}>
+          <View style={styles.titleRow}>
+            <Text 
+              style={[
+                styles.titleText,
+                fontsLoaded && { fontFamily: 'Lobster_400Regular' },
+                !title && styles.appNameStyle
+              ]}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
+              {title || appName}
+            </Text>
+            {badge != null && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{badge}</Text>
+              </View>
+            )}
+          </View>
+          {subtitle ? (
+            <Text style={styles.subtitleText} numberOfLines={1}>{subtitle}</Text>
+          ) : null}
+        </View>
         { rightContent ? (
           <TouchableOpacity onPress={onBlockToggle} style={styles.iconButton} disabled={blockLoading}>
             {rightContent}
@@ -157,12 +183,40 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
   },
+  titleContainer: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   titleText: {
     fontSize: 20,
     color: '#333',
     fontWeight: 'bold',
     textAlign: 'center',
-    flex: 1,
+  },
+  subtitleText: {
+    fontSize: 12,
+    color: '#6c757d',
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  badge: {
+    backgroundColor: '#ff3b30',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 6,
+    paddingHorizontal: 6,
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: 'bold',
   },
   appNameStyle: {
     fontSize: 24,

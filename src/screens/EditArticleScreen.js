@@ -17,7 +17,7 @@ import {
 const { width } = Dimensions.get('window');
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
+import { ImagePickerButton } from '../components/common';
 import * as DocumentPicker from 'expo-document-picker';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -277,32 +277,9 @@ const EditArticleScreen = ({ navigation, route }) => {
   };
   
   // Function to pick multiple images
-  const pickImage = async () => {
-    const totalImages = existingImages.filter(img => !imagesToDelete.includes(img.id)).length + newImageAssets.length;
-    if (totalImages >= 10) {
-      Alert.alert('Maximum erreicht', 'Du kannst maximal 10 Bilder pro Artikel hochladen.');
-      return;
-    }
-
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Berechtigung benötigt', 'Sorry, wir benötigen die Berechtigung, um auf deine Fotos zugreifen zu können.');
-      return;
-    }
-
-    const remainingSlots = 10 - totalImages;
-    let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsMultipleSelection: true,
-      selectionLimit: remainingSlots,
-      quality: 0.8,
-      base64: true,
-    });
-
-    if (!result.canceled && result.assets) {
-      setNewImageAssets(prev => [...prev, ...result.assets]);
-    }
-  };
+  // Image picking is now handled by ImagePickerButton component
+  const activeExistingCount = existingImages.filter(img => !imagesToDelete.includes(img.id)).length;
+  const maxNewImages = Math.max(0, 10 - activeExistingCount);
 
   // Function to upload a single image and return URL
   const uploadSingleImage = async (asset) => {
@@ -900,16 +877,14 @@ const EditArticleScreen = ({ navigation, route }) => {
                   ))}
                 </ScrollView>
               )}
-              <TouchableOpacity 
-                style={styles.imagePickerButton} 
-                onPress={pickImage} 
-                disabled={isUploading || totalImages >= 10}
-              >
-                <Ionicons name="images" size={20} color="#4285F4" style={{marginRight: 10}} />
-                <Text style={styles.imagePickerButtonText}>
-                  {totalImages > 0 ? `Weitere Bilder hinzufügen (${totalImages}/10)` : 'Bilder auswählen'}
-                </Text>
-              </TouchableOpacity>
+              <ImagePickerButton
+                images={newImageAssets}
+                onImagesChange={setNewImageAssets}
+                maxImages={maxNewImages}
+                disabled={isUploading}
+                label=""
+                showCoverBadge={false}
+              />
             </>
 
           {/* File Attachments Upload/Edit */}
