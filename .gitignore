@@ -15,3 +15,5 @@ node_modules
 /android
 android
 android_olddist/
+
+dist/
