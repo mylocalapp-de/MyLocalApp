@@ -12,6 +12,7 @@ import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import { navigate } from './src/navigation/navigationRef';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from './src/lib/supabase';
 
 // Storage key for badge count
 const BADGE_COUNT_KEY = 'app_badge_count';
@@ -97,15 +98,19 @@ export default function App() {
 
   const incrementBadge = useCallback(async () => {
     try {
-      const newCount = badgeCount + 1;
-      setBadgeCount(newCount);
-      await AsyncStorage.setItem(BADGE_COUNT_KEY, String(newCount));
-      await Notifications.setBadgeCountAsync(newCount);
-      console.log('Badge incremented to:', newCount);
+      // Use functional state update to avoid stale closure
+      setBadgeCount(prevCount => {
+        const newCount = prevCount + 1;
+        // Persist asynchronously (fire and forget within the updater)
+        AsyncStorage.setItem(BADGE_COUNT_KEY, String(newCount)).catch(() => {});
+        Notifications.setBadgeCountAsync(newCount).catch(() => {});
+        console.log('Badge incremented to:', newCount);
+        return newCount;
+      });
     } catch (e) {
       console.error('Error incrementing badge:', e);
     }
-  }, [badgeCount]);
+  }, []); // No dependency on badgeCount — uses functional update
 
   const clearBadge = useCallback(async () => {
     try {
@@ -174,16 +179,38 @@ export default function App() {
     }
   }, []);
 
-  // --- App State Change Handler (clear badge when app becomes active) ---
+  // --- Sync badge with server-side unread count ---
+  const syncBadgeWithServer = useCallback(async () => {
+    try {
+      const { data: session } = await supabase.auth.getSession();
+      if (session?.session?.user) {
+        const { data, error } = await supabase.rpc('get_total_unread_count');
+        if (!error && typeof data === 'number') {
+          setBadgeCount(data);
+          await AsyncStorage.setItem(BADGE_COUNT_KEY, String(data));
+          await Notifications.setBadgeCountAsync(data);
+          console.log('Badge synced with server:', data);
+          return;
+        }
+      }
+      // If not logged in or error, just clear the badge
+      await clearBadge();
+    } catch (e) {
+      console.error('Error syncing badge with server:', e);
+      await clearBadge();
+    }
+  }, [clearBadge]);
+
+  // --- App State Change Handler (sync badge when app becomes active) ---
   useEffect(() => {
     const subscription = AppState.addEventListener('change', async (nextAppState) => {
       if (
         appState.current.match(/inactive|background/) &&
         nextAppState === 'active'
       ) {
-        // App has come to the foreground - clear badge
-        console.log('App came to foreground, clearing badge');
-        await clearBadge();
+        // App has come to the foreground - sync badge with server
+        console.log('App came to foreground, syncing badge');
+        await syncBadgeWithServer();
       }
       appState.current = nextAppState;
     });
@@ -191,7 +218,7 @@ export default function App() {
     return () => {
       subscription.remove();
     };
-  }, [clearBadge]);
+  }, [syncBadgeWithServer]);
 
   // --- Initial Badge Load ---
   useEffect(() => {

@@ -21,6 +21,7 @@ import {
   subscribeToDmConversation,
   removeChannel,
 } from '../services/dmService';
+import { markDmConversationRead } from '../services/chatService';
 import { fetchOrganizationLogo, fetchProfile } from '../services/profileService';
 import { uploadImage as uploadImageService } from '../services/uploadService';
 import { useAuth } from '../context/AuthContext';
@@ -65,11 +66,22 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
   const flatListRef = useRef(null);
   const [recipientImageUrl, setRecipientImageUrl] = useState(null); // State for header image
 
+  // Mark DM conversation as read on server
+  const markConversationAsRead = async () => {
+    if (user && conversationId && !isOfflineMode) {
+      try {
+        await markDmConversationRead(conversationId);
+      } catch (err) {
+        console.error('Error marking DM conversation read on server:', err);
+      }
+    }
+  };
+
   // Load messages when component mounts or conversationId changes
   useEffect(() => {
     if (conversationId && !isOfflineMode) {
       fetchMessages();
-      // Consider marking conversation as read here or on view
+      markConversationAsRead();
     } else if (isOfflineMode) {
       setError("Nachrichten sind offline nicht verfügbar.");
       setLoading(false);
@@ -78,6 +90,14 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
         setLoading(false);
     }
   }, [conversationId, isOfflineMode]);
+
+  // Also mark as read when screen is focused (coming back from another screen)
+  useEffect(() => {
+    const unsubscribeFocus = navigation.addListener('focus', () => {
+      markConversationAsRead();
+    });
+    return () => unsubscribeFocus();
+  }, [navigation, conversationId, user, isOfflineMode]);
 
   // Subscribe to new messages in this conversation
   useEffect(() => {

@@ -31,6 +31,7 @@ import {
   deleteAuthenticatedSubscription,
   insertAuthenticatedSubscription,
   insertAnonymousSubscription,
+  markChatGroupRead,
 } from '../services/chatService';
 import { uploadImage as uploadImageService } from '../services/uploadService';
 import { useAuth } from '../context/AuthContext';
@@ -358,7 +359,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
     };
   }, [navigation, chatGroup.id]);
 
-  // Mark chat as viewed in AsyncStorage
+  // Mark chat as viewed in AsyncStorage AND on the server
   const markChatAsViewed = async () => {
     try {
       // Get current unread counts
@@ -370,6 +371,13 @@ const ChatDetailScreen = ({ route, navigation }) => {
       
       // Save updated counts
       await AsyncStorage.setItem('localUnreadCounts', JSON.stringify(unreadCounts));
+
+      // Also mark as read on the server (for badge count tracking)
+      if (user && chatGroup.id) {
+        markChatGroupRead(chatGroup.id).catch(err => {
+          console.error('Error marking chat group read on server:', err);
+        });
+      }
     } catch (err) {
       console.error('Error marking chat as viewed:', err);
     }

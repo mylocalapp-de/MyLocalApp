@@ -8,6 +8,7 @@ import { useNetwork } from '../context/NetworkContext';
 import {
   fetchChatGroupTags,
   fetchChatGroupListings,
+  fetchUnreadCounts,
 } from '../services/chatService';
 import {
   fetchDmConversations,
@@ -157,13 +158,23 @@ const ChatScreen = ({ navigation, route }) => {
 
     // Use Promise.all to fetch both concurrently
     try {
-        const [groupsResult, dmsResult] = await Promise.all([
+        const [groupsResult, dmsResult, unreadResult] = await Promise.all([
             fetchChatGroupsInternal(),
-            fetchDirectMessagesInternal()
+            fetchDirectMessagesInternal(),
+            user ? fetchUnreadCounts() : Promise.resolve({ data: null, error: null }),
         ]);
 
+        // Build server-side unread counts map
+        let serverUnreadMap = {};
+        if (unreadResult?.data && Array.isArray(unreadResult.data)) {
+          unreadResult.data.forEach(row => {
+            const key = row.item_type === 'chat_group' ? row.item_id : `dm-${row.item_id}`;
+            serverUnreadMap[key] = Number(row.unread_count) || 0;
+          });
+        }
+
         // Combine and process results (initial pass without user avatars)
-        let combinedInitial = processAndCombineData(groupsResult, dmsResult, currentUserProfile.blocked || []);
+        let combinedInitial = processAndCombineData(groupsResult, dmsResult, currentUserProfile.blocked || [], serverUnreadMap);
         setCombinedList(combinedInitial);
 
         // --- Fetch missing user avatars ---
@@ -267,7 +278,7 @@ const ChatScreen = ({ navigation, route }) => {
 
   // --- Data Processing and Filtering ---
 
-  const processAndCombineData = (groups, dms, blockedIds) => {
+  const processAndCombineData = (groups, dms, blockedIds, serverUnreadMap = {}) => {
       // console.log(`[ChatScreen] Processing ${groups.length} groups and ${dms.length} DMs for context: ${isOrganizationActive ? 'Organization' : 'Personal'}`);
       let combined = [];
 
@@ -290,9 +301,11 @@ const ChatScreen = ({ navigation, route }) => {
           if (group.type === 'open_group') uiType = 'Offene Gruppen';
           else if (group.type === 'broadcast') uiType = 'Ankündigungen';
 
+          // Prefer server-side unread count, fall back to local tracking
+          const serverUnread = serverUnreadMap[group.id];
           const unreadCount = localUnreadCounts[group.id] !== undefined
               ? localUnreadCounts[group.id]
-              : parseInt(group.unread_count) || 0;
+              : (serverUnread !== undefined ? serverUnread : (parseInt(group.unread_count) || 0));
 
           const localMsg = localLastMessages[group.id];
           let lastMessage = group.last_message || '';
@@ -364,6 +377,9 @@ const ChatScreen = ({ navigation, route }) => {
                displayMessage = `${dm.last_message_sender_name}: ${displayMessage}`;
            }
 
+          // Get server-side DM unread count
+          const dmServerUnread = serverUnreadMap[`dm-${dm.conversation_id}`] || 0;
+
           return {
               id: `dm-${dm.conversation_id}`,
               conversationId: dm.conversation_id,
@@ -373,7 +389,7 @@ const ChatScreen = ({ navigation, route }) => {
               lastMessageSenderName: dm.last_message_sender_name,
               time: dm.last_message_time || '',
               lastTimestamp: lastTimestamp,
-              unread: 0,
+              unread: dmServerUnread,
               avatarUrl: isOrg ? dm.logo_url : null,
               type: 'dm',
               uiType: isOrg ? 'Organisations-DM' : 'Direktnachricht',
