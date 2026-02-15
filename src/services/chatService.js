@@ -156,6 +156,40 @@ export async function insertAnonymousSubscription({ chatGroupId, expoPushToken }
     .insert({ chat_group_id: chatGroupId, expo_push_token: expoPushToken });
 }
 
+// ─── Read Tracking & Unread Counts ───────────────────────────────────────────
+
+/**
+ * Mark a chat group as read for the current user.
+ * Upserts into chat_group_reads with the current timestamp.
+ */
+export async function markChatGroupRead(chatGroupId) {
+  return supabase.rpc('mark_chat_read', { p_chat_group_id: chatGroupId });
+}
+
+/**
+ * Mark a DM conversation as read for the current user.
+ * Upserts into dm_conversation_reads with the current timestamp.
+ */
+export async function markDmConversationRead(conversationId) {
+  return supabase.rpc('mark_dm_read', { p_conversation_id: conversationId });
+}
+
+/**
+ * Get per-item unread counts for the current user.
+ * Returns rows with { item_type: 'chat_group'|'dm_conversation', item_id: UUID, unread_count: number }
+ */
+export async function fetchUnreadCounts() {
+  return supabase.rpc('get_unread_counts');
+}
+
+/**
+ * Get total unread count across all chats and DMs for the current user.
+ * Used for app icon badge.
+ */
+export async function fetchTotalUnreadCount() {
+  return supabase.rpc('get_total_unread_count');
+}
+
 // ─── Real-time Channel Helpers ───────────────────────────────────────────────
 
 /**
