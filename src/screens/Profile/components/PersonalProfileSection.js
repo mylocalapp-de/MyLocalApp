@@ -174,7 +174,7 @@ const PersonalProfileSection = ({
 
       {/* About Me */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Über Mich</Text>
+        <Text style={styles.cardTitle}>Über mich</Text>
         <Text style={styles.aboutMeText}>{profile?.about_me || 'Keine Beschreibung hinterlegt.'}</Text>
         <TouchableOpacity style={styles.editButtonInline} onPress={onOpenAboutMeModal}>
           <Text style={styles.editButtonText}>Über mich bearbeiten</Text>

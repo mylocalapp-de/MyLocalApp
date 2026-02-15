@@ -547,9 +547,10 @@ export const AuthProvider = ({ children, expoPushToken }) => {
 
   // --- Sign In / Sign Out --- (No change needed for token here, handled by useEffect)
   const signIn = async (email, password) => {
-    setLoading(true);
+    // Note: Do NOT set global loading here — AppNavigator returns null when loading=true,
+    // which unmounts WelcomeScreen and loses local state (error messages, step).
+    // WelcomeScreen has its own local loading state for the button spinner.
     try {
-      // console.log('AuthContext: Attempting sign in:', email);
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -565,12 +566,9 @@ export const AuthProvider = ({ children, expoPushToken }) => {
          return { success: false, error: { message: 'Anmeldung fehlgeschlagen, keine Benutzerdaten.' } };
       }
 
-      // console.log('AuthContext: SignIn successful, user:', data.user.id);
-
       // Set onboarding complete flag in storage on successful sign-in
-      // console.log('AuthContext: Setting onboarding complete status after sign-in.');
       await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
-      setHasCompletedOnboarding(true); // Update state
+      setHasCompletedOnboarding(true);
 
       // onAuthStateChange listener handles setting user state, loading profile & orgs,
       // and triggering token registration via useEffect.
@@ -579,8 +577,6 @@ export const AuthProvider = ({ children, expoPushToken }) => {
     } catch (error) {
       console.error('AuthContext: Unexpected error during signIn:', error);
       return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
-    } finally {
-      setLoading(false);
     }
   };
 
