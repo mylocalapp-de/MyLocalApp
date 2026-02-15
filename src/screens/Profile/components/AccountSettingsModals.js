@@ -170,7 +170,7 @@ export const AboutMeModal = ({
   <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
     <View style={styles.modalOverlay}>
       <View style={styles.modalContent}>
-        <Text style={styles.modalTitle}>Über Mich bearbeiten</Text>
+        <Text style={styles.modalTitle}>Über mich bearbeiten</Text>
         <TextInput style={[styles.input, styles.textArea]} value={aboutMe} onChangeText={onAboutMeChange} placeholder="Erzähl etwas über dich..." multiline numberOfLines={4} />
         {error ? <Text style={styles.errorTextModal}>{error}</Text> : null}
         <View style={styles.modalActions}>

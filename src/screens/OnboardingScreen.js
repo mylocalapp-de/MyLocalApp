@@ -22,8 +22,6 @@ const OnboardingScreen = ({ navigation }) => {
   const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false); // Local loading for final submission
   const [error, setError] = useState('');
-  const [termsAccepted, setTermsAccepted] = useState(false);
-  const [termsError, setTermsError] = useState('');
   const [showInList, setShowInList] = useState(true);
 
   const validateEmail = (text) => {
@@ -54,11 +52,6 @@ const OnboardingScreen = ({ navigation }) => {
 
   const handleCompleteOnboarding = async () => {
     setError(''); // Clear previous errors
-    setTermsError('');
-    if (!termsAccepted) {
-      setTermsError('Bitte akzeptiere die AGB und die Datenschutzbestimmungen.');
-      return;
-    }
     if (!displayName.trim()) {
       // Should be caught earlier, but double-check
       setError('Der Anzeigename fehlt.');
@@ -179,11 +172,8 @@ const OnboardingScreen = ({ navigation }) => {
             </View>
             {error ? <Text style={styles.errorText}>{error}</Text> : null}
             <View style={styles.termsContainer}>
-              <TouchableOpacity onPress={() => setTermsAccepted(!termsAccepted)}>
-                <Ionicons name={termsAccepted ? "checkbox" : "checkbox-outline"} size={20} color="#333" />
-              </TouchableOpacity>
               <Text style={styles.termsText}>
-                Hiermit akzeptiere ich die <Text style={styles.link} onPress={() => Linking.openURL('https://mylocapp.de/agb')}>AGB</Text> und die <Text style={styles.link} onPress={() => Linking.openURL('https://mylocalapp.de/datenschutz')}>Datenschutzbestimmungen</Text> der App. Des Weiteren erkenne ich hiermit an keine illegalen oder unangemessenen Inhalte zu veröffentlichen.
+                Mit dem Klicken auf „Loslegen & Entdecken“ akzeptiere ich die <Text style={styles.link} onPress={() => Linking.openURL('https://mylocapp.de/agb')}>AGB</Text> und die <Text style={styles.link} onPress={() => Linking.openURL('https://mylocalapp.de/datenschutz')}>Datenschutzbestimmungen</Text> der App. Des Weiteren erkenne ich hiermit an keine illegalen oder unangemessenen Inhalte zu veröffentlichen.
               </Text>
             </View>
             {/* Public directory opt-in */}
@@ -191,7 +181,6 @@ const OnboardingScreen = ({ navigation }) => {
               <Switch value={showInList} onValueChange={setShowInList} />
               <Text style={[styles.termsText, { marginLeft: 8 }]}>In Personenliste anzeigen (für Direktnachrichten auffindbar)</Text>
             </View>
-            {termsError ? <Text style={styles.errorText}>{termsError}</Text> : null}
             <TouchableOpacity 
               style={[styles.actionButton, combinedLoading && styles.buttonDisabled]}
               onPress={handleCompleteOnboarding}
