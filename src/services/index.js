@@ -11,3 +11,4 @@ export * from './dmService';
 export * from './poiService';
 export * from './profileService';
 export * from './calendarService';
+export * from './notificationService';

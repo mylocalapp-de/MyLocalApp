@@ -19,6 +19,7 @@ import useOrganizationManagement from './hooks/useOrganizationManagement';
 import ProfileHeader from './components/ProfileHeader';
 import OrganizationManager from './components/OrganizationManager';
 import PersonalProfileSection, { CATEGORIES } from './components/PersonalProfileSection';
+import NotificationSettings from './components/NotificationSettings';
 import {
   CreateAccountModal,
   AccountSettingsModal,
@@ -251,6 +252,11 @@ const ProfileScreen = () => {
           onSaveDataForOffline={saveDataForOffline}
           onUpdateVisibility={handleUpdateVisibility}
         />
+      )}
+
+      {/* Notification Settings — personal context, full account only */}
+      {!org.isOrganizationActive && account.hasFullAccount && user?.id && (
+        <NotificationSettings userId={user.id} />
       )}
 
       {/* Sign Out / Delete — personal context only */}
