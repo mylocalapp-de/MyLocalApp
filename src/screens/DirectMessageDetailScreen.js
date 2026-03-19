@@ -28,7 +28,8 @@ import { useAuth } from '../context/AuthContext';
 import { useNetwork } from '../context/NetworkContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
-// uuid and base64-arraybuffer now handled by uploadService
+import 'react-native-get-random-values';
+import { v4 as uuidv4 } from 'uuid';
 import { useOrganization } from '../context/OrganizationContext';
 
 const { height } = Dimensions.get('window');
