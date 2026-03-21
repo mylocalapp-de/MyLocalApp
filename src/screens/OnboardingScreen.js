@@ -99,7 +99,7 @@ const OnboardingScreen = ({ navigation }) => {
           <>
             <Text style={styles.title}>Willkommen bei MeinStrodehne!</Text>
             <Text style={styles.description}>
-              Entdecke deine Gemeinde neu! Mit MeinStrodehne bleibst du informiert und kannst <Text style={styles.boldText}>aktiv teilnehmen</Text>:
+              Entdecke Strodehne neu! Mit MeinStrodehne bleibst du informiert und kannst <Text style={styles.boldText}>aktiv teilnehmen</Text>:
             </Text>
             <View style={styles.featureList}>
               <View style={styles.featureItem}>
