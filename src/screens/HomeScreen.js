@@ -432,7 +432,7 @@ const HomeScreen = ({ navigation }) => {
                         <Image
                           source={{ uri: getTransformedImageUrl(org.logo_url) }}
                           style={styles.gridImage}
-                          resizeMode="cover"
+                          resizeMode="contain"
                         />
                       ) : (
                         <View style={[styles.gridImage, styles.gridPlaceholder]}>
