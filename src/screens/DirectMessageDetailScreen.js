@@ -35,6 +35,14 @@ import { useOrganization } from '../context/OrganizationContext';
 const { height } = Dimensions.get('window');
 const androidPaddingTop = height * 0.05;
 
+// Format timestamp as "03. Feb 2026, 12:34"
+const formatMessageTime = (dateInput) => {
+  const d = new Date(dateInput);
+  const day = d.toLocaleDateString('de-DE', { day: '2-digit', month: 'short', year: 'numeric' });
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return `${day}, ${time}`;
+};
+
 // Helper function to transform Supabase Storage URLs
 const getTransformedImageUrl = (originalUrl) => {
   if (!originalUrl || !originalUrl.includes('/storage/v1/object/public/')) {
@@ -134,7 +142,7 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
              if (prevMessages.some(msg => msg.id === newMessage.id)) {
                 return prevMessages;
             }
-            const formattedTime = new Date(newMessage.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const formattedTime = formatMessageTime(newMessage.created_at);
 
             // Fetch sender profile for the new message if not already cached/present
             // This might be slightly inefficient; consider a profile cache later.
@@ -234,7 +242,7 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
         // Process messages AFTER filtering
         const processedMessages = data.map(msg => {
             const messageDate = new Date(msg.created_at);
-            const formattedTime = messageDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const formattedTime = formatMessageTime(messageDate);
             const isMyMessage = msg.sender_id === user?.id;
 
             // Determine sender name based on context AND the fact we've filtered
@@ -340,7 +348,7 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
       image_url: imageAsset ? imageAsset.uri : null, // Use local URI for preview initially
       // Determine sender based on context
       sender: isOrganizationActive ? (activeOrganization?.name || 'Organisation') : (displayName || 'Ich'), 
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      time: formatMessageTime(new Date()),
       user_id: user.id,
       isOptimistic: true // Optional flag to style differently if needed
     };
