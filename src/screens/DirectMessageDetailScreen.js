@@ -537,10 +537,10 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
       {renderHeader()}
 
 
-      {/* Use inverted FlatList with reversed data so newest sits at bottom and you can scroll up */}
+      {/* inverted FlatList: data stays chronological (oldest first), FlatList renders newest at bottom */}
       <FlatList
         ref={flatListRef}
-        data={[...messages].reverse()}
+        data={messages}
         renderItem={renderItem}
         keyExtractor={item => item.id.toString()}
         style={styles.messagesList}
@@ -548,8 +548,6 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
         inverted
         onRefresh={isOfflineMode ? undefined : fetchMessages}
         refreshing={!isOfflineMode && loading}
-        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
-        onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>
