@@ -182,7 +182,7 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
 
             return updatedMessages; // Return the list with the immediately added message
           });
-          setTimeout(() => flatListRef.current?.scrollToEnd(), 100);
+          setTimeout(() => flatListRef.current?.scrollToOffset({ offset: 0, animated: true }), 100);
         });
 
     return () => {
@@ -537,10 +537,10 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
       {renderHeader()}
 
 
-      {/* inverted FlatList: data stays chronological (oldest first), FlatList renders newest at bottom */}
+      {/* inverted FlatList: data reversed (newest first in array = bottom of screen) */}
       <FlatList
         ref={flatListRef}
-        data={messages}
+        data={[...messages].reverse()}
         renderItem={renderItem}
         keyExtractor={item => item.id.toString()}
         style={styles.messagesList}
