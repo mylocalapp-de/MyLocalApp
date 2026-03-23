@@ -178,10 +178,10 @@ const ArticleDetailScreen = ({ route, navigation }) => {
       });
       
       // Set author name (prioritize organization name)
-      if (articleData.organizations && articleData.organizations.name) {
-        setAuthorName(articleData.organizations.name);
-      } else if (articleData.profiles && articleData.profiles.display_name) {
-        setAuthorName(articleData.profiles.display_name);
+      if (articleData.organization && articleData.organization.name) {
+        setAuthorName(articleData.organization.name);
+      } else if (articleData.author && articleData.author.display_name) {
+        setAuthorName(articleData.author.display_name);
       } else {
         setAuthorName('Redaktion'); // Default fallback
       }
