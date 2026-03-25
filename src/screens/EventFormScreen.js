@@ -21,7 +21,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Picker } from '@react-native-picker/picker';
 import { RRule } from 'rrule';
 import {
-  fetchEventCategories,
+  fetchEventCategories as fetchEventCategoriesService,
   createEvent,
   updateEvent as updateEventService,
   fetchEventRaw,
@@ -93,7 +93,7 @@ const EventFormScreen = ({ navigation, route }) => {
   const fetchEventCategories = async () => {
     setLoadingCategories(true);
     try {
-      const { data, error } = await fetchEventCategories();
+      const { data, error } = await fetchEventCategoriesService();
 
       if (error) {
         console.error('Error fetching event categories:', error);
