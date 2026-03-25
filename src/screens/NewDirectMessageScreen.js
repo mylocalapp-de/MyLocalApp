@@ -284,7 +284,6 @@ const NewDirectMessageScreen = ({ navigation }) => {
       {renderUserAvatar(item)}
       <View style={styles.listItemInfo}>
         <Text style={styles.listItemName}>{item.display_name || 'Unbekannter Benutzer'}</Text>
-        <Text style={styles.listItemDetail}>{item.email}</Text>
       </View>
       {loadingConversation && selectedTargetId === item.id && (
            <ActivityIndicator size="small" color="#4285F4" style={styles.itemLoadingIndicator}/>
