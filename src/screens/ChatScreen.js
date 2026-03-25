@@ -870,7 +870,7 @@ const ChatScreen = ({ navigation, route }) => {
                       <Text style={styles.chatName}>{item.display_name || 'Unbekannter Benutzer'}</Text>
                   </View>
                   <View style={styles.chatBottomLine}>
-                      <Text style={styles.chatMessage} numberOfLines={1}>{item.email || ''}</Text>
+                      <Text style={styles.chatMessage} numberOfLines={1}>{item.last_message || ''}</Text>
                       {loadingConversation && selectedTargetId === item.id && (
                           <ActivityIndicator size="small" color="#4285F4" style={styles.itemLoadingIndicator} />
                       )}
