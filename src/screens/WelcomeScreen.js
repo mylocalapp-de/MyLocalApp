@@ -325,7 +325,7 @@ const WelcomeScreen = ({ navigation }) => {
             }}
             disabled={loading}
           >
-            <Text style={styles.primaryButtonText}>Registrieren</Text>
+            <Text style={styles.primaryButtonText}>Neu hier?</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -336,7 +336,7 @@ const WelcomeScreen = ({ navigation }) => {
             }}
             disabled={loading}
           >
-            <Text style={styles.secondaryButtonText}>Anmelden</Text>
+            <Text style={styles.secondaryButtonText}>Login mit bestehendem Account</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
