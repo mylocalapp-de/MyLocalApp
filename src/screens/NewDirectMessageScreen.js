@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Platform,
   TextInput,
   ScrollView,
@@ -330,119 +331,123 @@ const NewDirectMessageScreen = ({ navigation }) => {
     }
 
     return (
-      <ScrollView
-         style={styles.contentContainer}
-         keyboardShouldPersistTaps="handled"
-         showsVerticalScrollIndicator={false}
+      <KeyboardAvoidingView
+         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+         style={{ flex: 1 }}
       >
-        <Text style={styles.sectionTitle}>Benutzer suchen</Text>
-        <View style={styles.searchContainer}>
-          <Ionicons name="search-outline" size={20} color="#888" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Nach Name suchen (min. 3 Zeichen)..."
-            placeholderTextColor="#888"
-            value={searchQuery}
-            onChangeText={(text) => {
-              setSearchQuery(text);
-              searchUsers(text);
-            }}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="default"
-            returnKeyType="search"
-          />
-          {searchQuery.length > 0 && (
-              <TouchableOpacity onPress={() => { setSearchQuery(''); setSearchResults([]); setSearchError(null); }} style={styles.clearIconContainer}>
-                  <Ionicons name="close-circle" size={20} color="#888" />
-              </TouchableOpacity>
-          )}
-        </View>
-
-        {isSearching && (
-          <View style={styles.listLoadingContainer}>
-            <ActivityIndicator size="small" color="#4285F4" />
-            <Text style={styles.loadingText}>Suche Benutzer...</Text>
-          </View>
-        )}
-
-        {!isSearching && searchError && (
-          <View style={styles.errorContainer}>
-            <Ionicons name="alert-circle-outline" size={24} color="#ff3b30" />
-            <Text style={styles.errorText}>{searchError}</Text>
-          </View>
-        )}
-
-        {!isSearching && !searchError && searchQuery.length >= 3 && searchResults.length === 0 && (
-           <View style={styles.emptyListContainer}>
-             <Text style={styles.emptyText}>Keine Benutzer für "{searchQuery}" gefunden.</Text>
-           </View>
-        )}
-
-        {!isSearching && !searchError && searchResults.length > 0 && (
-          <FlatList
-            data={searchResults}
-            renderItem={renderUserItem}
-            keyExtractor={item => `user-${item.id}`}
-            scrollEnabled={false}
-          />
-        )}
-
-        <Text style={styles.sectionTitle}>Organisationen direkt anschreiben</Text>
-        {loadingOrganizations && (
-            <View style={styles.listLoadingContainer}>
-                <ActivityIndicator size="small" color="#4285F4" />
-                <Text style={styles.loadingText}>Lade Organisationen...</Text>
-            </View>
-        )}
-        {!loadingOrganizations && orgError && (
-            <View style={styles.errorContainer}>
-                <Ionicons name="alert-circle-outline" size={24} color="#ff3b30" />
-                <Text style={styles.errorText}>{orgError}</Text>
-            </View>
-        )}
-        {!loadingOrganizations && !orgError && organizations.length === 0 && (
-            <View style={styles.emptyListContainer}>
-                <Text style={styles.emptyText}>Keine Organisationen gefunden.</Text>
-            </View>
-        )}
-        {!loadingOrganizations && !orgError && organizations.length > 0 && (
-             <FlatList
-                data={organizations}
-                renderItem={renderOrganizationItem}
-                keyExtractor={item => `org-${item.id}`}
-                scrollEnabled={false}
-             />
-        )}
-
-        <Text style={styles.sectionTitle}>Direktnachricht an Personen</Text>
-        {loadingPublicUsers && (
-            <View style={styles.listLoadingContainer}>
-                <ActivityIndicator size="small" color="#4285F4" />
-                <Text style={styles.loadingText}>Lade Benutzer...</Text>
-            </View>
-        )}
-        {!loadingPublicUsers && publicUsersError && (
-            <View style={styles.errorContainer}>
-                <Ionicons name="alert-circle-outline" size={24} color="#ff3b30" />
-                <Text style={styles.errorText}>{publicUsersError}</Text>
-            </View>
-        )}
-        {!loadingPublicUsers && !publicUsersError && publicUsers.length === 0 && (
-            <View style={styles.emptyListContainer}>
-                <Text style={styles.emptyText}>Noch keine Benutzer in der Liste.</Text>
-            </View>
-        )}
-        {!loadingPublicUsers && !publicUsersError && publicUsers.length > 0 && (
-            <FlatList
-               data={publicUsers}
-               renderItem={renderUserItem}
-               keyExtractor={item => `public-user-${item.id}`}
-               scrollEnabled={false}
+        <ScrollView
+           style={styles.contentContainer}
+           keyboardShouldPersistTaps="handled"
+           showsVerticalScrollIndicator={false}
+        >
+          <Text style={styles.sectionTitle}>Benutzer suchen</Text>
+          <View style={styles.searchContainer}>
+            <Ionicons name="search-outline" size={20} color="#888" style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Nach Name suchen (min. 3 Zeichen)..."
+              placeholderTextColor="#888"
+              value={searchQuery}
+              onChangeText={(text) => {
+                setSearchQuery(text);
+                searchUsers(text);
+              }}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="default"
+              returnKeyType="search"
             />
-        )}
+            {searchQuery.length > 0 && (
+                <TouchableOpacity onPress={() => { setSearchQuery(''); setSearchResults([]); setSearchError(null); }} style={styles.clearIconContainer}>
+                    <Ionicons name="close-circle" size={20} color="#888" />
+                </TouchableOpacity>
+            )}
+          </View>
 
-      </ScrollView>
+          {isSearching && (
+            <View style={styles.listLoadingContainer}>
+              <ActivityIndicator size="small" color="#4285F4" />
+              <Text style={styles.loadingText}>Suche Benutzer...</Text>
+            </View>
+          )}
+
+          {!isSearching && searchError && (
+            <View style={styles.errorContainer}>
+              <Ionicons name="alert-circle-outline" size={24} color="#ff3b30" />
+              <Text style={styles.errorText}>{searchError}</Text>
+            </View>
+          )}
+
+          {!isSearching && !searchError && searchQuery.length >= 3 && searchResults.length === 0 && (
+             <View style={styles.emptyListContainer}>
+               <Text style={styles.emptyText}>Keine Benutzer für "{searchQuery}" gefunden.</Text>
+             </View>
+          )}
+
+          {!isSearching && !searchError && searchResults.length > 0 && (
+            <FlatList
+              data={searchResults}
+              renderItem={renderUserItem}
+              keyExtractor={item => `user-${item.id}`}
+              scrollEnabled={false}
+            />
+          )}
+
+          <Text style={styles.sectionTitle}>Organisationen direkt anschreiben</Text>
+          {loadingOrganizations && (
+              <View style={styles.listLoadingContainer}>
+                  <ActivityIndicator size="small" color="#4285F4" />
+                  <Text style={styles.loadingText}>Lade Organisationen...</Text>
+              </View>
+          )}
+          {!loadingOrganizations && orgError && (
+              <View style={styles.errorContainer}>
+                  <Ionicons name="alert-circle-outline" size={24} color="#ff3b30" />
+                  <Text style={styles.errorText}>{orgError}</Text>
+              </View>
+          )}
+          {!loadingOrganizations && !orgError && organizations.length === 0 && (
+              <View style={styles.emptyListContainer}>
+                  <Text style={styles.emptyText}>Keine Organisationen gefunden.</Text>
+              </View>
+          )}
+          {!loadingOrganizations && !orgError && organizations.length > 0 && (
+               <FlatList
+                  data={organizations}
+                  renderItem={renderOrganizationItem}
+                  keyExtractor={item => `org-${item.id}`}
+                  scrollEnabled={false}
+               />
+          )}
+
+          <Text style={styles.sectionTitle}>Direktnachricht an Personen</Text>
+          {loadingPublicUsers && (
+              <View style={styles.listLoadingContainer}>
+                  <ActivityIndicator size="small" color="#4285F4" />
+                  <Text style={styles.loadingText}>Lade Benutzer...</Text>
+              </View>
+          )}
+          {!loadingPublicUsers && publicUsersError && (
+              <View style={styles.errorContainer}>
+                  <Ionicons name="alert-circle-outline" size={24} color="#ff3b30" />
+                  <Text style={styles.errorText}>{publicUsersError}</Text>
+              </View>
+          )}
+          {!loadingPublicUsers && !publicUsersError && publicUsers.length === 0 && (
+              <View style={styles.emptyListContainer}>
+                  <Text style={styles.emptyText}>Noch keine Benutzer in der Liste.</Text>
+              </View>
+          )}
+          {!loadingPublicUsers && !publicUsersError && publicUsers.length > 0 && (
+              <FlatList
+                 data={publicUsers}
+                 renderItem={renderUserItem}
+                 keyExtractor={item => `public-user-${item.id}`}
+                 scrollEnabled={false}
+              />
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
     );
   };
 
