@@ -4,6 +4,8 @@ import {
   Animated,
   Dimensions,
   Image,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -537,9 +539,14 @@ const WelcomeScreen = ({ navigation }) => {
       {step === 'welcome' ? (
         renderWelcome()
       ) : (
-        <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
-          {step === 'login' ? renderLoginForm() : renderForgotPassword()}
-        </ScrollView>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={{ flex: 1 }}
+        >
+          <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
+            {step === 'login' ? renderLoginForm() : renderForgotPassword()}
+          </ScrollView>
+        </KeyboardAvoidingView>
       )}
     </SafeAreaView>
   );
