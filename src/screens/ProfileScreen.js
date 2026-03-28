@@ -862,7 +862,9 @@ const ProfileScreen = () => {
         <View style={styles.profileInfo}>
            <Text style={styles.headerTitle} numberOfLines={1}>{headerTitle}</Text>
           {hasFullAccount && !isOrganizationActive && (
-             <Text style={styles.email}>{user?.email || ''}</Text>
+             user?.email?.endsWith('@users.mylocalapp.de')
+               ? <Text style={styles.email}>Registriert seit: {user?.created_at ? new Date(user.created_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) : ''}</Text>
+               : <Text style={styles.email}>{user?.email || ''}</Text>
           )}
           {!hasFullAccount && (
             <Text style={styles.accountStatus}>Lokaler Account (nicht synchronisiert)</Text>
