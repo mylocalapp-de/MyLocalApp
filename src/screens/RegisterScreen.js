@@ -123,7 +123,7 @@ const RegisterScreen = ({ navigation }) => {
   const [otpCode, setOtpCode] = useState('');
   const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]);
   const [countryOpen, setCountryOpen] = useState(false);
-  const [showInList, setShowInList] = useState(true);
+
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [isSendingCode, setIsSendingCode] = useState(false);
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
@@ -327,7 +327,7 @@ const RegisterScreen = ({ navigation }) => {
       const result = await signUpWithUsername(username, password, verifyMethod, {
         value: targetResult.value,
         code: otpCode.trim(),
-        showInList,
+        showInList: true,
       });
 
       if (!result.success) {
@@ -645,12 +645,7 @@ const RegisterScreen = ({ navigation }) => {
         </Text>
       </View>
 
-      <View style={styles.termsContainer}>
-        <Switch value={showInList} onValueChange={setShowInList} />
-        <Text style={styles.termsText}>
-          In der Personenliste anzeigen, damit dich andere leichter für Direktnachrichten finden.
-        </Text>
-      </View>
+
     </>
   );
 
