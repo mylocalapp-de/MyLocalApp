@@ -746,6 +746,11 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         };
       }
 
+      // Force profile state to reflect verified status before navigation kicks in.
+      // Without this, onAuthStateChange may reload the profile before the DB update
+      // is visible, causing the old VerificationScreen to flash briefly.
+      setProfile(prev => prev ? { ...prev, ...profileUpdates } : profileUpdates);
+
       await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
       setHasCompletedOnboarding(true);
 
