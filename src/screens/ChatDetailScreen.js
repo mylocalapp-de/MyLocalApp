@@ -1076,49 +1076,48 @@ const ChatDetailScreen = ({ route, navigation }) => {
       
       {/* Reverse messages for inverted list so newest is first in data */}
       {(() => { return null })()}
-      
-      <FlatList
-        ref={flatListRef}
-        data={[...messages].reverse()}
-        renderItem={renderItem}
-        keyExtractor={item => item.id.toString()}
-        style={styles.messagesList}
-        contentContainerStyle={styles.messagesContent}
-        inverted
-        onContentSizeChange={() => {
-          if (!hasAutoScrolled) {
-            scrollToBottom();
-          }
-        }}
-        onLayout={() => {
-          if (!hasAutoScrolled && messages.length > 0) {
-            scrollToBottom();
-          }
-        }}
-        onRefresh={isOfflineMode ? undefined : fetchMessages}
-        refreshing={!isOfflineMode && loading}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            {isOfflineMode ? (
-              <Text style={styles.emptyText}>
-                Nachrichten sind im Offline-Modus nicht verfügbar.
-              </Text>
-            ) : (
-              <Text style={styles.emptyText}>
-                {isBot() ? 'Frag den Dorfbot etwas über dein Dorf!' :
-                 isOpenChat() ? 'Sei der Erste, der eine Nachricht schreibt!' :
-                 'Keine Ankündigungen vorhanden.'}
-              </Text>
-            )}
-          </View>
-        }
-      />
-      
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 90}
-        style={styles.inputContainer}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}
       >
+        <FlatList
+          ref={flatListRef}
+          data={[...messages].reverse()}
+          renderItem={renderItem}
+          keyExtractor={item => item.id.toString()}
+          style={styles.messagesList}
+          contentContainerStyle={styles.messagesContent}
+          inverted
+          onContentSizeChange={() => {
+            if (!hasAutoScrolled) {
+              scrollToBottom();
+            }
+          }}
+          onLayout={() => {
+            if (!hasAutoScrolled && messages.length > 0) {
+              scrollToBottom();
+            }
+          }}
+          onRefresh={isOfflineMode ? undefined : fetchMessages}
+          refreshing={!isOfflineMode && loading}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              {isOfflineMode ? (
+                <Text style={styles.emptyText}>
+                  Nachrichten sind im Offline-Modus nicht verfügbar.
+                </Text>
+              ) : (
+                <Text style={styles.emptyText}>
+                  {isBot() ? 'Frag den Dorfbot etwas über dein Dorf!' :
+                   isOpenChat() ? 'Sei der Erste, der eine Nachricht schreibt!' :
+                   'Keine Ankündigungen vorhanden.'}
+                </Text>
+              )}
+            </View>
+          }
+        />
+
+        <View style={styles.inputContainer}>
         {commentingOnMessageId !== null && (
           <View style={styles.commentingBar}>
             <Text style={styles.commentingText}>Kommentar schreiben</Text>
@@ -1245,30 +1244,31 @@ const ChatDetailScreen = ({ route, navigation }) => {
             </TouchableOpacity>
           </View>
         )}
-      </KeyboardAvoidingView>
-      
-      {/* Image preview */}
-      {!isOfflineMode && imageAsset && (
-        <View style={styles.imagePreviewContainer}>
-          <Image 
-            source={{ uri: imageAsset.uri }} 
-            style={styles.imagePreview}
-            resizeMode="cover"
-          />
-          <TouchableOpacity 
-            style={styles.removeImageButton}
-            onPress={() => setImageAsset(null)}
-            disabled={isUploading || sendingMessage}
-          >
-            <Ionicons name="close-circle" size={24} color="#ff3b30" />
-          </TouchableOpacity>
-          {isUploading && (
-            <View style={styles.uploadingOverlay}>
-              <ActivityIndicator size="large" color="#ffffff" />
-            </View>
-          )}
         </View>
-      )}
+
+        {/* Image preview */}
+        {!isOfflineMode && imageAsset && (
+          <View style={styles.imagePreviewContainer}>
+            <Image 
+              source={{ uri: imageAsset.uri }} 
+              style={styles.imagePreview}
+              resizeMode="cover"
+            />
+            <TouchableOpacity 
+              style={styles.removeImageButton}
+              onPress={() => setImageAsset(null)}
+              disabled={isUploading || sendingMessage}
+            >
+              <Ionicons name="close-circle" size={24} color="#ff3b30" />
+            </TouchableOpacity>
+            {isUploading && (
+              <View style={styles.uploadingOverlay}>
+                <ActivityIndicator size="large" color="#ffffff" />
+              </View>
+            )}
+          </View>
+        )}
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };
