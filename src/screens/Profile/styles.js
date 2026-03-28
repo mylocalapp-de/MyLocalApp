@@ -375,6 +375,21 @@ export default StyleSheet.create({
     textAlign: 'center',
     marginBottom: 10,
   },
+  avatarUploadRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    marginBottom: 8,
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#e0e0e0',
+  },
+  avatarUploadText: {
+    fontSize: 15,
+    color: '#4285F4',
+    marginLeft: 8,
+    fontWeight: '500',
+  },
   modalSubtitle: {
     fontSize: 14,
     color: '#666',

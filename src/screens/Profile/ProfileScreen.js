@@ -312,6 +312,9 @@ const ProfileScreen = () => {
         aboutMe={editAboutMe} onAboutMeChange={setEditAboutMe}
         error={editFormError} isLoading={isEditLoading}
         onSave={handleSaveAboutMe}
+        onSelectProfilePicture={handleSelectProfilePicture}
+        uploadingImage={uploadingImage}
+        isOrganizationActive={org.isOrganizationActive}
       />
 
       {account.isMakingPermanent ? (

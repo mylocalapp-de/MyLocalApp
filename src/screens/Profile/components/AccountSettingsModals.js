@@ -166,11 +166,30 @@ export const AboutMeModal = ({
   visible, onClose,
   aboutMe, onAboutMeChange,
   error, isLoading, onSave,
+  onSelectProfilePicture, uploadingImage, isOrganizationActive,
 }) => (
   <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
     <View style={styles.modalOverlay}>
       <View style={styles.modalContent}>
         <Text style={styles.modalTitle}>Über mich bearbeiten</Text>
+
+        {/* Profile picture upload shortcut — only in personal context */}
+        {!isOrganizationActive && onSelectProfilePicture && (
+          <TouchableOpacity
+            style={styles.avatarUploadRow}
+            onPress={() => {
+              onClose();
+              setTimeout(() => onSelectProfilePicture(), 300);
+            }}
+            disabled={uploadingImage}
+          >
+            <Ionicons name="camera-outline" size={22} color="#4285F4" />
+            <Text style={styles.avatarUploadText}>
+              {uploadingImage ? 'Wird hochgeladen…' : 'Profilbild ändern'}
+            </Text>
+          </TouchableOpacity>
+        )}
+
         <TextInput style={[styles.input, styles.textArea]} value={aboutMe} onChangeText={onAboutMeChange} placeholder="Erzähl etwas über dich..." multiline numberOfLines={4} />
         {error ? <Text style={styles.errorTextModal}>{error}</Text> : null}
         <View style={styles.modalActions}>
