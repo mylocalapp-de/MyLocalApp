@@ -1853,6 +1853,24 @@ const ProfileScreen = () => {
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
           <Text style={styles.modalTitle}>Über Mich bearbeiten</Text>
+
+          {/* Profile picture upload shortcut */}
+          {!isOrganizationActive && (
+            <TouchableOpacity
+              style={styles.avatarUploadRow}
+              onPress={() => {
+                setShowAboutMeModal(false);
+                setTimeout(() => handleSelectProfilePicture(), 300);
+              }}
+              disabled={uploadingImage}
+            >
+              <Ionicons name="camera-outline" size={22} color="#4285F4" />
+              <Text style={styles.avatarUploadText}>
+                {uploadingImage ? 'Wird hochgeladen…' : 'Profilbild ändern'}
+              </Text>
+            </TouchableOpacity>
+          )}
+
           <TextInput
             style={[styles.input, styles.textArea]}
             value={editAboutMe}
@@ -2334,6 +2352,21 @@ const styles = StyleSheet.create({
     color: '#333',
     textAlign: 'center',
     marginBottom: 10,
+  },
+  avatarUploadRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    marginBottom: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e0e0e0',
+  },
+  avatarUploadText: {
+    fontSize: 15,
+    color: '#4285F4',
+    marginLeft: 8,
+    fontWeight: '500',
   },
    modalSubtitle: {
     fontSize: 14,
