@@ -544,95 +544,95 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
     <SafeAreaView style={styles.container}>
       {renderHeader()}
 
-
-      {/* inverted FlatList: data reversed (newest first in array = bottom of screen) */}
-      <FlatList
-        ref={flatListRef}
-        data={[...messages].reverse()}
-        renderItem={renderItem}
-        keyExtractor={item => item.id.toString()}
-        style={styles.messagesList}
-        contentContainerStyle={styles.messagesContent}
-        inverted
-        onRefresh={isOfflineMode ? undefined : fetchMessages}
-        refreshing={!isOfflineMode && loading}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>
-              {isOfflineMode ? 'Offline keine Nachrichten.' : 'Schreibe die erste Nachricht!'}
-            </Text>
-          </View>
-        }
-      />
-
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 90} // Adjust as needed
-        style={styles.inputContainer}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}
       >
-        {/* Image preview */}
-        {imageAsset && (
-          <View style={styles.imagePreviewContainer}>
-            <Image
-              source={{ uri: imageAsset.uri }}
-              style={styles.imagePreview}
-              resizeMode="cover"
-            />
-            <TouchableOpacity
-              style={styles.removeImageButton}
-              onPress={() => setImageAsset(null)}
-              disabled={isUploading || sendingMessage}
-            >
-              <Ionicons name="close-circle" size={24} color="#ff3b30" />
-            </TouchableOpacity>
-            {isUploading && (
-              <View style={styles.uploadingOverlay}>
-                <ActivityIndicator size="large" color="#ffffff" />
-              </View>
-            )}
-          </View>
-        )}
+        {/* inverted FlatList: data reversed (newest first in array = bottom of screen) */}
+        <FlatList
+          ref={flatListRef}
+          data={[...messages].reverse()}
+          renderItem={renderItem}
+          keyExtractor={item => item.id.toString()}
+          style={styles.messagesList}
+          contentContainerStyle={styles.messagesContent}
+          inverted
+          onRefresh={isOfflineMode ? undefined : fetchMessages}
+          refreshing={!isOfflineMode && loading}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>
+                {isOfflineMode ? 'Offline keine Nachrichten.' : 'Schreibe die erste Nachricht!'}
+              </Text>
+            </View>
+          }
+        />
 
-        {!isOfflineMode && user && (
-           <View style={styles.inputRow}>
-            <TouchableOpacity
-                style={styles.imageButton}
-                onPress={pickImage}
+        <View style={styles.inputContainer}>
+          {/* Image preview */}
+          {imageAsset && (
+            <View style={styles.imagePreviewContainer}>
+              <Image
+                source={{ uri: imageAsset.uri }}
+                style={styles.imagePreview}
+                resizeMode="cover"
+              />
+              <TouchableOpacity
+                style={styles.removeImageButton}
+                onPress={() => setImageAsset(null)}
                 disabled={isUploading || sendingMessage}
               >
-                <Ionicons
-                  name="image-outline"
-                  size={24}
-                  color={isUploading || sendingMessage ? "#ccc" : "#4285F4"}
-                />
+                <Ionicons name="close-circle" size={24} color="#ff3b30" />
               </TouchableOpacity>
-            <TextInput
-              style={styles.input}
-              placeholder="Nachricht schreiben..."
-              value={message}
-              onChangeText={setMessage}
-              multiline
-            />
-            <TouchableOpacity
-              style={[
-                styles.sendButton,
-                ((message.trim() === '' && !imageAsset) || sendingMessage || isUploading) && styles.sendButtonDisabled
-              ]}
-              onPress={sendMessage}
-              disabled={(message.trim() === '' && !imageAsset) || sendingMessage || isUploading}
-            >
-              {sendingMessage || isUploading ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Ionicons
-                  name="send"
-                  size={20}
-                  color={(message.trim() === '' && !imageAsset) ? "#ccc" : "#fff"}
-                />
+              {isUploading && (
+                <View style={styles.uploadingOverlay}>
+                  <ActivityIndicator size="large" color="#ffffff" />
+                </View>
               )}
-            </TouchableOpacity>
-          </View>
-        )}
+            </View>
+          )}
+
+          {!isOfflineMode && user && (
+             <View style={styles.inputRow}>
+              <TouchableOpacity
+                  style={styles.imageButton}
+                  onPress={pickImage}
+                  disabled={isUploading || sendingMessage}
+                >
+                  <Ionicons
+                    name="image-outline"
+                    size={24}
+                    color={isUploading || sendingMessage ? "#ccc" : "#4285F4"}
+                  />
+                </TouchableOpacity>
+              <TextInput
+                style={styles.input}
+                placeholder="Nachricht schreiben..."
+                value={message}
+                onChangeText={setMessage}
+                multiline
+              />
+              <TouchableOpacity
+                style={[
+                  styles.sendButton,
+                  ((message.trim() === '' && !imageAsset) || sendingMessage || isUploading) && styles.sendButtonDisabled
+                ]}
+                onPress={sendMessage}
+                disabled={(message.trim() === '' && !imageAsset) || sendingMessage || isUploading}
+              >
+                {sendingMessage || isUploading ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Ionicons
+                    name="send"
+                    size={20}
+                    color={(message.trim() === '' && !imageAsset) ? "#ccc" : "#fff"}
+                  />
+                )}
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
