@@ -255,7 +255,6 @@ const AppNavigator = () => {
               name="MainApp" 
               component={TabNavigator} 
             />
-          )
         ) : (
           <RootStack.Screen 
             name="AuthFlow" 
