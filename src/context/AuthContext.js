@@ -1,8 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import 'react-native-url-polyfill/auto';
+import Constants from 'expo-constants';
 import { supabase } from '../lib/supabase';
-import { v4 as uuidv4 } from 'uuid';
 import { Buffer } from 'buffer';
 import * as FileSystem from 'expo-file-system';
 
@@ -17,6 +17,76 @@ const generateRandomPassword = (length = 12) => {
     password += charset.charAt(Math.floor(Math.random() * n));
   }
   return password;
+};
+
+const VERIFICATION_API_BASE = 'https://admin.mylocalapp.de/api/verification';
+const PASSWORD_RESET_API_BASE = 'https://admin.mylocalapp.de/api/password-reset';
+const USERNAME_REGEX = /^[a-z0-9._-]{3,30}$/;
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const normalizeUsername = (value = '') => value.trim().toLowerCase();
+const isValidUsername = (value = '') => USERNAME_REGEX.test(normalizeUsername(value));
+
+const toInternalEmail = (username) => `${normalizeUsername(username)}@users.mylocalapp.de`;
+
+const getSupabaseUrl = () => {
+  const fromEnv = process.env.EXPO_PUBLIC_SUPABASE_URL;
+  if (fromEnv) {
+    return fromEnv;
+  }
+  return Constants?.expoConfig?.extra?.supabaseUrl ?? '';
+};
+
+const buildApiHeaders = () => ({
+  'Content-Type': 'application/json',
+  'X-Supabase-Url': getSupabaseUrl(),
+});
+
+const buildVerificationPayload = (method, target, code) => ({
+  type: method,
+  target,
+  ...(method === 'email' ? { email: target } : { phone: target }),
+  ...(code ? { code } : {}),
+});
+
+const parseApiResponse = async (response) => {
+  const raw = await response.text();
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return { message: raw };
+  }
+};
+
+const waitForProfileRow = async (userId, maxAttempts = 8, delayMs = 500) => {
+  let lastError = null;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const { data, error, status } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (data?.id) {
+      return { success: true };
+    }
+
+    if (error && status !== 406) {
+      lastError = error;
+    }
+
+    if (attempt < maxAttempts - 1) {
+      await wait(delayMs);
+    }
+  }
+
+  return { success: false, error: lastError };
 };
 
 // Auth provider component
@@ -236,7 +306,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         supabase
           .from('profiles')
           // Fetch avatar_url along with other profile data
-          .select(`display_name, preferences, updated_at, is_temporary, avatar_url, about_me, is_verified, show_in_list`)
+          .select(`display_name, preferences, updated_at, is_temporary, avatar_url, about_me, is_verified, show_in_list, username, email, phone, verify_method`)
           .eq('id', userId)
           .maybeSingle(),
         supabase
@@ -545,14 +615,277 @@ export const AuthProvider = ({ children, expoPushToken }) => {
     }
   };
 
+  const signUpWithUsername = async (username, password, verifyMethod, contact) => {
+    const normalizedUsername = normalizeUsername(username);
+    const method = verifyMethod === 'phone' ? 'phone' : 'email';
+    const rawContactValue = typeof contact === 'string'
+      ? contact.trim()
+      : String(contact?.value ?? contact?.target ?? '').trim();
+    const contactValue = method === 'email' ? rawContactValue.toLowerCase() : rawContactValue;
+    const verificationCode = typeof contact === 'object'
+      ? String(contact?.code ?? contact?.otpCode ?? '').trim()
+      : '';
+    const hasShowInList = typeof contact === 'object' && Object.prototype.hasOwnProperty.call(contact, 'showInList');
+    const profileUpdates = {
+      display_name: normalizedUsername,
+      username: normalizedUsername,
+      email: method === 'email' ? contactValue : null,
+      phone: method === 'phone' ? contactValue : null,
+      verify_method: method,
+      is_verified: true,
+      updated_at: new Date().toISOString(),
+      ...(hasShowInList ? { show_in_list: !!contact.showInList } : {}),
+    };
+
+    if (!normalizedUsername) {
+      return { success: false, error: { message: 'Bitte gib einen Benutzernamen ein.' } };
+    }
+
+    if (!isValidUsername(normalizedUsername)) {
+      return {
+        success: false,
+        error: { message: 'Der Benutzername muss 3 bis 30 Zeichen lang sein und darf nur Kleinbuchstaben, Zahlen, Punkt, Unterstrich oder Bindestrich enthalten.' },
+      };
+    }
+
+    if (!password || password.length < 8) {
+      return { success: false, error: { message: 'Das Passwort muss mindestens 8 Zeichen lang sein.' } };
+    }
+
+    if (!contactValue) {
+      return {
+        success: false,
+        error: { message: method === 'phone' ? 'Bitte gib eine Telefonnummer ein.' : 'Bitte gib eine E-Mail-Adresse ein.' },
+      };
+    }
+
+    if (!verificationCode) {
+      return { success: false, error: { message: 'Bitte gib den Bestätigungscode ein.' } };
+    }
+
+    try {
+      const { data: existingProfile, error: usernameCheckError, status: usernameCheckStatus } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('username', normalizedUsername)
+        .maybeSingle();
+
+      if (usernameCheckError && usernameCheckStatus !== 406) {
+        console.error('AuthContext: Username availability check failed during signUpWithUsername:', usernameCheckError);
+        return {
+          success: false,
+          error: { message: usernameCheckError.message || 'Der Benutzername konnte nicht geprüft werden.' },
+        };
+      }
+
+      if (existingProfile?.id) {
+        return { success: false, error: { message: 'Dieser Benutzername ist bereits vergeben.' } };
+      }
+
+      const verifyResponse = await fetch(`${VERIFICATION_API_BASE}/verify`, {
+        method: 'POST',
+        headers: buildApiHeaders(),
+        body: JSON.stringify(buildVerificationPayload(method, contactValue, verificationCode)),
+      });
+      const verifyResult = await parseApiResponse(verifyResponse);
+
+      if (!verifyResponse.ok || verifyResult?.success === false) {
+        return {
+          success: false,
+          error: {
+            message: verifyResult?.message || 'Der Bestätigungscode ist ungültig oder abgelaufen.',
+          },
+        };
+      }
+
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email: toInternalEmail(normalizedUsername),
+        password,
+        options: {
+          data: {
+            display_name: normalizedUsername,
+          },
+        },
+      });
+
+      if (signUpError) {
+        console.error('AuthContext: Supabase signUp error (username signup):', signUpError);
+        const message = signUpError.message?.includes('User already registered')
+          ? 'Dieser Benutzername ist bereits vergeben.'
+          : signUpError.message || 'Registrierung fehlgeschlagen.';
+        return { success: false, error: { message } };
+      }
+
+      if (!signUpData.user) {
+        console.error('AuthContext: Username signUp successful but no user data returned.');
+        return { success: false, error: { message: 'Registrierung fehlgeschlagen, keine Benutzerdaten.' } };
+      }
+
+      const profileReadyResult = await waitForProfileRow(signUpData.user.id);
+      if (!profileReadyResult.success) {
+        console.error('AuthContext: Profile row not ready after username signUp:', profileReadyResult.error);
+        return {
+          success: false,
+          error: { message: 'Dein Profil konnte nach der Registrierung nicht vorbereitet werden.' },
+        };
+      }
+
+      const { error: profileUpdateError } = await supabase
+        .from('profiles')
+        .update(profileUpdates)
+        .eq('id', signUpData.user.id);
+
+      if (profileUpdateError) {
+        console.error('AuthContext: Profile update failed after username signUp:', profileUpdateError);
+        const message = profileUpdateError.code === '23505' || profileUpdateError.message?.toLowerCase().includes('duplicate')
+          ? 'Dieser Benutzername ist bereits vergeben.'
+          : profileUpdateError.message || 'Dein Profil konnte nicht gespeichert werden.';
+        return {
+          success: false,
+          error: { message },
+        };
+      }
+
+      await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
+      setHasCompletedOnboarding(true);
+
+      return { success: true, data: { user: signUpData.user } };
+    } catch (error) {
+      console.error('AuthContext: Unexpected error during signUpWithUsername:', error);
+      return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+    }
+  };
+
+  const signInWithUsername = async (username, password) => {
+    const normalizedUsername = normalizeUsername(username);
+
+    if (!normalizedUsername) {
+      return { success: false, error: { message: 'Bitte gib deinen Benutzernamen ein.' } };
+    }
+
+    if (!password) {
+      return { success: false, error: { message: 'Bitte gib dein Passwort ein.' } };
+    }
+
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: toInternalEmail(normalizedUsername),
+        password,
+      });
+
+      if (error) {
+        console.error('AuthContext: Supabase username signIn error:', error);
+        return { success: false, error: { message: error.message || 'Anmeldung fehlgeschlagen.' } };
+      }
+
+      if (!data.user) {
+        console.error('AuthContext: Username signIn successful but no user data returned.');
+        return { success: false, error: { message: 'Anmeldung fehlgeschlagen, keine Benutzerdaten.' } };
+      }
+
+      await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
+      setHasCompletedOnboarding(true);
+
+      return { success: true, data: { user: data.user } };
+    } catch (error) {
+      console.error('AuthContext: Unexpected error during signInWithUsername:', error);
+      return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+    }
+  };
+
+  const requestPasswordReset = async (username) => {
+    const normalizedUsername = normalizeUsername(username);
+
+    if (!normalizedUsername) {
+      return { success: false, error: { message: 'Bitte gib deinen Benutzernamen ein.' } };
+    }
+
+    try {
+      const response = await fetch(`${PASSWORD_RESET_API_BASE}/request`, {
+        method: 'POST',
+        headers: buildApiHeaders(),
+        body: JSON.stringify({ username: normalizedUsername }),
+      });
+      const result = await parseApiResponse(response);
+
+      if (!response.ok || result?.success === false) {
+        return {
+          success: false,
+          error: { message: result?.message || 'Der Reset-Code konnte nicht angefordert werden.' },
+        };
+      }
+
+      return { success: true, data: result ?? {} };
+    } catch (error) {
+      console.error('AuthContext: Unexpected error during requestPasswordReset:', error);
+      return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+    }
+  };
+
+  const completePasswordReset = async (username, code, newPassword) => {
+    const normalizedUsername = normalizeUsername(username);
+    const normalizedCode = String(code ?? '').trim();
+
+    if (!normalizedUsername) {
+      return { success: false, error: { message: 'Bitte gib deinen Benutzernamen ein.' } };
+    }
+
+    if (!normalizedCode) {
+      return { success: false, error: { message: 'Bitte gib den Reset-Code ein.' } };
+    }
+
+    if (!newPassword || newPassword.length < 8) {
+      return { success: false, error: { message: 'Das neue Passwort muss mindestens 8 Zeichen lang sein.' } };
+    }
+
+    try {
+      const response = await fetch(`${PASSWORD_RESET_API_BASE}/reset`, {
+        method: 'POST',
+        headers: buildApiHeaders(),
+        body: JSON.stringify({
+          username: normalizedUsername,
+          code: normalizedCode,
+          newPassword,
+        }),
+      });
+      const result = await parseApiResponse(response);
+
+      if (!response.ok || result?.success === false) {
+        return {
+          success: false,
+          error: { message: result?.message || 'Das Passwort konnte nicht zurückgesetzt werden.' },
+        };
+      }
+
+      return { success: true, data: result ?? {} };
+    } catch (error) {
+      console.error('AuthContext: Unexpected error during completePasswordReset:', error);
+      return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+    }
+  };
+
   // --- Sign In / Sign Out --- (No change needed for token here, handled by useEffect)
-  const signIn = async (email, password) => {
+  const signIn = async (identifier, password) => {
     // Note: Do NOT set global loading here — AppNavigator returns null when loading=true,
     // which unmounts WelcomeScreen and loses local state (error messages, step).
     // WelcomeScreen has its own local loading state for the button spinner.
+    const normalizedIdentifier = String(identifier ?? '').trim();
+
+    if (!normalizedIdentifier) {
+      return { success: false, error: { message: 'Bitte gib deinen Benutzernamen oder deine E-Mail-Adresse ein.' } };
+    }
+
+    if (!password) {
+      return { success: false, error: { message: 'Bitte gib dein Passwort ein.' } };
+    }
+
+    if (!normalizedIdentifier.includes('@')) {
+      return signInWithUsername(normalizedIdentifier, password);
+    }
+
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
-        email,
+        email: normalizedIdentifier,
         password,
       });
 
@@ -1164,8 +1497,12 @@ export const AuthProvider = ({ children, expoPushToken }) => {
     // createLocalAccount, // REMOVED
     createTemporaryAccount, // ADDED
     upgradeToFullAccount, // Now used for temp -> full
+    signUpWithUsername,
+    signInWithUsername,
     signIn,
     signOut,
+    requestPasswordReset,
+    completePasswordReset,
     // Profile Updates
     updateDisplayName,
     updatePreferences,
@@ -1200,4 +1537,4 @@ export const useAuth = () => {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
-}; 
+};

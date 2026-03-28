@@ -29,6 +29,26 @@ export async function updateProfile(userId, updates) {
     .eq('id', userId);
 }
 
+export async function checkUsernameAvailability(username) {
+  const normalizedUsername = (username || '').trim().toLowerCase();
+
+  if (!normalizedUsername) {
+    return { available: false, error: { message: 'Bitte gib einen Benutzernamen ein.' } };
+  }
+
+  const { data, error, status } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('username', normalizedUsername)
+    .maybeSingle();
+
+  if (error && status !== 406) {
+    return { available: false, error };
+  }
+
+  return { available: !data };
+}
+
 // ─── Organization Membership Check ──────────────────────────────────────────
 
 export async function checkOrgMembership(organizationId, userId) {

@@ -1,16 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  TouchableOpacity, 
-  Image,
-  ScrollView,
-  TextInput,
+import React, { useEffect, useRef, useState } from 'react';
+import {
   ActivityIndicator,
   Animated,
   Dimensions,
-  Alert
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -27,223 +26,283 @@ const welcomeImages = [
   require('../../assets/welcomescreen/birgit-photo-27.png'),
 ];
 
+const imageRotations = ['-11deg', '8deg', '-6deg', '10deg', '-9deg', '7deg', '-5deg', '9deg'];
+
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 const IMAGE_SIZE = screenWidth * 0.4;
 const ANIMATION_DURATION = 40000;
 
-const numRepeats = 4; // Render image set multiple times for density and wrapping
+const numRepeats = 4;
 const horizontalMargin = 10;
-const verticalMargin = 15; // Increased vertical margin slightly
+const verticalMargin = 15;
 const imageWidthWithMargin = IMAGE_SIZE + horizontalMargin * 2;
 const imageHeightWithMargin = IMAGE_SIZE * 1.1 + verticalMargin * 2;
 const totalWidth = welcomeImages.length * numRepeats * imageWidthWithMargin;
-const scrollAmount = totalWidth / 2; // Scroll half the total width for looping
-const effectiveAnimationDuration = ANIMATION_DURATION * (numRepeats / 1.5); // Adjust duration factor as needed for speed
+const scrollAmount = totalWidth / 2;
+const effectiveAnimationDuration = ANIMATION_DURATION * (numRepeats / 1.5);
 
 const WelcomeScreen = ({ navigation }) => {
-  const { signIn } = useAuth();
-  const [step, setStep] = useState('welcome'); // 'welcome', 'login', 'forgotPassword'
-  const [email, setEmail] = useState('');
+  const { signIn, requestPasswordReset, completePasswordReset } = useAuth();
+  const [step, setStep] = useState('welcome');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false); 
+  const [resetUsername, setResetUsername] = useState('');
+  const [resetCode, setResetCode] = useState('');
+  const [resetNewPassword, setResetNewPassword] = useState('');
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('');
+  const [resetStage, setResetStage] = useState('request');
+  const [resetTarget, setResetTarget] = useState('');
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const scrollX = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    scrollX.setValue(0); // Reset on step change or mount
+    scrollX.setValue(0);
 
     if (step === 'welcome') {
-        Animated.loop(
-            Animated.timing(scrollX, {
-                toValue: -scrollAmount, // Scroll half the total calculated width
-                duration: effectiveAnimationDuration, // Use adjusted duration
-                useNativeDriver: true,
-                easing: t => t, // Linear easing
-            })
-        ).start();
+      Animated.loop(
+        Animated.timing(scrollX, {
+          toValue: -scrollAmount,
+          duration: effectiveAnimationDuration,
+          useNativeDriver: true,
+          easing: (t) => t,
+        })
+      ).start();
     } else {
-        scrollX.stopAnimation(); // Stop animation if navigating away
+      scrollX.stopAnimation();
     }
 
-    return () => scrollX.stopAnimation(); // Cleanup on unmount/step change
+    return () => scrollX.stopAnimation();
   }, [step, scrollX]);
 
-  const handlePasswordReset = async () => {
-    if (!email.trim() || !email.includes('@')) {
-      setError('Bitte gib eine gültige E-Mail-Adresse ein');
-      return;
-    }
-
-    setLoading(true);
+  const clearMessages = () => {
     setError('');
     setSuccessMessage('');
+  };
 
-    try {
-      const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
-      
-      const response = await fetch('https://admin.mylocalapp.de/api/password-reset/reset', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Supabase-Url': supabaseUrl
-        },
-        body: JSON.stringify({ email: email.trim() })
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        setSuccessMessage('Wenn die E-Mail existiert, wurde ein neues Passwort gesendet.');
-        // Optional: Clear email field? No, maybe keep it if they need to check.
-      } else {
-        // Handle specific API errors if needed, otherwise show generic
-        setError(data.message || 'Fehler beim Zurücksetzen des Passworts.');
-      }
-    } catch (err) {
-      console.error('Error requesting password reset:', err);
-      setError('Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es später erneut.');
-    } finally {
-      setLoading(false);
-    }
+  const clearResetForm = () => {
+    setResetCode('');
+    setResetNewPassword('');
+    setResetConfirmPassword('');
+    setResetTarget('');
+    setResetStage('request');
   };
 
   const handleLoginSubmit = async () => {
-    if (!email.trim() || !email.includes('@')) {
-      setError('Bitte gib eine gültige E-Mail-Adresse ein');
+    if (!identifier.trim()) {
+      setError('Bitte gib deinen Benutzernamen ein.');
       return;
     }
-    
+
     if (!password) {
-      setError('Bitte gib ein Passwort ein');
+      setError('Bitte gib dein Passwort ein.');
       return;
     }
-    
-    if (password.length < 6) { 
-      setError('Das Passwort muss mindestens 6 Zeichen lang sein');
-      return;
-    }
-    
+
     setLoading(true);
-    setError('');
-    
+    clearMessages();
+
     try {
-      // console.log('Attempting to sign in with:', email);
-      const result = await signIn(email, password);
-      
+      const result = await signIn(identifier, password);
+
       if (result.success) {
-        // console.log('Login successful, AppNavigator will handle navigation via AuthContext state.');
+        return;
+      }
+
+      const errorMessage = result.error?.message || '';
+      if (errorMessage === 'Invalid login credentials') {
+        setError('Benutzername, E-Mail oder Passwort ist ungültig. Bitte überprüfe deine Eingaben.');
+      } else if (errorMessage.toLowerCase().includes('rate limit')) {
+        setError('Zu viele Anmeldeversuche. Bitte warte einen Moment und versuche es erneut.');
       } else {
-        console.error('Login failed:', result.error);
-        const errorMessage = result.error?.message;
-        
-        if (errorMessage === 'Invalid login credentials') {
-            setError('E-Mail oder Passwort ist ungültig. Bitte überprüfe deine Eingaben.');
-        } else if (errorMessage?.includes('Email not confirmed')) {
-            setError('Bitte bestätige deine E-Mail-Adresse, bevor du dich anmeldest. Überprüfe dein Postfach.');
-        } else if (errorMessage?.includes('rate limit')) {
-             setError('Zu viele Anmeldeversuche. Bitte warte einen Moment und versuche es erneut.');
-        } else {
-             setError(`Anmeldung fehlgeschlagen: ${errorMessage || 'Unbekannter Fehler'}`);
-        }
+        setError(errorMessage || 'Anmeldung fehlgeschlagen.');
       }
     } catch (err) {
       console.error('Unexpected error during login:', err);
-      setError('Ein unerwarteter Fehler ist aufgetreten');
+      setError('Ein unerwarteter Fehler ist aufgetreten.');
     } finally {
       setLoading(false);
     }
   };
 
+  const handlePasswordResetRequest = async () => {
+    if (!resetUsername.trim()) {
+      setError('Bitte gib deinen Benutzernamen ein.');
+      return;
+    }
+
+    setLoading(true);
+    clearMessages();
+
+    try {
+      const result = await requestPasswordReset(resetUsername);
+
+      if (!result.success) {
+        setError(result.error?.message || 'Der Reset-Code konnte nicht angefordert werden.');
+        return;
+      }
+
+      const normalizedUsername = resetUsername.trim().toLowerCase();
+      const maskedTarget = result.data?.maskedTarget || 'deine hinterlegte Kontaktmöglichkeit';
+      const methodLabel = result.data?.method === 'phone' ? 'SMS' : 'E-Mail';
+
+      setResetUsername(normalizedUsername);
+      setResetTarget(maskedTarget);
+      setResetStage('confirm');
+      setSuccessMessage(`Wir haben einen Reset-Code per ${methodLabel} an ${maskedTarget} gesendet.`);
+    } catch (err) {
+      console.error('Unexpected error during password reset request:', err);
+      setError('Ein unerwarteter Fehler ist aufgetreten.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePasswordResetSubmit = async () => {
+    if (!resetCode.trim()) {
+      setError('Bitte gib den Reset-Code ein.');
+      return;
+    }
+
+    if (!resetNewPassword || resetNewPassword.length < 8) {
+      setError('Das neue Passwort muss mindestens 8 Zeichen lang sein.');
+      return;
+    }
+
+    if (resetNewPassword !== resetConfirmPassword) {
+      setError('Die Passwörter stimmen nicht überein.');
+      return;
+    }
+
+    setLoading(true);
+    clearMessages();
+
+    try {
+      const result = await completePasswordReset(resetUsername, resetCode, resetNewPassword);
+
+      if (!result.success) {
+        setError(result.error?.message || 'Das Passwort konnte nicht zurückgesetzt werden.');
+        return;
+      }
+
+      setIdentifier(resetUsername);
+      setPassword('');
+      clearResetForm();
+      setStep('login');
+      setSuccessMessage('Dein Passwort wurde geändert. Du kannst dich jetzt anmelden.');
+    } catch (err) {
+      console.error('Unexpected error during password reset submit:', err);
+      setError('Ein unerwarteter Fehler ist aufgetreten.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForgotPasswordBack = () => {
+    clearMessages();
+
+    if (resetStage === 'confirm') {
+      setResetStage('request');
+      setResetCode('');
+      setResetNewPassword('');
+      setResetConfirmPassword('');
+      return;
+    }
+
+    clearResetForm();
+    setStep('welcome');
+  };
+
+  const renderAnimatedRows = () => (
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      <Animated.View
+        style={[
+          styles.animatedImageContainer,
+          {
+            width: totalWidth,
+            transform: [
+              { translateX: scrollX },
+              { translateY: -imageHeightWithMargin },
+            ],
+          },
+        ]}
+      >
+        {[...Array(numRepeats)].flatMap((_, repeatIndex) =>
+          welcomeImages.map((imgSrc, index) => (
+            <Image
+              key={`img-above-${repeatIndex}-${index}`}
+              source={imgSrc}
+              style={[
+                styles.backgroundImage,
+                { transform: [{ rotate: imageRotations[index % imageRotations.length] }] },
+              ]}
+            />
+          ))
+        )}
+      </Animated.View>
+
+      <Animated.View
+        style={[
+          styles.animatedImageContainer,
+          {
+            width: totalWidth,
+            transform: [
+              {
+                translateX: scrollX.interpolate({
+                  inputRange: [-scrollAmount, 0],
+                  outputRange: [-scrollAmount - imageWidthWithMargin / 2, -(imageWidthWithMargin / 2)],
+                }),
+              },
+            ],
+          },
+        ]}
+      >
+        {[...Array(numRepeats)].flatMap((_, repeatIndex) =>
+          welcomeImages.map((imgSrc, index) => (
+            <Image
+              key={`img-center-${repeatIndex}-${index}`}
+              source={imgSrc}
+              style={[
+                styles.backgroundImage,
+                { transform: [{ rotate: imageRotations[(index + 2) % imageRotations.length] }] },
+              ]}
+            />
+          ))
+        )}
+      </Animated.View>
+
+      <Animated.View
+        style={[
+          styles.animatedImageContainer,
+          {
+            width: totalWidth,
+            transform: [
+              { translateX: scrollX },
+              { translateY: imageHeightWithMargin },
+            ],
+          },
+        ]}
+      >
+        {[...Array(numRepeats)].flatMap((_, repeatIndex) =>
+          welcomeImages.map((imgSrc, index) => (
+            <Image
+              key={`img-below-${repeatIndex}-${index}`}
+              source={imgSrc}
+              style={[
+                styles.backgroundImage,
+                { transform: [{ rotate: imageRotations[(index + 4) % imageRotations.length] }] },
+              ]}
+            />
+          ))
+        )}
+      </Animated.View>
+    </View>
+  );
+
   const renderWelcome = () => (
     <View style={styles.welcomeRootContainer}>
-      <View style={StyleSheet.absoluteFill} pointerEvents="none">
-        {/* Row 1 (Above center) */}
-        <Animated.View
-          style={[
-            styles.animatedImageContainer,
-            { 
-              width: totalWidth, 
-              transform: [
-                { translateX: scrollX }, 
-                { translateY: -imageHeightWithMargin } // Position above center
-              ] 
-            }
-          ]}
-        >
-          {[...Array(numRepeats)].flatMap((_, repeatIndex) =>
-            welcomeImages.map((imgSrc, index) => (
-              <Image
-                key={`img-above-${repeatIndex}-${index}`} // Unique key
-                source={imgSrc}
-                style={[
-                    styles.backgroundImage,
-                    { transform: [{ rotate: `${Math.random() * 25 - 12.5}deg` }] }
-                ]}
-              />
-            ))
-          )}
-        </Animated.View>
-
-        {/* Row 2 (Center - Original position, offset horizontally) */}
-        <Animated.View
-          style={[
-            styles.animatedImageContainer,
-            { 
-              width: totalWidth, 
-              transform: [
-                // Interpolate scrollX to add a constant horizontal offset
-                { translateX: scrollX.interpolate({ 
-                    inputRange: [-scrollAmount, 0], 
-                    outputRange: [-scrollAmount - (imageWidthWithMargin / 2), -(imageWidthWithMargin / 2)] 
-                  }) 
-                }
-              ] 
-            }
-          ]}
-        >
-          {[...Array(numRepeats)].flatMap((_, repeatIndex) =>
-            welcomeImages.map((imgSrc, index) => (
-              <Image
-                key={`img-center-${repeatIndex}-${index}`} // Unique key
-                source={imgSrc}
-                style={[
-                    styles.backgroundImage,
-                    { transform: [{ rotate: `${Math.random() * 25 - 12.5}deg` }] }
-                ]}
-              />
-            ))
-          )}
-        </Animated.View>
-
-        {/* Row 3 (Below center) */}
-        <Animated.View
-          style={[
-            styles.animatedImageContainer,
-            { 
-              width: totalWidth, 
-              transform: [
-                { translateX: scrollX }, 
-                { translateY: imageHeightWithMargin } // Position below center
-              ] 
-            }
-          ]}
-        >
-          {[...Array(numRepeats)].flatMap((_, repeatIndex) =>
-            welcomeImages.map((imgSrc, index) => (
-              <Image
-                key={`img-below-${repeatIndex}-${index}`} // Unique key
-                source={imgSrc}
-                style={[
-                    styles.backgroundImage,
-                    { transform: [{ rotate: `${Math.random() * 25 - 12.5}deg` }] }
-                ]}
-              />
-            ))
-          )}
-        </Animated.View>
-      </View>
-
+      {renderAnimatedRows()}
       <View style={styles.overlay} pointerEvents="none" />
 
       <View style={styles.contentContainer}>
@@ -254,34 +313,45 @@ const WelcomeScreen = ({ navigation }) => {
         />
         <Text style={styles.welcomeTitle}>Willkommen bei MeinStrodehne</Text>
         <Text style={styles.welcomeText}>
-          Dein Dorf in einer App - Bleib informiert und verbunden.
+          Dein Dorf in einer App. Bleib informiert, vernetzt und direkt im Gespräch.
         </Text>
-        
+
         <View style={styles.buttonsContainer}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.primaryButton}
-            onPress={() => navigation.navigate('Onboarding')}
+            onPress={() => {
+              clearMessages();
+              navigation.navigate('Register');
+            }}
             disabled={loading}
           >
-            <Text style={styles.primaryButtonText}>Neu hier?</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={styles.secondaryButton}
-            onPress={() => setStep('login')}
-            disabled={loading}
-          >
-            <Text style={styles.secondaryButtonText}>Login mit existierendem Account</Text>
+            <Text style={styles.primaryButtonText}>Registrieren</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity 
-            style={[styles.textButton, { marginTop: 15 }]}
-            onPress={() => setStep('forgotPassword')}
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={() => {
+              clearMessages();
+              setStep('login');
+            }}
             disabled={loading}
           >
-            <Text style={styles.textButtonText}>Passwort wiederherstellen</Text>
+            <Text style={styles.secondaryButtonText}>Anmelden</Text>
           </TouchableOpacity>
-          
+
+          <TouchableOpacity
+            style={styles.textButton}
+            onPress={() => {
+              clearMessages();
+              clearResetForm();
+              setResetUsername(identifier.trim().toLowerCase());
+              setStep('forgotPassword');
+            }}
+            disabled={loading}
+          >
+            <Text style={styles.textButtonText}>Passwort vergessen?</Text>
+          </TouchableOpacity>
+
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
         </View>
       </View>
@@ -292,23 +362,25 @@ const WelcomeScreen = ({ navigation }) => {
     <View style={styles.contentContainer}>
       <Text style={styles.preferencesTitle}>Anmelden</Text>
       <Text style={styles.preferencesText}>
-        Melde dich mit deinem bestehenden Account an.
+        Melde dich mit deinem Benutzernamen an. Alte Accounts funktionieren vorübergehend auch noch mit E-Mail.
       </Text>
-      
+
       <View style={styles.formContainer}>
         <View style={styles.inputContainer}>
-          <Text style={styles.inputLabel}>E-Mail</Text>
+          <Text style={styles.inputLabel}>Benutzername</Text>
           <TextInput
             style={styles.textInput}
-            value={email}
-            onChangeText={setEmail}
-            placeholder="deine@email.de"
-            keyboardType="email-address"
+            value={identifier}
+            onChangeText={setIdentifier}
+            placeholder="deinname"
             autoCapitalize="none"
             autoCorrect={false}
           />
+          <Text style={styles.helperText}>
+            Falls du dich früher mit E-Mail registriert hast, kannst du sie weiterhin hier eingeben.
+          </Text>
         </View>
-        
+
         <View style={styles.inputContainer}>
           <Text style={styles.inputLabel}>Passwort</Text>
           <TextInput
@@ -319,27 +391,25 @@ const WelcomeScreen = ({ navigation }) => {
             secureTextEntry
           />
         </View>
-        
+
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {successMessage ? <Text style={styles.successText}>{successMessage}</Text> : null}
       </View>
-      
+
       <View style={styles.actionsContainer}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.backButton}
           onPress={() => {
+            clearMessages();
             setStep('welcome');
-            setError('');
           }}
         >
           <Ionicons name="arrow-back" size={20} color="#666" />
           <Text style={styles.backButtonText}>Zurück</Text>
         </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={[
-            styles.continueButton,
-            loading && styles.buttonDisabled
-          ]}
+
+        <TouchableOpacity
+          style={[styles.continueButton, loading && styles.buttonDisabled]}
           onPress={handleLoginSubmit}
           disabled={loading}
         >
@@ -355,60 +425,107 @@ const WelcomeScreen = ({ navigation }) => {
 
   const renderForgotPassword = () => (
     <View style={styles.contentContainer}>
-      <Text style={styles.preferencesTitle}>Passwort wiederherstellen</Text>
+      <Text style={styles.preferencesTitle}>Passwort zurücksetzen</Text>
       <Text style={styles.preferencesText}>
-        Bitte gib deine E-Mail-Adresse ein, um dein Passwort zurückzusetzen.
+        {resetStage === 'request'
+          ? 'Gib deinen Benutzernamen ein. Wir senden dir einen Code an deine hinterlegte E-Mail-Adresse oder Telefonnummer.'
+          : 'Gib den Code ein und vergebe ein neues Passwort.'}
       </Text>
-      
+
       <View style={styles.formContainer}>
         <View style={styles.inputContainer}>
-          <Text style={styles.inputLabel}>E-Mail</Text>
+          <Text style={styles.inputLabel}>Benutzername</Text>
           <TextInput
-            style={styles.textInput}
-            value={email}
-            onChangeText={setEmail}
-            placeholder="deine@email.de"
-            keyboardType="email-address"
+            style={[styles.textInput, resetStage === 'confirm' && styles.disabledInput]}
+            value={resetUsername}
+            onChangeText={setResetUsername}
+            placeholder="deinname"
             autoCapitalize="none"
             autoCorrect={false}
+            editable={resetStage === 'request'}
           />
         </View>
-        
+
+        {resetStage === 'confirm' ? (
+          <>
+            <View style={styles.infoBox}>
+              <Text style={styles.infoText}>
+                Der Reset-Code wurde an {resetTarget || 'deine hinterlegte Kontaktmöglichkeit'} gesendet.
+              </Text>
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Reset-Code</Text>
+              <TextInput
+                style={styles.textInput}
+                value={resetCode}
+                onChangeText={setResetCode}
+                placeholder="123456"
+                autoCapitalize="characters"
+                autoCorrect={false}
+              />
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Neues Passwort</Text>
+              <TextInput
+                style={styles.textInput}
+                value={resetNewPassword}
+                onChangeText={setResetNewPassword}
+                placeholder="Mindestens 8 Zeichen"
+                secureTextEntry
+              />
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Passwort wiederholen</Text>
+              <TextInput
+                style={styles.textInput}
+                value={resetConfirmPassword}
+                onChangeText={setResetConfirmPassword}
+                placeholder="Mindestens 8 Zeichen"
+                secureTextEntry
+              />
+            </View>
+
+            <TouchableOpacity
+              style={styles.inlineTextButton}
+              onPress={handlePasswordResetRequest}
+              disabled={loading}
+            >
+              <Text style={styles.textButtonText}>Code erneut senden</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <View style={styles.infoBox}>
+            <Text style={styles.infoText}>
+              Wir nutzen deine im Profil hinterlegte E-Mail-Adresse oder Telefonnummer. Die interne
+              `@users.mylocalapp.de`-Adresse ist dafür nicht relevant.
+            </Text>
+          </View>
+        )}
+
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
         {successMessage ? <Text style={styles.successText}>{successMessage}</Text> : null}
-        
-        <View style={styles.infoBox}>
-             <Text style={styles.infoText}>
-                Wenn du deine E-Mail-Adresse nicht mehr weißt oder dich ohne E-Mail registriert hast, schreibe bitte eine E-Mail an info@mylocalapp.de oder erstelle einen neuen Account.
-             </Text>
-        </View>
       </View>
-      
+
       <View style={styles.actionsContainer}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => {
-            setStep('welcome');
-            setError('');
-            setSuccessMessage('');
-          }}
-        >
+        <TouchableOpacity style={styles.backButton} onPress={handleForgotPasswordBack}>
           <Ionicons name="arrow-back" size={20} color="#666" />
           <Text style={styles.backButtonText}>Zurück</Text>
         </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={[
-            styles.continueButton,
-            loading && styles.buttonDisabled
-          ]}
-          onPress={handlePasswordReset}
+
+        <TouchableOpacity
+          style={[styles.continueButton, loading && styles.buttonDisabled]}
+          onPress={resetStage === 'request' ? handlePasswordResetRequest : handlePasswordResetSubmit}
           disabled={loading}
         >
           {loading ? (
             <ActivityIndicator color="#fff" size="small" />
           ) : (
-            <Text style={styles.continueButtonText}>Zurücksetzen</Text>
+            <Text style={styles.continueButtonText}>
+              {resetStage === 'request' ? 'Code senden' : 'Passwort speichern'}
+            </Text>
           )}
         </TouchableOpacity>
       </View>
@@ -418,16 +535,12 @@ const WelcomeScreen = ({ navigation }) => {
   return (
     <SafeAreaView style={styles.container}>
       {step === 'welcome' ? (
-         renderWelcome() 
-      ) : step === 'login' ? (
-        <ScrollView contentContainerStyle={styles.scrollContainer}>
-          {renderLoginForm()}
+        renderWelcome()
+      ) : (
+        <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
+          {step === 'login' ? renderLoginForm() : renderForgotPassword()}
         </ScrollView>
-      ) : step === 'forgotPassword' ? (
-        <ScrollView contentContainerStyle={styles.scrollContainer}>
-            {renderForgotPassword()}
-        </ScrollView>
-      ) : null}
+      )}
     </SafeAreaView>
   );
 };
@@ -520,7 +633,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   secondaryButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
     borderWidth: 1,
     borderColor: '#3F51B5',
     borderRadius: 8,
@@ -532,6 +645,20 @@ const styles = StyleSheet.create({
     color: '#3F51B5',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  textButton: {
+    padding: 10,
+    marginTop: 15,
+    alignItems: 'center',
+  },
+  inlineTextButton: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+  },
+  textButtonText: {
+    color: '#3F51B5',
+    fontSize: 14,
+    textDecorationLine: 'underline',
   },
   preferencesTitle: {
     fontSize: 22,
@@ -545,17 +672,56 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
     marginBottom: 30,
+    lineHeight: 22,
+  },
+  formContainer: {
+    width: '100%',
+    maxWidth: 420,
+  },
+  inputContainer: {
+    width: '100%',
+    marginBottom: 18,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  textInput: {
+    width: '100%',
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#D7DEFF',
+    color: '#222',
+  },
+  disabledInput: {
+    backgroundColor: '#F3F5FD',
+    color: '#68708D',
+  },
+  helperText: {
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#6B7280',
   },
   actionsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
     width: '100%',
-    marginTop: 20,
+    maxWidth: 420,
+    marginTop: 12,
   },
   backButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 15,
+    paddingVertical: 14,
+    paddingRight: 12,
   },
   backButtonText: {
     fontSize: 16,
@@ -565,8 +731,10 @@ const styles = StyleSheet.create({
   continueButton: {
     backgroundColor: '#4285F4',
     borderRadius: 8,
-    padding: 15,
-    paddingHorizontal: 25,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    minWidth: 180,
+    alignItems: 'center',
   },
   continueButtonText: {
     color: '#fff',
@@ -578,66 +746,38 @@ const styles = StyleSheet.create({
     backgroundColor: '#9FA8DA',
   },
   errorText: {
-    color: '#D32F2F',
-    marginTop: 15,
+    color: '#C62828',
+    marginTop: 12,
     textAlign: 'center',
-    fontWeight: 'bold',
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    fontWeight: '600',
+    backgroundColor: 'rgba(255, 235, 238, 0.92)',
     paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 4,
+    paddingVertical: 8,
+    borderRadius: 8,
   },
   successText: {
-    color: '#388E3C', // Green for success
-    marginTop: 15,
+    color: '#2E7D32',
+    marginTop: 12,
     textAlign: 'center',
-    fontWeight: 'bold',
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    fontWeight: '600',
+    backgroundColor: 'rgba(232, 245, 233, 0.95)',
     paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 4,
-  },
-  textButton: {
-    padding: 10,
-    alignItems: 'center',
-  },
-  textButtonText: {
-    color: '#3F51B5',
-    fontSize: 14,
-    textDecorationLine: 'underline',
+    paddingVertical: 8,
+    borderRadius: 8,
   },
   infoBox: {
-      marginTop: 20,
-      padding: 15,
-      backgroundColor: '#E8EAF6', // Light indigo background
-      borderRadius: 8,
-      borderLeftWidth: 4,
-      borderLeftColor: '#3F51B5',
+    marginBottom: 18,
+    padding: 15,
+    backgroundColor: '#E8EAF6',
+    borderRadius: 10,
+    borderLeftWidth: 4,
+    borderLeftColor: '#3F51B5',
   },
   infoText: {
-      fontSize: 13,
-      color: '#333',
-      lineHeight: 18,
-  },
-  formContainer: {
-    width: '100%',
-    marginBottom: 20,
-  },
-  inputContainer: {
-    marginBottom: 15,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 13,
     color: '#333',
-    marginBottom: 5,
-  },
-  textInput: {
-    backgroundColor: '#f5f5f5',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
+    lineHeight: 20,
   },
 });
 
-export default WelcomeScreen; 
+export default WelcomeScreen;
