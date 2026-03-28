@@ -13,6 +13,7 @@ import { Platform } from 'react-native';
 import { navigate } from './src/navigation/navigationRef';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './src/lib/supabase';
+import Constants from 'expo-constants';
 
 // Storage key for badge count
 const BADGE_COUNT_KEY = 'app_badge_count';
@@ -29,6 +30,10 @@ Notifications.setNotificationHandler({
 // Function to register for push notifications
 async function registerForPushNotificationsAsync() {
   let token;
+  const projectId =
+    Constants?.expoConfig?.extra?.eas?.projectId ??
+    Constants?.easConfig?.projectId ??
+    null;
 
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync('default', {
@@ -55,7 +60,12 @@ async function registerForPushNotificationsAsync() {
     // Learn more about projectId: https://docs.expo.dev/push-notifications/push-notifications-setup/#configure-projectid
     // Note: you must have the projectId correctly set in your app.json / app.config.js
     try {
-      token = (await Notifications.getExpoPushTokenAsync()).data;
+      if (!projectId) {
+        console.error('Error getting Expo push token: missing EAS projectId in app config.');
+        return null;
+      }
+
+      token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
       console.log('Expo Push Token:', token);
     } catch (e) {
       console.error("Error getting Expo push token:", e);

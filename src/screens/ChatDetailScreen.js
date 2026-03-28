@@ -41,11 +41,6 @@ import { loadOfflineData } from '../utils/storageUtils';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 // uuid and base64-arraybuffer now handled by uploadService
-// --- Push Notification Imports ---
-import * as Notifications from 'expo-notifications';
-import * as Device from 'expo-device';
-import Constants from 'expo-constants';
-// ------------------------------
 
 const { height } = Dimensions.get('window');
 const androidPaddingTop = height * 0.05; // 5% of screen height for better scaling
@@ -62,7 +57,7 @@ const getTransformedImageUrl = (originalUrl) => {
 
 const ChatDetailScreen = ({ route, navigation }) => {
   const { chatGroup: initialChatGroup, onReturn } = route.params;
-  const { user, displayName, userOrganizations } = useAuth();
+  const { user, displayName, userOrganizations, expoPushToken } = useAuth();
   const { activeOrganizationId } = useOrganization();
   const { isOfflineMode, isConnected } = useNetwork();
   const [message, setMessage] = useState('');
@@ -81,72 +76,12 @@ const ChatDetailScreen = ({ route, navigation }) => {
   const [isOrgMember, setIsOrgMember] = useState(false);
   const [hasAutoScrolled, setHasAutoScrolled] = useState(false); // Track initial auto-scroll
   // --- Push Notification State ---
-  const [expoPushToken, setExpoPushToken] = useState('');
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [checkingSubscription, setCheckingSubscription] = useState(false);
   const [togglingSubscription, setTogglingSubscription] = useState(false); // For loading indicator on toggle
   // -----------------------------
 
   // --- Push Notification Logic ---
-  // Function to register for push notifications and get token
-  async function registerForPushNotificationsAsync() {
-    let token;
-    if (!Device.isDevice) {
-      // console.log('Push notifications require a physical device, skipping registration.');
-      return null;
-    }
-
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
-    let finalStatus = existingStatus;
-
-    if (existingStatus !== 'granted') {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
-    }
-    if (finalStatus !== 'granted') {
-      Alert.alert('Berechtigung benötigt', 'Push-Benachrichtigungen können nicht aktiviert werden, da die Berechtigung fehlt.');
-      return null;
-    }
-
-    // Get the token that identifies this device
-    try {
-      const projectId = Constants.expoConfig?.extra?.eas?.projectId;
-      if (!projectId) {
-        console.error('Project ID not found. Make sure eas.json is configured.');
-        Alert.alert('Fehler', 'Projekt-ID für Push-Benachrichtigungen nicht gefunden.');
-        return null;
-      }
-      token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
-      // console.log('Expo Push Token:', token);
-      setExpoPushToken(token); // Store token in state
-    } catch (e) {
-      console.error("Error getting push token:", e);
-      Alert.alert('Fehler', 'Push-Token konnte nicht abgerufen werden.');
-      return null;
-    }
-
-    // Android specific setup
-    if (Platform.OS === 'android') {
-      Notifications.setNotificationChannelAsync('default', {
-        name: 'default',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#FF231F7C',
-      });
-    }
-
-    return token;
-  }
-
-  // Get push token on mount if not already available
-  useEffect(() => {
-    if (!expoPushToken) {
-      // console.log('Attempting to register for push notifications...');
-      registerForPushNotificationsAsync();
-    }
-  }, []);
-
-
   // Check subscription status when user, chatGroup, and token are available
   useEffect(() => {
     const checkSubscription = async () => {

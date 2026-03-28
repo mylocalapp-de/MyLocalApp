@@ -1492,6 +1492,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
     session,
     user,
     profile, // Includes avatar_url and about_me now
+    expoPushToken,
     loading,
     preferences,
     displayName,
