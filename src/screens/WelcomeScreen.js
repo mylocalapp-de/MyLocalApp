@@ -362,7 +362,7 @@ const WelcomeScreen = ({ navigation }) => {
     <View style={styles.contentContainer}>
       <Text style={styles.preferencesTitle}>Anmelden</Text>
       <Text style={styles.preferencesText}>
-        Melde dich mit deinem Benutzernamen an. Alte Accounts funktionieren vorübergehend auch noch mit E-Mail.
+        Melde dich mit deinem Benutzernamen an. Alte Accounts funktionieren auch noch mit E-Mail.
       </Text>
 
       <View style={styles.formContainer}>
