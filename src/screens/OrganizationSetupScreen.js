@@ -11,6 +11,7 @@ import {
   TouchableWithoutFeedback, 
   ScrollView,
   Modal, // Added Modal
+  KeyboardAvoidingView,
   Platform, // Added Platform
   Linking // Added Linking
 } from 'react-native';
@@ -806,34 +807,39 @@ const OrganizationSetupScreen = ({ navigation }) => {
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-      <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
-        <View style={styles.header}>
-           <TouchableOpacity 
-              onPress={() => { 
-                   setIsLoading(false); // Reset loading state on back press
-                   setPurchaseError(null);
-                   setError('');
-                   // Potentially reset mode as well if purchase was hanging?
-                   // setMode('select'); 
-                   navigation.goBack();
-               }} 
-              style={styles.backButton}
-           >
-                <Ionicons name="arrow-back" size={24} color="#333" />
-            </TouchableOpacity>
-          <Text style={styles.title}>Organisation verwalten</Text>
-          <View style={{ width: 24 }} />{/* Spacer */}
-        </View>
-        {/* check for temporary account */}
-        {profile?.is_temporary ? (
-          renderTemporaryBlocked()
-        ) : (
-          <>  
-            {renderContent()}
-            {renderVoucherModal()}
-          </>
-        )}
-      </ScrollView>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}
+      >
+        <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+          <View style={styles.header}>
+             <TouchableOpacity 
+                onPress={() => { 
+                     setIsLoading(false); // Reset loading state on back press
+                     setPurchaseError(null);
+                     setError('');
+                     // Potentially reset mode as well if purchase was hanging?
+                     // setMode('select'); 
+                     navigation.goBack();
+                 }} 
+                style={styles.backButton}
+             >
+                  <Ionicons name="arrow-back" size={24} color="#333" />
+              </TouchableOpacity>
+            <Text style={styles.title}>Organisation verwalten</Text>
+            <View style={{ width: 24 }} />{/* Spacer */}
+          </View>
+          {/* check for temporary account */}
+          {profile?.is_temporary ? (
+            renderTemporaryBlocked()
+          ) : (
+            <>  
+              {renderContent()}
+              {renderVoucherModal()}
+            </>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
     </TouchableWithoutFeedback>
   );
 };
