@@ -32,7 +32,7 @@ import NewDirectMessageScreen from '../screens/NewDirectMessageScreen';
 import DirectMessageDetailScreen from '../screens/DirectMessageDetailScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
 import RegisterScreen from '../screens/RegisterScreen';
-import VerificationScreen from '../screens/VerificationScreen';
+
 import UserProfileViewScreen from '../screens/UserProfileViewScreen';
 import OrganizationProfileViewScreen from '../screens/OrganizationProfileViewScreen';
 import EventArticleFormScreen from '../screens/EventArticleFormScreen';
@@ -233,11 +233,7 @@ const TabNavigator = () => {
 
 const AppNavigator = () => {
   const { loading, hasCompletedOnboarding, user, profile } = useAuth();
-  const { config: appConfig, loading: appConfigLoading } = useAppConfig();
   const [authChecked, setAuthChecked] = React.useState(false);
-  const isTrue = (val) => val === true || val === 'true' || val === '1';
-  const disableVerifyFallback = isTrue(process.env.EXPO_PUBLIC_DISABLE_VERIFY) || isTrue(Constants?.expoConfig?.extra?.disableVerify);
-  const disableVerify = appConfigLoading ? disableVerifyFallback : isTrue(appConfig.EXPO_PUBLIC_DISABLE_VERIFY);
   
   // Force a re-render when auth state changes
   React.useEffect(() => {
@@ -251,19 +247,10 @@ const AppNavigator = () => {
     return null; // You could add a loading spinner here
   }
 
-  const shouldShowVerification = !!user && !!profile && (profile.is_verified === false) && !disableVerify;
-
   return (
     <NavigationContainer ref={navigationRef}>
       <RootStack.Navigator screenOptions={{ headerShown: false }}>
         {hasCompletedOnboarding ? (
-          shouldShowVerification ? (
-            <RootStack.Screen
-              name="Verify"
-              component={VerificationScreen}
-              options={{ gestureEnabled: false }}
-            />
-          ) : (
             <RootStack.Screen 
               name="MainApp" 
               component={TabNavigator} 
