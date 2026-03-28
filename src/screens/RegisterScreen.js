@@ -612,8 +612,8 @@ const RegisterScreen = ({ navigation }) => {
           style={styles.textInput}
           value={otpCode}
           onChangeText={setOtpCode}
-          placeholder="123456"
-          keyboardType="number-pad"
+          placeholder={verifyMethod === 'email' ? 'ABC123' : '123456'}
+          keyboardType={verifyMethod === 'email' ? 'default' : 'number-pad'}
           autoCapitalize="characters"
           autoCorrect={false}
         />
