@@ -31,6 +31,7 @@ import DirectMessagesScreen from '../screens/DirectMessagesScreen';
 import NewDirectMessageScreen from '../screens/NewDirectMessageScreen';
 import DirectMessageDetailScreen from '../screens/DirectMessageDetailScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
+import RegisterScreen from '../screens/RegisterScreen';
 import VerificationScreen from '../screens/VerificationScreen';
 import UserProfileViewScreen from '../screens/UserProfileViewScreen';
 import OrganizationProfileViewScreen from '../screens/OrganizationProfileViewScreen';
@@ -112,6 +113,10 @@ const AuthStackNavigator = () => {
       <AuthStack.Screen 
         name="Onboarding"
         component={OnboardingScreen}
+      />
+      <AuthStack.Screen
+        name="Register"
+        component={RegisterScreen}
       />
     </AuthStack.Navigator>
   );
@@ -331,4 +336,4 @@ const AppNavigator = () => {
   );
 };
 
-export default AppNavigator; 
+export default AppNavigator;
