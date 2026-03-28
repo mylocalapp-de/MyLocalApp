@@ -84,50 +84,23 @@ const PersonalProfileSection = ({
         </View>
       )}
 
-      {/* Organizations */}
-      {hasFullAccount && (
-        <View style={[styles.card, hasNoOrganizations && styles.highlightedOrgCard]}>
-          <Text style={[styles.cardTitle, hasNoOrganizations && styles.highlightedOrgTitle]}>Organisationen</Text>
-          {userOrganizations && userOrganizations.length > 0 ? (
-            <View>
-              <Text style={styles.cardText}>Du bist Mitglied in:</Text>
-              {userOrganizations.map(org => (
-                <View key={org.id} style={styles.orgSelectItem}>
-                  <Text style={styles.orgSelectName}>{org.name}</Text>
-                  <TouchableOpacity
-                    style={[styles.buttonSmall, styles.switchButtonSmall]}
-                    onPress={() => onSwitchToOrg(org.id)}
-                    disabled={isOrgContextLoading}
-                  >
-                    {isOrgContextLoading ? <ActivityIndicator size="small" color="#4285F4" /> : <Text style={styles.buttonSmallText}>Zu dieser Organisation wechseln</Text>}
-                  </TouchableOpacity>
-                </View>
-              ))}
-              <View style={styles.separator} />
+      {/* Organizations - creation/joining handled via Admin Panel */}
+      {hasFullAccount && userOrganizations && userOrganizations.length > 0 && (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Organisationen</Text>
+          <Text style={styles.cardText}>Du bist Mitglied in:</Text>
+          {userOrganizations.map(org => (
+            <View key={org.id} style={styles.orgSelectItem}>
+              <Text style={styles.orgSelectName}>{org.name}</Text>
+              <TouchableOpacity
+                style={[styles.buttonSmall, styles.switchButtonSmall]}
+                onPress={() => onSwitchToOrg(org.id)}
+                disabled={isOrgContextLoading}
+              >
+                {isOrgContextLoading ? <ActivityIndicator size="small" color="#4285F4" /> : <Text style={styles.buttonSmallText}>Zu dieser Organisation wechseln</Text>}
+              </TouchableOpacity>
             </View>
-          ) : (
-            <Text style={[styles.orgPromptText, hasNoOrganizations && styles.highlightedOrgPromptText]}>
-              Werde <Text style={styles.boldText}>aktiv</Text> und <Text style={styles.boldText}>gestalte</Text> die App mit!
-            </Text>
-          )}
-          {hasNoOrganizations && (
-            <Text style={[styles.orgPromptText, styles.highlightedOrgPromptText]}>
-              Veröffentliche <Text style={styles.boldText}>Artikel</Text>, gründe <Text style={styles.boldText}>Gruppen</Text> oder trage <Text style={styles.boldText}>Veranstaltungen</Text> ein!
-            </Text>
-          )}
-          <TouchableOpacity style={[!hasNoOrganizations && styles.primaryButton, { marginTop: 10 }]} onPress={() => navigation.navigate('OrganizationSetup')}>
-            {hasNoOrganizations ? (
-              <LinearGradient colors={['#7b4397', '#dc2430']} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={styles.gradientButton}>
-                <Ionicons name="business-outline" size={20} color="#fff" style={styles.buttonIcon} />
-                <Text style={styles.primaryButtonText}>Organisation erstellen / beitreten</Text>
-              </LinearGradient>
-            ) : (
-              <>
-                <Ionicons name="business-outline" size={20} color="#fff" style={styles.buttonIcon} />
-                <Text style={styles.primaryButtonText}>Organisation erstellen / beitreten</Text>
-              </>
-            )}
-          </TouchableOpacity>
+          ))}
         </View>
       )}
 
