@@ -414,8 +414,7 @@ const RegisterScreen = ({ navigation }) => {
     <>
       <Text style={styles.title}>Registrieren</Text>
       <Text style={styles.description}>
-        Wähle deinen Benutzernamen und ein sicheres Passwort. Mit diesem Benutzernamen meldest du
-        dich später in der App an.
+        Wähle einen Benutzernamen, unter dem dich die Strodehner kennen. Mit diesem Namen meldest du dich später in der App an.
       </Text>
 
       <View style={styles.inputContainer}>
@@ -429,12 +428,12 @@ const RegisterScreen = ({ navigation }) => {
               void checkUsername(username);
             }
           }}
-          placeholder="deinname"
+          placeholder="z.B. hans.mueller"
           autoCapitalize="none"
           autoCorrect={false}
           autoComplete="username"
         />
-        <Text style={styles.helperText}>Erlaubt sind Kleinbuchstaben, Zahlen, Punkt, Unterstrich und Bindestrich.</Text>
+        <Text style={styles.helperText}>Kleinbuchstaben, Zahlen, Punkt, Unterstrich und Bindestrich. Keine Leerzeichen.</Text>
         {renderUsernameMessage()}
       </View>
 
