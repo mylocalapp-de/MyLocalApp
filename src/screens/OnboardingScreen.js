@@ -5,6 +5,8 @@ import {
   StyleSheet, 
   TextInput, 
   TouchableOpacity, 
+  KeyboardAvoidingView,
+  Platform,
   ScrollView, 
   ActivityIndicator,
   Alert,
@@ -201,18 +203,23 @@ const OnboardingScreen = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
-        {/* Always show back button, adjust onPress based on step */} 
-        <TouchableOpacity 
-          style={styles.backNavButton} 
-          onPress={currentStep === 1 ? () => navigation.goBack() : handleInternalGoBack}
-        >
-          <Ionicons name="arrow-back" size={24} color="#333" />
-        </TouchableOpacity>
-         
-        {renderStepContent()}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContainer}>
+          {/* Always show back button, adjust onPress based on step */} 
+          <TouchableOpacity 
+            style={styles.backNavButton} 
+            onPress={currentStep === 1 ? () => navigation.goBack() : handleInternalGoBack}
+          >
+            <Ionicons name="arrow-back" size={24} color="#333" />
+          </TouchableOpacity>
+           
+          {renderStepContent()}
 
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };
