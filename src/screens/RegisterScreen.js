@@ -1,7 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Linking,
+  Platform,
   ScrollView,
   StyleSheet,
   Switch,
@@ -449,6 +451,7 @@ const RegisterScreen = ({ navigation }) => {
             autoCapitalize="none"
             autoCorrect={false}
             autoComplete="new-password"
+            onFocus={() => setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 300)}
           />
           <TouchableOpacity
             style={styles.eyeButton}
@@ -472,6 +475,7 @@ const RegisterScreen = ({ navigation }) => {
             autoCapitalize="none"
             autoCorrect={false}
             autoComplete="new-password"
+            onFocus={() => setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 300)}
           />
           <TouchableOpacity
             style={styles.eyeButton}
@@ -652,9 +656,20 @@ const RegisterScreen = ({ navigation }) => {
 
   const isPrimaryLoading = isSendingCode || isCreatingAccount || usernameStatus === 'checking';
 
+  const scrollRef = useRef(null);
+
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+      >
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={styles.scrollContainer}
+        keyboardShouldPersistTaps="handled"
+      >
         <TouchableOpacity style={styles.backNavButton} onPress={handleBack}>
           <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
@@ -700,6 +715,7 @@ const RegisterScreen = ({ navigation }) => {
           </TouchableOpacity>
         </View>
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {countryOpen ? (
         <TouchableOpacity
