@@ -225,13 +225,13 @@ const EventDetailScreen = ({ route, navigation }) => {
       
       if (eventError) {
         console.error('Error fetching event:', eventError);
-        setError('Could not load event. Please try again later.');
+        setError('Veranstaltung konnte nicht geladen werden. Bitte versuche es später erneut.');
         setLoading(false);
         return;
       }
       
       if (!eventData) {
-        setError('Event not found.');
+        setError('Veranstaltung nicht gefunden.');
         setLoading(false);
         return;
       }
