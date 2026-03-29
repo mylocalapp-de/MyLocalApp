@@ -435,7 +435,7 @@ const RegisterScreen = ({ navigation }) => {
           autoCorrect={false}
           autoComplete="username"
         />
-        <Text style={styles.helperText}>Kleinbuchstaben, Zahlen, Punkt, Unterstrich und Bindestrich. Keine Leerzeichen.</Text>
+        <Text style={styles.helperText}>Groß- und Kleinschreibung egal – Buchstaben, Zahlen, Punkt, Unterstrich und Bindestrich. Keine Leerzeichen.</Text>
         {renderUsernameMessage()}
       </View>
 
