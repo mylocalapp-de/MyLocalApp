@@ -459,8 +459,7 @@ const HomeScreen = ({ navigation }) => {
                   key={article.id} 
                   style={styles.articleCard}
                   onPress={() => {
-                    // Navigate to EventDetail only if linked event is published
-                    if (article.linked_event_id && article.linked_event_is_published === true) {
+                    if (article.linked_event_id) {
                       navigation.navigate('EventDetail', { eventId: article.linked_event_id });
                     } else {
                       navigation.navigate('ArticleDetail', { articleId: article.id });
