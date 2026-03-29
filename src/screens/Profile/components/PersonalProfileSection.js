@@ -8,6 +8,7 @@ import { View, Text, TouchableOpacity, ActivityIndicator, Switch, Linking } from
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import styles from '../styles';
+import NotificationSettings from './NotificationSettings';
 
 const CATEGORIES = [
   { id: 'kultur', name: 'Kultur', icon: 'film-outline' },
@@ -41,6 +42,7 @@ const PersonalProfileSection = ({
   onOpenCreateAccountModal,
   onSaveDataForOffline,
   onUpdateVisibility,
+  userId,
 }) => {
   const hasNoOrganizations = !userOrganizations || userOrganizations.length === 0;
 
@@ -154,6 +156,11 @@ const PersonalProfileSection = ({
           <Ionicons name="chevron-forward" size={16} color="#4285F4" />
         </TouchableOpacity>
       </View>
+
+      {/* Notification Settings — after content, before utility sections */}
+      {hasFullAccount && userId && (
+        <NotificationSettings userId={userId} />
+      )}
 
       {/* Account Settings */}
       {hasFullAccount && (
