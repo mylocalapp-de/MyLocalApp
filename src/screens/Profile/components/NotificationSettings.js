@@ -148,7 +148,7 @@ const NotificationSettings = ({ userId }) => {
       <View style={styles.separator} />
 
       <Text style={[styles.cardText, { marginBottom: 5, fontWeight: '500', color: '#555' }]}>
-        Neue Artikel benachrichtigen:
+        Aktiviere was Dich interessiert, und Du wirst benachrichtigt, wenn es etwas Neues gibt.
       </Text>
 
       {articleItems.map((item) => (
@@ -162,10 +162,6 @@ const NotificationSettings = ({ userId }) => {
           />
         </View>
       ))}
-
-      <Text style={styles.modalInfoText}>
-        Aktiviere Kategorien, um bei neuen Artikeln benachrichtigt zu werden.
-      </Text>
     </View>
   );
 };
