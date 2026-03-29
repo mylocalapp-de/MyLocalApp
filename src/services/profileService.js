@@ -39,7 +39,7 @@ export async function checkUsernameAvailability(username) {
   const { data, error, status } = await supabase
     .from('profiles')
     .select('id')
-    .eq('username', normalizedUsername)
+    .eq('username_lower', normalizedUsername)
     .maybeSingle();
 
   if (error && status !== 406) {

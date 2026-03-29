@@ -19,7 +19,7 @@ import { useAuth } from '../context/AuthContext';
 import { checkUsernameAvailability } from '../services/profileService';
 
 const VERIFICATION_API_BASE = 'https://admin.mylocalapp.de/api/verification';
-const USERNAME_REGEX = /^[a-z0-9._-]{3,30}$/;
+const USERNAME_REGEX = /^[a-zA-Z0-9._-]{3,30}$/;
 
 const COUNTRIES = [
   { code: 'DE', name: 'Deutschland', dialCode: '49' },
@@ -43,7 +43,7 @@ const validateUsername = (value = '') => {
   }
 
   if (!USERNAME_REGEX.test(normalized)) {
-    return 'Der Benutzername muss 3 bis 30 Zeichen lang sein und darf nur Kleinbuchstaben, Zahlen, Punkt, Unterstrich oder Bindestrich enthalten.';
+    return 'Der Benutzername muss 3 bis 30 Zeichen lang sein und darf nur Buchstaben (Groß und Klein), Zahlen, Punkt, Unterstrich oder Bindestrich enthalten.';
   }
 
   return '';
@@ -150,7 +150,7 @@ const RegisterScreen = ({ navigation }) => {
   };
 
   const handleUsernameChange = (value) => {
-    const normalizedValue = value.toLowerCase().replace(/\s+/g, '');
+    const normalizedValue = value.replace(/\s+/g, '');
     setUsername(normalizedValue);
     if (normalizeUsername(normalizedValue) !== lastCheckedUsername) {
       setUsernameStatus('idle');
@@ -435,7 +435,7 @@ const RegisterScreen = ({ navigation }) => {
           autoCorrect={false}
           autoComplete="username"
         />
-        <Text style={styles.helperText}>Groß- und Kleinschreibung egal – Buchstaben, Zahlen, Punkt, Unterstrich und Bindestrich. Keine Leerzeichen.</Text>
+        <Text style={styles.helperText}>Dein Benutzername wird genau so gespeichert, wie du ihn eingibst. Groß- und Kleinschreibung wird bei der Anmeldung ignoriert.</Text>
         {renderUsernameMessage()}
       </View>
 
@@ -599,7 +599,7 @@ const RegisterScreen = ({ navigation }) => {
 
       <View style={styles.infoBox}>
         <Text style={styles.infoText}>
-          Benutzername: <Text style={styles.boldText}>{normalizeUsername(username)}</Text>
+          Benutzername: <Text style={styles.boldText}>{username.trim()}</Text>
         </Text>
         <Text style={styles.infoText}>
           Verifizierung: <Text style={styles.boldText}>{verifyMethod === 'phone' ? 'Telefon' : 'E-Mail'}</Text>

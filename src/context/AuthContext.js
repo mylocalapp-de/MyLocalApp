@@ -21,7 +21,7 @@ const generateRandomPassword = (length = 12) => {
 
 const VERIFICATION_API_BASE = 'https://admin.mylocalapp.de/api/verification';
 const PASSWORD_RESET_API_BASE = 'https://admin.mylocalapp.de/api/password-reset';
-const USERNAME_REGEX = /^[a-z0-9._-]{3,30}$/;
+const USERNAME_REGEX = /^[a-zA-Z0-9._-]{3,30}$/;
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -626,9 +626,11 @@ export const AuthProvider = ({ children, expoPushToken }) => {
       ? String(contact?.code ?? contact?.otpCode ?? '').trim()
       : '';
     const hasShowInList = typeof contact === 'object' && Object.prototype.hasOwnProperty.call(contact, 'showInList');
+    const trimmedUsername = username.trim();
     const profileUpdates = {
-      display_name: normalizedUsername,
-      username: normalizedUsername,
+      display_name: trimmedUsername,
+      username: trimmedUsername,
+      username_lower: normalizedUsername,
       email: method === 'email' ? contactValue : null,
       phone: method === 'phone' ? contactValue : null,
       verify_method: method,
@@ -644,7 +646,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
     if (!isValidUsername(normalizedUsername)) {
       return {
         success: false,
-        error: { message: 'Der Benutzername muss 3 bis 30 Zeichen lang sein und darf nur Kleinbuchstaben, Zahlen, Punkt, Unterstrich oder Bindestrich enthalten.' },
+        error: { message: 'Der Benutzername muss 3 bis 30 Zeichen lang sein und darf nur Buchstaben (Groß und Klein), Zahlen, Punkt, Unterstrich oder Bindestrich enthalten.' },
       };
     }
 
@@ -667,7 +669,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
       const { data: existingProfile, error: usernameCheckError, status: usernameCheckStatus } = await supabase
         .from('profiles')
         .select('id')
-        .eq('username', normalizedUsername)
+        .eq('username_lower', normalizedUsername)
         .maybeSingle();
 
       if (usernameCheckError && usernameCheckStatus !== 406) {
@@ -703,7 +705,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         password,
         options: {
           data: {
-            display_name: normalizedUsername,
+            display_name: trimmedUsername,
           },
         },
       });
