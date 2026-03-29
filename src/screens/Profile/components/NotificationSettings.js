@@ -55,6 +55,12 @@ const TOGGLE_ITEMS = [
     section: 'articles',
   },
   {
+    key: 'filter_dorfschnack',
+    label: 'Dorfschnack',
+    icon: 'chatbubbles-outline',
+    section: 'articles',
+  },
+  {
     key: 'org_articles',
     label: 'Vereins-Artikel',
     icon: 'people-outline',
