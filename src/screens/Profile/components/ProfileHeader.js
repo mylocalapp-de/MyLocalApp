@@ -89,8 +89,9 @@ const ProfileHeader = ({
           const email = user?.email || '';
           const isPseudo = email.includes('@users.mylocalapp.de') || email.includes('@user.mylocalapp.de') || email.includes('@temp.mylocalapp.de');
           if (isPseudo) {
-            const since = profile?.created_at ? new Date(profile.created_at).toLocaleDateString('de-DE') : null;
-            return since ? <Text style={styles.email}>Mitglied seit {since}</Text> : null;
+            const rawDate = profile?.created_at || user?.created_at;
+            const since = rawDate ? new Date(rawDate).toLocaleDateString('de-DE') : null;
+            return <Text style={styles.email}>{since ? `Mitglied seit ${since}` : 'Username-Account'}</Text>;
           }
           return <Text style={styles.email}>{email}</Text>;
         })()}
