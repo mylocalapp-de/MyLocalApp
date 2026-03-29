@@ -87,7 +87,7 @@ const ProfileHeader = ({
         <Text style={styles.headerTitle} numberOfLines={1}>{headerTitle}</Text>
         {hasFullAccount && !isOrganizationActive && (() => {
           const email = user?.email || '';
-          const isPseudo = email.includes('@user.mylocalapp.de') || email.includes('@temp.mylocalapp.de');
+          const isPseudo = email.includes('@users.mylocalapp.de') || email.includes('@user.mylocalapp.de') || email.includes('@temp.mylocalapp.de');
           if (isPseudo) {
             const since = profile?.created_at ? new Date(profile.created_at).toLocaleDateString('de-DE') : null;
             return since ? <Text style={styles.email}>Mitglied seit {since}</Text> : null;
