@@ -76,7 +76,7 @@ export async function fetchEventWithOrganizer(eventId) {
       organization:organizations ( name, logo_url )
     `)
     .eq('id', eventId)
-    .single();
+    .maybeSingle();
 }
 
 export async function fetchLinkedArticle(eventId) {
