@@ -1303,13 +1303,6 @@ const htmlStyles = {
   },
   em: {
       fontStyle: 'italic'
-  },
-  figcaption: {
-    display: 'none',
-  },
-  figure: {
-    marginHorizontal: 0,
-    marginVertical: 8,
   }
 };
 
