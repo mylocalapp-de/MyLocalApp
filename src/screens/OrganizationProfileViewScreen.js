@@ -10,7 +10,8 @@ import {
     FlatList, 
     Alert,
     Platform,
-    Dimensions
+    Dimensions,
+    Linking
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -467,7 +468,19 @@ const OrganizationProfileViewScreen = ({ route, navigation }) => {
                 <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Über die Organisation</Text>
                     <Text style={styles.aboutMeText}>
-                        {organizationProfile.about_me || 'Keine Beschreibung hinterlegt.'}
+                        {(organizationProfile.about_me || 'Keine Beschreibung hinterlegt.').split(/(https?:\/\/[^\s]+)/g).map((part, index) =>
+                            /^https?:\/\//.test(part) ? (
+                                <Text
+                                    key={index}
+                                    style={styles.linkText}
+                                    onPress={() => Linking.openURL(part)}
+                                >
+                                    {part}
+                                </Text>
+                            ) : (
+                                <Text key={index}>{part}</Text>
+                            )
+                        )}
                     </Text>
                 </View>
 
@@ -615,6 +628,12 @@ const styles = StyleSheet.create({
     aboutMeText: {
         fontSize: 14,
         color: '#555',
+        lineHeight: 20,
+    },
+    linkText: {
+        fontSize: 14,
+        color: '#2E7D32',
+        textDecorationLine: 'underline',
         lineHeight: 20,
     },
     emptyText: { // Style for empty lists (members, articles, etc.)
