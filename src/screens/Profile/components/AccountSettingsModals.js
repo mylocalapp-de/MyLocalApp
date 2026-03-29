@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { View, Text, TextInput, TouchableOpacity, Modal, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, Modal, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import styles from '../styles';
 
@@ -169,37 +169,40 @@ export const AboutMeModal = ({
   onSelectProfilePicture, uploadingImage, isOrganizationActive,
 }) => (
   <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-    <View style={styles.modalOverlay}>
-      <View style={styles.modalContent}>
-        <Text style={styles.modalTitle}>Über mich bearbeiten</Text>
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+      <View style={styles.modalOverlay}>
+        <View style={[styles.modalContent, { maxHeight: '85%' }]}>
+          <Text style={styles.modalTitle}>Über mich bearbeiten</Text>
+          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            {/* Profile picture upload shortcut — only in personal context */}
+            {!isOrganizationActive && onSelectProfilePicture && (
+              <TouchableOpacity
+                style={styles.avatarUploadRow}
+                onPress={() => {
+                  onClose();
+                  setTimeout(() => onSelectProfilePicture(), 300);
+                }}
+                disabled={uploadingImage}
+              >
+                <Ionicons name="camera-outline" size={22} color="#4285F4" />
+                <Text style={styles.avatarUploadText}>
+                  {uploadingImage ? 'Wird hochgeladen…' : 'Profilbild ändern'}
+                </Text>
+              </TouchableOpacity>
+            )}
 
-        {/* Profile picture upload shortcut — only in personal context */}
-        {!isOrganizationActive && onSelectProfilePicture && (
-          <TouchableOpacity
-            style={styles.avatarUploadRow}
-            onPress={() => {
-              onClose();
-              setTimeout(() => onSelectProfilePicture(), 300);
-            }}
-            disabled={uploadingImage}
-          >
-            <Ionicons name="camera-outline" size={22} color="#4285F4" />
-            <Text style={styles.avatarUploadText}>
-              {uploadingImage ? 'Wird hochgeladen…' : 'Profilbild ändern'}
-            </Text>
-          </TouchableOpacity>
-        )}
-
-        <TextInput style={[styles.input, styles.textArea]} value={aboutMe} onChangeText={onAboutMeChange} placeholder="Erzähl etwas über dich..." multiline numberOfLines={4} />
-        {error ? <Text style={styles.errorTextModal}>{error}</Text> : null}
-        <View style={styles.modalActions}>
-          <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={onClose} disabled={isLoading}><Text style={styles.modalButtonText}>Abbrechen</Text></TouchableOpacity>
-          <TouchableOpacity style={[styles.modalButton, styles.saveButton, isLoading && styles.buttonDisabled]} onPress={onSave} disabled={isLoading}>
-            {isLoading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.modalButtonText}>Speichern</Text>}
-          </TouchableOpacity>
+            <TextInput style={[styles.input, styles.textArea]} value={aboutMe} onChangeText={onAboutMeChange} placeholder="Erzähl etwas über dich..." multiline numberOfLines={6} textAlignVertical="top" />
+            {error ? <Text style={styles.errorTextModal}>{error}</Text> : null}
+          </ScrollView>
+          <View style={[styles.modalActions, { marginTop: 12 }]}>
+            <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={onClose} disabled={isLoading}><Text style={styles.modalButtonText}>Abbrechen</Text></TouchableOpacity>
+            <TouchableOpacity style={[styles.modalButton, styles.saveButton, isLoading && styles.buttonDisabled]} onPress={onSave} disabled={isLoading}>
+              {isLoading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.modalButtonText}>Speichern</Text>}
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   </Modal>
 );
 

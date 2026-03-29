@@ -85,9 +85,15 @@ const ProfileHeader = ({
 
       <View style={styles.profileInfo}>
         <Text style={styles.headerTitle} numberOfLines={1}>{headerTitle}</Text>
-        {hasFullAccount && !isOrganizationActive && (
-          <Text style={styles.email}>{user?.email || ''}</Text>
-        )}
+        {hasFullAccount && !isOrganizationActive && (() => {
+          const email = user?.email || '';
+          const isPseudo = email.includes('@user.mylocalapp.de') || email.includes('@temp.mylocalapp.de');
+          if (isPseudo) {
+            const since = profile?.created_at ? new Date(profile.created_at).toLocaleDateString('de-DE') : null;
+            return since ? <Text style={styles.email}>Mitglied seit {since}</Text> : null;
+          }
+          return <Text style={styles.email}>{email}</Text>;
+        })()}
         {!hasFullAccount && (
           <Text style={styles.accountStatus}>Lokaler Account (nicht synchronisiert)</Text>
         )}

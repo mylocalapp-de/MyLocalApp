@@ -604,7 +604,7 @@ export default StyleSheet.create({
     fontStyle: 'italic',
   },
   textArea: {
-    height: 100,
+    height: 140,
     textAlignVertical: 'top',
   },
   aboutMeText: {
