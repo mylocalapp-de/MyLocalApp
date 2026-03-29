@@ -374,7 +374,8 @@ const HomeScreen = ({ navigation }) => {
             is_organization_post: article?.is_organization_post ?? false,
             image_url: article?.image_url ?? null, // Keep null if not present
             preview_image_url: article?.preview_image_url ?? null, // Keep null if not present
-            linked_event_id: article?.linked_event_id ?? null // For Event-Articles
+            linked_event_id: article?.linked_event_id ?? null, // For Event-Articles
+            linked_event_is_published: article?.linked_event_is_published ?? null
         };
     });
   };
@@ -458,8 +459,8 @@ const HomeScreen = ({ navigation }) => {
                   key={article.id} 
                   style={styles.articleCard}
                   onPress={() => {
-                    // Navigate to EventDetail if this is an Event-Article
-                    if (article.linked_event_id) {
+                    // Navigate to EventDetail only if linked event is published
+                    if (article.linked_event_id && article.linked_event_is_published === true) {
                       navigation.navigate('EventDetail', { eventId: article.linked_event_id });
                     } else {
                       navigation.navigate('ArticleDetail', { articleId: article.id });
