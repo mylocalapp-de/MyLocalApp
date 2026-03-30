@@ -56,6 +56,7 @@ const WelcomeScreen = ({ navigation }) => {
   const [resetTarget, setResetTarget] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [errorCode, setErrorCode] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const scrollX = useRef(new Animated.Value(0)).current;
@@ -81,6 +82,7 @@ const WelcomeScreen = ({ navigation }) => {
 
   const clearMessages = () => {
     setError('');
+    setErrorCode('');
     setSuccessMessage('');
   };
 
@@ -114,12 +116,19 @@ const WelcomeScreen = ({ navigation }) => {
       }
 
       const errorMessage = result.error?.message || '';
-      if (errorMessage === 'Invalid login credentials') {
-        setError('Benutzername, E-Mail oder Passwort ist ungültig. Bitte überprüfe deine Eingaben.');
+      const code = result.error?.code || '';
+      if (code === 'USERNAME_NOT_FOUND' || code === 'EMAIL_NOT_FOUND') {
+        setError(errorMessage);
+        setErrorCode('NOT_FOUND');
+      } else if (code === 'WRONG_PASSWORD') {
+        setError('Passwort falsch.');
+        setErrorCode('WRONG_PASSWORD');
       } else if (errorMessage.toLowerCase().includes('rate limit')) {
         setError('Zu viele Anmeldeversuche. Bitte warte einen Moment und versuche es erneut.');
+        setErrorCode('');
       } else {
         setError(errorMessage || 'Anmeldung fehlgeschlagen.');
+        setErrorCode('');
       }
     } catch (err) {
       console.error('Unexpected error during login:', err);
@@ -402,7 +411,33 @@ const WelcomeScreen = ({ navigation }) => {
           </View>
         </View>
 
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {error ? (
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>{error}</Text>
+            {errorCode === 'NOT_FOUND' && (
+              <TouchableOpacity
+                onPress={() => {
+                  clearMessages();
+                  navigation.navigate('Register');
+                }}
+              >
+                <Text style={styles.errorLinkText}>Neuen Benutzer anlegen →</Text>
+              </TouchableOpacity>
+            )}
+            {errorCode === 'WRONG_PASSWORD' && (
+              <TouchableOpacity
+                onPress={() => {
+                  clearMessages();
+                  clearResetForm();
+                  setResetUsername(identifier.trim().toLowerCase());
+                  setStep('forgotPassword');
+                }}
+              >
+                <Text style={styles.errorLinkText}>Passwort vergessen?</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        ) : null}
         {successMessage ? <Text style={styles.successText}>{successMessage}</Text> : null}
       </View>
 
@@ -780,15 +815,25 @@ const styles = StyleSheet.create({
     opacity: 0.6,
     backgroundColor: '#9FA8DA',
   },
-  errorText: {
-    color: '#C62828',
+  errorContainer: {
     marginTop: 12,
-    textAlign: 'center',
-    fontWeight: '600',
     backgroundColor: 'rgba(255, 235, 238, 0.92)',
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderRadius: 8,
+    alignItems: 'center',
+  },
+  errorText: {
+    color: '#C62828',
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  errorLinkText: {
+    color: '#C62828',
+    textAlign: 'center',
+    textDecorationLine: 'underline',
+    marginTop: 6,
+    fontWeight: '500',
   },
   successText: {
     color: '#2E7D32',

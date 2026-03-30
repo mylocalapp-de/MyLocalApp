@@ -775,6 +775,17 @@ export const AuthProvider = ({ children, expoPushToken }) => {
     }
 
     try {
+      // Pre-check: does this username exist? (needed for specific error messages)
+      const { data: existingProfile } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('username_lower', normalizedUsername)
+        .maybeSingle();
+
+      if (!existingProfile) {
+        return { success: false, error: { message: 'Benutzername unbekannt.', code: 'USERNAME_NOT_FOUND' } };
+      }
+
       const { data, error } = await supabase.auth.signInWithPassword({
         email: toInternalEmail(normalizedUsername),
         password,
@@ -782,7 +793,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
 
       if (error) {
         console.error('AuthContext: Supabase username signIn error:', error);
-        return { success: false, error: { message: error.message || 'Anmeldung fehlgeschlagen.' } };
+        return { success: false, error: { message: 'Passwort falsch.', code: 'WRONG_PASSWORD' } };
       }
 
       if (!data.user) {
@@ -891,6 +902,17 @@ export const AuthProvider = ({ children, expoPushToken }) => {
     }
 
     try {
+      // Pre-check: does this email exist in profiles?
+      const { data: emailProfile } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('email', normalizedIdentifier.toLowerCase())
+        .maybeSingle();
+
+      if (!emailProfile) {
+        return { success: false, error: { message: 'E-Mail-Adresse unbekannt.', code: 'EMAIL_NOT_FOUND' } };
+      }
+
       const { data, error } = await supabase.auth.signInWithPassword({
         email: normalizedIdentifier,
         password,
@@ -898,7 +920,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
 
       if (error) {
         console.error('AuthContext: Supabase signIn error:', error);
-        return { success: false, error: { message: error.message || 'Anmeldung fehlgeschlagen.' } };
+        return { success: false, error: { message: 'Passwort falsch.', code: 'WRONG_PASSWORD' } };
       }
 
       if (!data.user) {
