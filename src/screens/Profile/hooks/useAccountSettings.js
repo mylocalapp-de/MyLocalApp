@@ -14,12 +14,15 @@ export default function useAccountSettings() {
     upgradeToFullAccount,
     updateEmail,
     updatePassword,
+    updateUsername,
+    updateVerificationContact,
     signOut,
     deleteCurrentUserAccount,
   } = useAuth();
 
   const hasFullAccount = !!user?.id;
   const isTemporaryAccount = hasFullAccount && profile?.is_temporary === true;
+  const isUsernameAccount = !!(profile?.username && user?.email?.endsWith('@users.mylocalapp.de'));
 
   // Create account modal state
   const [showCreateAccountModal, setShowCreateAccountModal] = useState(false);
@@ -39,6 +42,10 @@ export default function useAccountSettings() {
   const [accountSettingsError, setAccountSettingsError] = useState('');
   const [isAccountSettingsLoading, setIsAccountSettingsLoading] = useState(false);
   const [isMakingPermanent, setIsMakingPermanent] = useState(false);
+
+  // Username-account specific state
+  const [newUsername, setNewUsername] = useState('');
+  const [newContact, setNewContact] = useState('');
 
   const handleOpenCreateAccountModal = () => {
     setCreateEmail('');
@@ -94,8 +101,14 @@ export default function useAccountSettings() {
     setEmailCurrentPassword('');
     setNewPassword('');
     setConfirmNewPassword('');
-    setActiveTab('email');
     setAccountSettingsError('');
+    if (isUsernameAccount) {
+      setNewUsername(profile.username || '');
+      setNewContact(profile.verify_method === 'phone' ? (profile.phone || '') : (profile.email || ''));
+      setActiveTab('username');
+    } else {
+      setActiveTab('email');
+    }
     setShowAccountSettingsModal(true);
   };
 
@@ -178,6 +191,61 @@ export default function useAccountSettings() {
         setIsMakingPermanent(false);
       } else {
         setAccountSettingsError(result.error?.message || 'Passwort konnte nicht geändert werden.');
+      }
+    } catch {
+      setAccountSettingsError('Ein unerwarteter Fehler ist aufgetreten.');
+    } finally {
+      setIsAccountSettingsLoading(false);
+    }
+  };
+
+  const handleUpdateUsername = async () => {
+    const trimmed = newUsername.trim();
+    if (!/^[a-zA-Z0-9_-]{3,20}$/.test(trimmed)) {
+      setAccountSettingsError('Nutzername muss 3–20 Zeichen lang sein (Buchstaben, Zahlen, _ oder -).');
+      return;
+    }
+    if (trimmed === profile?.username) {
+      setAccountSettingsError('Der neue Nutzername muss sich vom aktuellen unterscheiden.');
+      return;
+    }
+    setIsAccountSettingsLoading(true);
+    setAccountSettingsError('');
+    try {
+      const result = await updateUsername(trimmed);
+      if (result.success) {
+        setShowAccountSettingsModal(false);
+        Alert.alert('Erfolgreich', 'Dein Nutzername wurde aktualisiert.');
+      } else {
+        setAccountSettingsError(result.error?.message || 'Nutzername konnte nicht geändert werden.');
+      }
+    } catch {
+      setAccountSettingsError('Ein unerwarteter Fehler ist aufgetreten.');
+    } finally {
+      setIsAccountSettingsLoading(false);
+    }
+  };
+
+  const handleUpdateContact = async () => {
+    const trimmed = newContact.trim();
+    if (!trimmed) {
+      setAccountSettingsError('Bitte gib einen gültigen Wert ein.');
+      return;
+    }
+    const method = profile?.verify_method || 'email';
+    if (method === 'email' && !trimmed.includes('@')) {
+      setAccountSettingsError('Bitte gib eine gültige E-Mail-Adresse ein.');
+      return;
+    }
+    setIsAccountSettingsLoading(true);
+    setAccountSettingsError('');
+    try {
+      const result = await updateVerificationContact(trimmed, method);
+      if (result.success) {
+        setShowAccountSettingsModal(false);
+        Alert.alert('Erfolgreich', method === 'phone' ? 'Deine Telefonnummer wurde aktualisiert.' : 'Deine Kontakt-E-Mail wurde aktualisiert.');
+      } else {
+        setAccountSettingsError(result.error?.message || 'Kontakt konnte nicht aktualisiert werden.');
       }
     } catch {
       setAccountSettingsError('Ein unerwarteter Fehler ist aufgetreten.');
@@ -276,6 +344,7 @@ export default function useAccountSettings() {
     // State
     hasFullAccount,
     isTemporaryAccount,
+    isUsernameAccount,
     // Create account
     showCreateAccountModal, setShowCreateAccountModal,
     createEmail, setCreateEmail,
@@ -299,8 +368,13 @@ export default function useAccountSettings() {
     handleOpenMakePermanentSettings,
     handleUpdateEmail,
     handleUpdatePassword,
+    handleUpdateUsername,
+    handleUpdateContact,
     handleMakePermanent,
     handleSignOut,
     handleDeleteAccount,
+    // Username-account specific
+    newUsername, setNewUsername,
+    newContact, setNewContact,
   };
 }

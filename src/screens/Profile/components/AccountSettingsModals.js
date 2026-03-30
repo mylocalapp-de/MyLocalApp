@@ -38,29 +38,85 @@ export const CreateAccountModal = ({
   </Modal>
 );
 
-// ── Account Settings Modal (Email/Password tabs) ──
+// ── Account Settings Modal (Email/Password tabs — or Username/Contact for username-accounts) ──
 export const AccountSettingsModal = ({
   visible, onClose,
   activeTab, onTabChange,
+  // Email-account props
   newEmail, onNewEmailChange,
   emailCurrentPassword, onEmailCurrentPasswordChange,
   newPassword, onNewPasswordChange,
   confirmNewPassword, onConfirmNewPasswordChange,
   error, isLoading,
   onUpdateEmail, onUpdatePassword,
+  // Username-account props
+  isUsernameAccount,
+  newUsername, onNewUsernameChange,
+  newContact, onNewContactChange,
+  verifyMethod,
+  onUpdateUsername, onUpdateContact,
 }) => (
   <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
     <View style={styles.modalOverlay}>
       <View style={styles.modalContent}>
         <Text style={styles.modalTitle}>Account Einstellungen</Text>
         <View style={styles.tabContainer}>
-          <TouchableOpacity style={[styles.tabButton, activeTab === 'email' && styles.tabButtonActive]} onPress={() => onTabChange('email')}>
-            <Text style={[styles.tabText, activeTab === 'email' && styles.tabTextActive]}>E-Mail ändern</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.tabButton, activeTab === 'password' && styles.tabButtonActive]} onPress={() => onTabChange('password')}>
-            <Text style={[styles.tabText, activeTab === 'password' && styles.tabTextActive]}>Passwort ändern</Text>
-          </TouchableOpacity>
+          {isUsernameAccount ? (
+            <>
+              <TouchableOpacity style={[styles.tabButton, activeTab === 'username' && styles.tabButtonActive]} onPress={() => onTabChange('username')}>
+                <Text style={[styles.tabText, activeTab === 'username' && styles.tabTextActive]}>Nutzername ändern</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.tabButton, activeTab === 'contact' && styles.tabButtonActive]} onPress={() => onTabChange('contact')}>
+                <Text style={[styles.tabText, activeTab === 'contact' && styles.tabTextActive]}>Kontakt ändern</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <TouchableOpacity style={[styles.tabButton, activeTab === 'email' && styles.tabButtonActive]} onPress={() => onTabChange('email')}>
+                <Text style={[styles.tabText, activeTab === 'email' && styles.tabTextActive]}>E-Mail ändern</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.tabButton, activeTab === 'password' && styles.tabButtonActive]} onPress={() => onTabChange('password')}>
+                <Text style={[styles.tabText, activeTab === 'password' && styles.tabTextActive]}>Passwort ändern</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
+        {/* ── Username-account: Nutzername ändern ── */}
+        {activeTab === 'username' && (
+          <>
+            <Text style={styles.inputLabel}>Neuer Nutzername</Text>
+            <TextInput style={styles.input} placeholder="Nutzername (3–20 Zeichen)" value={newUsername} onChangeText={onNewUsernameChange} autoCapitalize="none" autoCorrect={false} />
+            {error ? <Text style={styles.errorTextModal}>{error}</Text> : null}
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={onClose} disabled={isLoading}><Text style={styles.modalButtonText}>Abbrechen</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.modalButton, styles.saveButton, isLoading && styles.buttonDisabled]} onPress={onUpdateUsername} disabled={isLoading}>
+                {isLoading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.modalButtonText}>Nutzername aktualisieren</Text>}
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+        {/* ── Username-account: Kontakt ändern ── */}
+        {activeTab === 'contact' && (
+          <>
+            <Text style={styles.inputLabel}>{verifyMethod === 'phone' ? 'Neue Telefonnummer' : 'Neue Kontakt-E-Mail'}</Text>
+            <TextInput
+              style={styles.input}
+              placeholder={verifyMethod === 'phone' ? 'Telefonnummer' : 'Kontakt-E-Mail'}
+              value={newContact}
+              onChangeText={onNewContactChange}
+              keyboardType={verifyMethod === 'phone' ? 'phone-pad' : 'email-address'}
+              autoCapitalize="none"
+            />
+            {error ? <Text style={styles.errorTextModal}>{error}</Text> : null}
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={onClose} disabled={isLoading}><Text style={styles.modalButtonText}>Abbrechen</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.modalButton, styles.saveButton, isLoading && styles.buttonDisabled]} onPress={onUpdateContact} disabled={isLoading}>
+                {isLoading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.modalButtonText}>{verifyMethod === 'phone' ? 'Telefonnummer aktualisieren' : 'Kontakt-E-Mail aktualisieren'}</Text>}
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+        {/* ── Email-account: E-Mail ändern ── */}
         {activeTab === 'email' && (
           <>
             <Text style={styles.inputLabel}>Neue E-Mail-Adresse</Text>
@@ -76,6 +132,7 @@ export const AccountSettingsModal = ({
             </View>
           </>
         )}
+        {/* ── Email-account: Passwort ändern ── */}
         {activeTab === 'password' && (
           <>
             <Text style={styles.inputLabel}>Neues Passwort (min. 6 Zeichen)</Text>

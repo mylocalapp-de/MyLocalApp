@@ -1500,6 +1500,86 @@ export const AuthProvider = ({ children, expoPushToken }) => {
     }
   };
 
+  // Update username for username-accounts (profiles table only, not auth)
+  const updateUsername = async (newUsername) => {
+    if (!user) {
+      return { success: false, error: { message: 'Nicht angemeldet.' } };
+    }
+    const trimmed = newUsername?.trim();
+    if (!trimmed || !/^[a-zA-Z0-9_-]{3,20}$/.test(trimmed)) {
+      return { success: false, error: { message: 'Nutzername muss 3–20 Zeichen lang sein (Buchstaben, Zahlen, _ oder -).' } };
+    }
+    const newLower = trimmed.toLowerCase();
+
+    try {
+      // Check uniqueness
+      const { data: existing } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('username_lower', newLower)
+        .neq('id', user.id)
+        .maybeSingle();
+
+      if (existing) {
+        return { success: false, error: { message: 'Dieser Nutzername ist bereits vergeben.' } };
+      }
+
+      // Update profiles table
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ username: trimmed, username_lower: newLower, updated_at: new Date() })
+        .eq('id', user.id);
+
+      if (updateError) {
+        return { success: false, error: { message: updateError.message || 'Nutzername konnte nicht geändert werden.' } };
+      }
+
+      // Also update the internal auth email to match
+      await supabase.auth.updateUser({ email: toInternalEmail(trimmed) });
+
+      await loadUserProfileAndOrgs(user.id);
+      return { success: true };
+    } catch (error) {
+      console.error('AuthContext: Unexpected error updating username:', error);
+      return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+    }
+  };
+
+  // Update verification contact (email/phone in profiles table) for username-accounts
+  const updateVerificationContact = async (newValue, method) => {
+    if (!user) {
+      return { success: false, error: { message: 'Nicht angemeldet.' } };
+    }
+    const trimmed = newValue?.trim();
+    if (!trimmed) {
+      return { success: false, error: { message: 'Bitte gib einen gültigen Wert ein.' } };
+    }
+
+    try {
+      const updateData = { updated_at: new Date() };
+      if (method === 'phone') {
+        updateData.phone = trimmed;
+      } else {
+        updateData.email = trimmed;
+      }
+
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update(updateData)
+        .eq('id', user.id);
+
+      if (updateError) {
+        return { success: false, error: { message: updateError.message || 'Kontakt konnte nicht aktualisiert werden.' } };
+      }
+
+      await loadUserProfileAndOrgs(user.id);
+      return { success: true };
+    } catch (error) {
+      console.error('AuthContext: Unexpected error updating verification contact:', error);
+      return { success: false, error: { message: 'Ein unerwarteter Fehler ist aufgetreten.' } };
+    }
+  };
+
   // --- Context Value --- (Add/Remove functions)
   const value = {
     session,
@@ -1528,6 +1608,8 @@ export const AuthProvider = ({ children, expoPushToken }) => {
     updateProfile,
     updateEmail, // Add temporary check inside
     updatePassword, // ADD THIS LINE
+    updateUsername,
+    updateVerificationContact,
     updateProfilePicture, // ADDED
     loadingProfilePicture, // ADDED
     loadUserProfile: loadUserProfileAndOrgs, // Keep combined loading function (requires userId)

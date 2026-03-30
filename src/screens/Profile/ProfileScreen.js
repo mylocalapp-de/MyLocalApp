@@ -334,6 +334,12 @@ const ProfileScreen = () => {
           error={account.accountSettingsError} isLoading={account.isAccountSettingsLoading}
           onUpdateEmail={account.handleUpdateEmail}
           onUpdatePassword={account.handleUpdatePassword}
+          isUsernameAccount={account.isUsernameAccount}
+          newUsername={account.newUsername} onNewUsernameChange={account.setNewUsername}
+          newContact={account.newContact} onNewContactChange={account.setNewContact}
+          verifyMethod={profile?.verify_method || 'email'}
+          onUpdateUsername={account.handleUpdateUsername}
+          onUpdateContact={account.handleUpdateContact}
         />
       )}
 
