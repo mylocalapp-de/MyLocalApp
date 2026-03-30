@@ -69,6 +69,9 @@ export const AccountSettingsModal = ({
               <TouchableOpacity style={[styles.tabButton, activeTab === 'contact' && styles.tabButtonActive]} onPress={() => onTabChange('contact')}>
                 <Text style={[styles.tabText, activeTab === 'contact' && styles.tabTextActive]}>Kontakt ändern</Text>
               </TouchableOpacity>
+              <TouchableOpacity style={[styles.tabButton, activeTab === 'password' && styles.tabButtonActive]} onPress={() => onTabChange('password')}>
+                <Text style={[styles.tabText, activeTab === 'password' && styles.tabTextActive]}>Passwort ändern</Text>
+              </TouchableOpacity>
             </>
           ) : (
             <>
