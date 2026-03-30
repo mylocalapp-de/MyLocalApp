@@ -631,6 +631,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
       display_name: trimmedUsername,
       username: trimmedUsername,
       username_lower: normalizedUsername,
+      auth_email: toInternalEmail(normalizedUsername),
       email: method === 'email' ? contactValue : null,
       phone: method === 'phone' ? contactValue : null,
       verify_method: method,
@@ -778,7 +779,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
       // Pre-check: does this username exist? (needed for specific error messages)
       const { data: existingProfile } = await supabase
         .from('profiles')
-        .select('id')
+        .select('id, auth_email')
         .eq('username_lower', normalizedUsername)
         .maybeSingle();
 
@@ -787,7 +788,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
       }
 
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: toInternalEmail(normalizedUsername),
+        email: existingProfile.auth_email ?? toInternalEmail(normalizedUsername),
         password,
       });
 
@@ -1533,9 +1534,6 @@ export const AuthProvider = ({ children, expoPushToken }) => {
       if (updateError) {
         return { success: false, error: { message: updateError.message || 'Nutzername konnte nicht geändert werden.' } };
       }
-
-      // Also update the internal auth email to match
-      await supabase.auth.updateUser({ email: toInternalEmail(trimmed) });
 
       await loadUserProfileAndOrgs(user.id);
       return { success: true };
