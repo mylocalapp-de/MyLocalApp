@@ -902,17 +902,6 @@ export const AuthProvider = ({ children, expoPushToken }) => {
     }
 
     try {
-      // Pre-check: does this email exist in profiles?
-      const { data: emailProfile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('email', normalizedIdentifier.toLowerCase())
-        .maybeSingle();
-
-      if (!emailProfile) {
-        return { success: false, error: { message: 'E-Mail-Adresse unbekannt.', code: 'EMAIL_NOT_FOUND' } };
-      }
-
       const { data, error } = await supabase.auth.signInWithPassword({
         email: normalizedIdentifier,
         password,
@@ -920,7 +909,7 @@ export const AuthProvider = ({ children, expoPushToken }) => {
 
       if (error) {
         console.error('AuthContext: Supabase signIn error:', error);
-        return { success: false, error: { message: 'Passwort falsch.', code: 'WRONG_PASSWORD' } };
+        return { success: false, error: { message: 'E-Mail oder Passwort ungültig.' } };
       }
 
       if (!data.user) {
