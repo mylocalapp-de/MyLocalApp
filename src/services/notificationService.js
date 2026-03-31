@@ -28,6 +28,7 @@ export async function fetchNotificationPreferences(userId) {
     supabase
       .from('organizations')
       .select('id, name')
+      .eq('is_verein', true)
       .order('name'),
   ]);
 
