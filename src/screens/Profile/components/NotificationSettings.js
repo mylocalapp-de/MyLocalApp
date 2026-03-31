@@ -1,5 +1,6 @@
 /**
  * NotificationSettings — Push notification preference toggles.
+ * Includes per-organization toggles beneath the master "Vereins-Artikel" switch.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -60,16 +61,11 @@ const TOGGLE_ITEMS = [
     icon: 'chatbubbles-outline',
     section: 'articles',
   },
-  {
-    key: 'org_articles',
-    label: 'Vereins-Artikel',
-    icon: 'people-outline',
-    section: 'articles',
-  },
 ];
 
 const NotificationSettings = ({ userId }) => {
   const [preferences, setPreferences] = useState(null);
+  const [organizations, setOrganizations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState(null);
 
@@ -79,8 +75,12 @@ const NotificationSettings = ({ userId }) => {
 
     const load = async () => {
       try {
-        const prefs = await fetchNotificationPreferences(userId);
-        if (!cancelled) setPreferences(prefs);
+        const result = await fetchNotificationPreferences(userId);
+        if (!cancelled) {
+          const { organizations: orgs, ...prefs } = result;
+          setPreferences(prefs);
+          setOrganizations(orgs || []);
+        }
       } catch (err) {
         console.error('[NotificationSettings] Failed to load preferences:', err);
       } finally {
@@ -98,20 +98,28 @@ const NotificationSettings = ({ userId }) => {
     const newValue = !preferences[key];
     const newPrefs = { ...preferences, [key]: newValue };
 
+    // When master org toggle is turned off, also disable all per-org toggles.
+    // When turned on, enable all per-org toggles.
+    if (key === 'org_articles') {
+      for (const org of organizations) {
+        newPrefs[`org_articles_${org.id}`] = newValue;
+      }
+    }
+
     // Optimistic update
     setPreferences(newPrefs);
     setSavingKey(key);
 
     try {
-      await updateNotificationPreferences(userId, newPrefs);
+      await updateNotificationPreferences(userId, { ...newPrefs, organizations });
     } catch (err) {
       console.error('[NotificationSettings] Failed to save preference:', err);
       // Revert on error
-      setPreferences(prev => ({ ...prev, [key]: !newValue }));
+      setPreferences(preferences);
     } finally {
       setSavingKey(null);
     }
-  }, [preferences, savingKey, userId]);
+  }, [preferences, savingKey, userId, organizations]);
 
   if (loading) {
     return (
@@ -162,6 +170,37 @@ const NotificationSettings = ({ userId }) => {
           />
         </View>
       ))}
+
+      {/* Master org articles toggle */}
+      <View style={styles.settingItem}>
+        <Ionicons name="people-outline" size={22} style={styles.settingIcon} />
+        <Text style={styles.settingText}>Vereins-Artikel (alle)</Text>
+        <Switch
+          value={!!preferences.org_articles}
+          onValueChange={() => handleToggle('org_articles')}
+          disabled={savingKey === 'org_articles'}
+        />
+      </View>
+
+      {/* Per-organization toggles */}
+      {organizations.length > 0 && (
+        <View style={{ paddingLeft: 20 }}>
+          {organizations.map((org) => {
+            const orgKey = `org_articles_${org.id}`;
+            return (
+              <View key={orgKey} style={[styles.settingItem, { paddingVertical: 10 }]}>
+                <Ionicons name="shield-outline" size={18} style={[styles.settingIcon, { marginRight: 10 }]} />
+                <Text style={[styles.settingText, { fontSize: 14, color: '#555' }]}>{org.name}</Text>
+                <Switch
+                  value={!!preferences[orgKey]}
+                  onValueChange={() => handleToggle(orgKey)}
+                  disabled={savingKey === orgKey}
+                />
+              </View>
+            );
+          })}
+        </View>
+      )}
     </View>
   );
 };
