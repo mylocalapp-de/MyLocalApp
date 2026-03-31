@@ -17,3 +17,11 @@ android
 android_olddist/
 
 dist/
+
+# Google Services (contains API keys - never commit!)
+google-services.json
+android/app/google-services.json
+
+# Android build artifacts
+android/app/build/
+android/build/
