@@ -250,7 +250,7 @@ const AppNavigator = () => {
   return (
     <NavigationContainer ref={navigationRef}>
       <RootStack.Navigator screenOptions={{ headerShown: false }}>
-        {hasCompletedOnboarding ? (
+        {hasCompletedOnboarding && !!user ? (
             <RootStack.Screen 
               name="MainApp" 
               component={TabNavigator} 
