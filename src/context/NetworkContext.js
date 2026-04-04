@@ -9,79 +9,46 @@ import {
     saveLastOfflineSaveTimestamp,
     loadLastOfflineSaveTimestamp
 } from '../utils/storageUtils';
-import { supabase } from '../lib/supabase'; // Import supabase for data fetching
+import { supabase } from '../lib/supabase';
 
-// Create context
+// --- Konfiguration ---
+const OFFLINE_DEBOUNCE_MS = 4000;    // 4s offline bevor Alert kommt
+const DISMISS_COOLDOWN_MS = 30000;   // 30s Ruhe nach "Abbrechen"
+const INITIAL_GRACE_PERIOD_MS = 6000; // 6s nach App-Start ignorieren (iOS isInternetReachable-Flicker)
+
 const NetworkContext = createContext();
 
 export const NetworkProvider = ({ children }) => {
-    const [isConnected, setIsConnected] = useState(true); // Assume connected initially
-    const [isOfflineMode, setIsOfflineMode] = useState(false); // Whether user chose offline mode
+    const [isConnected, setIsConnected] = useState(true);
+    const [isOfflineMode, setIsOfflineMode] = useState(false);
     const [lastOfflineSaveTimestamp, setLastOfflineSaveTimestamp] = useState(null);
-    const [isSavingData, setIsSavingData] = useState(false); // Loading state for save button
-    const [initialCheckDone, setInitialCheckDone] = useState(false); // Track initial network check
+    const [isSavingData, setIsSavingData] = useState(false);
 
-    // Keep refs for latest values inside event handlers
-    const isOfflineModeRef = useRef(isOfflineMode);
-    useEffect(() => { isOfflineModeRef.current = isOfflineMode; }, [isOfflineMode]);
-    const initialCheckDoneRef = useRef(initialCheckDone);
-    useEffect(() => { initialCheckDoneRef.current = initialCheckDone; }, [initialCheckDone]);
-
-    // Subscribe to network changes once on mount
-    useEffect(() => {
-        const unsubscribe = NetInfo.addEventListener(state => {
-            const isDefinitelyOffline = state.isConnected === false || state.isInternetReachable === false;
-            const currentlyConnected = !isDefinitelyOffline;
-
-            // console.log('[NetworkContext] Network State Change:', state);
-            // console.log(`[NetworkContext] isConnected: ${state.isConnected}, isInternetReachable: ${state.isInternetReachable}, Effective: ${currentlyConnected}`);
-
-            setIsConnected(currentlyConnected);
-
-            if (!initialCheckDoneRef.current) {
-                if (state.isConnected === false && !isOfflineModeRef.current) {
-                    // console.log('[NetworkContext] Initial check: No connection detected (isConnected=false). Prompting offline mode.');
-                    promptOfflineMode();
-                } else {
-                    // console.log('[NetworkContext] Initial check: Connection detected or already in offline mode.');
-                }
-                initialCheckDoneRef.current = true;
-                setInitialCheckDone(true);
-                return; // avoid running subsequent logic on first pass
-            }
-
-            if (isDefinitelyOffline && !isOfflineModeRef.current) {
-                // console.log('[NetworkContext] Subsequent check: Connection lost and not in offline mode. Prompting offline mode.');
-                promptOfflineMode();
-            }
-        });
-
-        return () => {
-            unsubscribe();
-        };
-    }, []);
-
-    // Load initial state once on mount (non-sticky offline mode)
-    useEffect(() => {
-        const loadInitialState = async () => {
-            const storedTimestamp = await loadLastOfflineSaveTimestamp();
-            setIsOfflineMode(false);
-            await saveOfflineModeStatus(false);
-            setLastOfflineSaveTimestamp(storedTimestamp);
-            // console.log(`[NetworkContext] Initial Load: isOfflineMode reset to false, lastSave=${storedTimestamp}`);
-        };
-        loadInitialState();
-    }, []);
-
-    // Track whether the offline prompt is currently shown to avoid duplicates
+    // Refs für stabile Zugriffe im Listener
+    const isOfflineModeRef = useRef(false);
     const isPromptOpenRef = useRef(false);
+    const dismissedAtRef = useRef(0);       // Timestamp des letzten "Abbrechen"
+    const debounceTimerRef = useRef(null);  // Debounce-Timer für Offline-Erkennung
+    const mountedAtRef = useRef(Date.now()); // App-Start-Zeitpunkt
 
-    // Function to prompt the user about offline mode
-    const promptOfflineMode = () => {
-        // Prevent prompt if already in offline mode or a prompt is currently open
-        if (isOfflineModeRef.current || isPromptOpenRef.current) return;
+    // Ref synchron halten
+    useEffect(() => {
+        isOfflineModeRef.current = isOfflineMode;
+    }, [isOfflineMode]);
+
+    // Prompt mit allen Guards
+    const promptOfflineMode = useCallback(() => {
+        // Guard 1: Schon im Offline-Modus
+        if (isOfflineModeRef.current) return;
+        // Guard 2: Alert ist schon offen
+        if (isPromptOpenRef.current) return;
+        // Guard 3: Cooldown nach "Abbrechen" läuft noch
+        if (Date.now() - dismissedAtRef.current < DISMISS_COOLDOWN_MS) return;
+        // Guard 4: Grace Period nach App-Start (iOS-Startup-Flicker)
+        if (Date.now() - mountedAtRef.current < INITIAL_GRACE_PERIOD_MS) return;
 
         isPromptOpenRef.current = true;
+
         Alert.alert(
             "Keine Internetverbindung",
             "Keine Internetverbindung gefunden. Willst du in den Offline-Modus wechseln?",
@@ -90,7 +57,10 @@ export const NetworkProvider = ({ children }) => {
                     text: "Offline Modus",
                     onPress: () => {
                         isPromptOpenRef.current = false;
-                        toggleOfflineMode(true);
+                        // Ref sofort synchron setzen (nicht auf useEffect warten)
+                        isOfflineModeRef.current = true;
+                        setIsOfflineMode(true);
+                        saveOfflineModeStatus(true);
                     },
                 },
                 {
@@ -98,46 +68,107 @@ export const NetworkProvider = ({ children }) => {
                     style: "cancel",
                     onPress: () => {
                         isPromptOpenRef.current = false;
-                        // console.log("Offline mode cancelled by user.");
+                        dismissedAtRef.current = Date.now(); // Cooldown starten
                     },
                 },
             ],
             { cancelable: false }
         );
-    };
+    }, []);
 
-    // Function to toggle offline mode manually
+    // NetInfo Listener mit Debouncing
+    useEffect(() => {
+        const handleConnectivityChange = (state) => {
+            // null bei isInternetReachable = noch unbekannt → NICHT als offline werten
+            // Nur definitiv false = wirklich offline
+            const isDefinitelyOffline =
+                state.isConnected === false ||
+                (state.isInternetReachable === false && state.isInternetReachable !== null);
+
+            const isOnline = !isDefinitelyOffline;
+            setIsConnected(isOnline);
+
+            // Wenn wieder online: Debounce-Timer abbrechen
+            if (isOnline) {
+                if (debounceTimerRef.current) {
+                    clearTimeout(debounceTimerRef.current);
+                    debounceTimerRef.current = null;
+                }
+                return;
+            }
+
+            // Offline erkannt: Debounce starten (nur wenn noch kein Timer läuft)
+            if (!debounceTimerRef.current) {
+                debounceTimerRef.current = setTimeout(() => {
+                    debounceTimerRef.current = null;
+
+                    // Nach Ablauf nochmal aktiv prüfen ob wirklich offline
+                    NetInfo.fetch().then((currentState) => {
+                        const stillOffline =
+                            currentState.isConnected === false ||
+                            currentState.isInternetReachable === false;
+                        if (stillOffline) {
+                            promptOfflineMode();
+                        }
+                    });
+                }, OFFLINE_DEBOUNCE_MS);
+            }
+        };
+
+        const unsubscribe = NetInfo.addEventListener(handleConnectivityChange);
+
+        return () => {
+            unsubscribe();
+            if (debounceTimerRef.current) {
+                clearTimeout(debounceTimerRef.current);
+            }
+        };
+    }, [promptOfflineMode]);
+
+    // Initial state laden (non-sticky: Offline-Modus wird nicht gespeichert)
+    useEffect(() => {
+        const loadInitialState = async () => {
+            const storedTimestamp = await loadLastOfflineSaveTimestamp();
+            setIsOfflineMode(false);
+            isOfflineModeRef.current = false;
+            await saveOfflineModeStatus(false);
+            setLastOfflineSaveTimestamp(storedTimestamp);
+        };
+        loadInitialState();
+    }, []);
+
+    // Wenn Verbindung zurückkommt und Offline-Modus aktiv war → automatisch beenden
+    useEffect(() => {
+        if (isConnected && isOfflineMode) {
+            setIsOfflineMode(false);
+            isOfflineModeRef.current = false;
+            saveOfflineModeStatus(false);
+        }
+    }, [isConnected, isOfflineMode]);
+
+    // Offline-Modus manuell umschalten
     const toggleOfflineMode = useCallback(async (offline) => {
-        // console.log(`[NetworkContext] Toggling offline mode to: ${offline}`);
+        // Ref sofort synchron setzen
+        isOfflineModeRef.current = offline;
         setIsOfflineMode(offline);
         await saveOfflineModeStatus(offline);
-        if (offline && !isConnected) {
-             // console.log("[NetworkContext] Entered offline mode while disconnected.");
-        }
-        if (!offline && isConnected) {
-             // console.log("[NetworkContext] Exited offline mode while connected.");
-             // Potentially trigger data refresh here if needed
-        }
-    }, [isConnected]);
+    }, []); // keine unnötigen Dependencies
 
-    // Function to fetch and save necessary data for offline use
+    // Daten für Offline-Nutzung speichern
     const saveDataForOffline = useCallback(async () => {
         if (!isConnected) {
             Alert.alert("Keine Verbindung", "Du benötigst eine Internetverbindung, um Offline-Daten zu speichern.");
             return { success: false, error: "No internet connection" };
         }
         if (isSavingData) {
-            // console.log("[NetworkContext] Data saving already in progress.");
-            return { success: false, error: "Saving already in progress"};
+            return { success: false, error: "Saving already in progress" };
         }
 
-        // console.log("[NetworkContext] Starting offline data save...");
         setIsSavingData(true);
         let success = true;
         let errorMsg = null;
 
         try {
-            // Fetch and save data concurrently
             const [articlesResult, filtersResult, eventsResult, chatGroupsResult] = await Promise.allSettled([
                 supabase
                     .from('article_listings')
@@ -149,54 +180,43 @@ export const NetworkProvider = ({ children }) => {
                     .order('display_order', { ascending: true }),
                 supabase
                     .from('event_listings')
-                    .select('*'), // Fetch all event data including recurrence
+                    .select('*'),
                 supabase
                     .from('chat_group_listings')
                     .select('*')
-                    .neq('type', 'bot'), // Exclude bots
+                    .neq('type', 'bot'),
             ]);
 
-            // Process Articles
             if (articlesResult.status === 'fulfilled' && !articlesResult.value.error) {
                 await saveOfflineData('articles', articlesResult.value.data || []);
-                // console.log(`[NetworkContext] Saved ${articlesResult.value.data?.length ?? 0} articles.`);
             } else {
                 console.error("[NetworkContext] Error fetching articles:", articlesResult.reason || articlesResult.value.error);
-                throw new Error("Artikel konnten nicht geladen werden."); // Throw error if critical data fails
+                throw new Error("Artikel konnten nicht geladen werden.");
             }
 
-            // Process Article Filters
             if (filtersResult.status === 'fulfilled' && !filtersResult.value.error) {
                 await saveOfflineData('article_filters', filtersResult.value.data || []);
-                // console.log(`[NetworkContext] Saved ${filtersResult.value.data?.length ?? 0} filters.`);
             } else {
                 console.error("[NetworkContext] Error fetching article filters:", filtersResult.reason || filtersResult.value.error);
-                // Decide if this is critical enough to throw
             }
 
-            // Process Events
             if (eventsResult.status === 'fulfilled' && !eventsResult.value.error) {
                 await saveOfflineData('events', eventsResult.value.data || []);
-                // console.log(`[NetworkContext] Saved ${eventsResult.value.data?.length ?? 0} events.`);
             } else {
                 console.error("[NetworkContext] Error fetching events:", eventsResult.reason || eventsResult.value.error);
                 throw new Error("Events konnten nicht geladen werden.");
             }
 
-            // Process Chat Groups
             if (chatGroupsResult.status === 'fulfilled' && !chatGroupsResult.value.error) {
                 await saveOfflineData('chat_groups', chatGroupsResult.value.data || []);
-                // console.log(`[NetworkContext] Saved ${chatGroupsResult.value.data?.length ?? 0} chat groups.`);
             } else {
                 console.error("[NetworkContext] Error fetching chat groups:", chatGroupsResult.reason || chatGroupsResult.value.error);
                 throw new Error("Chat-Gruppen konnten nicht geladen werden.");
             }
 
-            // --- Update Timestamp ---
             const now = Date.now();
             setLastOfflineSaveTimestamp(now);
             await saveLastOfflineSaveTimestamp(now);
-            // console.log("[NetworkContext] Offline data save completed successfully.");
 
         } catch (err) {
             console.error("[NetworkContext] Error during offline data save:", err);
@@ -208,8 +228,7 @@ export const NetworkProvider = ({ children }) => {
         }
 
         return { success, error: errorMsg };
-    }, [isConnected, isSavingData]); // Add dependencies
-
+    }, [isConnected, isSavingData]);
 
     const value = {
         isConnected,
@@ -227,11 +246,10 @@ export const NetworkProvider = ({ children }) => {
     );
 };
 
-// Custom hook to use the context
 export const useNetwork = () => {
     const context = useContext(NetworkContext);
     if (context === undefined) {
         throw new Error('useNetwork must be used within a NetworkProvider');
     }
     return context;
-}; 
+};
