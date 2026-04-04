@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import ImageViewing from 'react-native-image-viewing';
 import { 
   View, 
   Text, 
@@ -126,6 +127,7 @@ const EventDetailScreen = ({ route, navigation }) => {
   
   // State for event data
   const [event, setEvent] = useState(null);
+  const [lightboxVisible, setLightboxVisible] = useState(false);
   const [isFullEventAvailable, setIsFullEventAvailable] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -892,11 +894,13 @@ const EventDetailScreen = ({ route, navigation }) => {
           
           {/* Display event image if available (access event.image_url safely) */}
           {event.image_url && (
-            <Image
-              source={{ uri: getTransformedImageUrl(event.image_url) }}
-              style={styles.eventImage}
-              resizeMode="cover"
-            />
+            <TouchableOpacity activeOpacity={0.9} onPress={() => setLightboxVisible(true)}>
+              <Image
+                source={{ uri: getTransformedImageUrl(event.image_url) }}
+                style={styles.eventImage}
+                resizeMode="cover"
+              />
+            </TouchableOpacity>
           )}
           
           {/* Access event.description safely */}
@@ -1067,6 +1071,18 @@ const EventDetailScreen = ({ route, navigation }) => {
           </View>
         )}
       </SafeAreaView>
+
+      {/* Lightbox */}
+      {event?.image_url && (
+        <ImageViewing
+          images={[{ uri: getTransformedImageUrl(event.image_url) }]}
+          imageIndex={0}
+          visible={lightboxVisible}
+          onRequestClose={() => setLightboxVisible(false)}
+          swipeToCloseEnabled
+          doubleTapToZoomEnabled
+        />
+      )}
     </Provider>
   );
 };

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import ImageViewing from 'react-native-image-viewing';
 import { 
   View, 
   Text, 
@@ -73,6 +74,9 @@ const ArticleDetailScreen = ({ route, navigation }) => {
   const [articleImages, setArticleImages] = useState([]);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const imageSliderRef = useRef(null);
+  // Lightbox
+  const [lightboxVisible, setLightboxVisible] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
   
   // State for file attachments
   const [articleAttachments, setArticleAttachments] = useState([]);
@@ -749,12 +753,17 @@ const ArticleDetailScreen = ({ route, navigation }) => {
                 contentContainerStyle={styles.imageSliderContent}
               >
                 {articleImages.map((imageUrl, index) => (
-                  <Image
+                  <TouchableOpacity
                     key={index}
-                    source={{ uri: getTransformedImageUrl(imageUrl) }}
-                    style={[styles.articleImage, { width: width - 30 }]}
-                    resizeMode="cover"
-                  />
+                    activeOpacity={0.9}
+                    onPress={() => { setLightboxIndex(index); setLightboxVisible(true); }}
+                  >
+                    <Image
+                      source={{ uri: getTransformedImageUrl(imageUrl) }}
+                      style={[styles.articleImage, { width: width - 30 }]}
+                      resizeMode="cover"
+                    />
+                  </TouchableOpacity>
                 ))}
               </ScrollView>
               {articleImages.length > 1 && (
@@ -934,6 +943,16 @@ const ArticleDetailScreen = ({ route, navigation }) => {
           </View>
         )}
       </SafeAreaView>
+
+      {/* Lightbox */}
+      <ImageViewing
+        images={articleImages.map(url => ({ uri: getTransformedImageUrl(url) }))}
+        imageIndex={lightboxIndex}
+        visible={lightboxVisible}
+        onRequestClose={() => setLightboxVisible(false)}
+        swipeToCloseEnabled
+        doubleTapToZoomEnabled
+      />
     </Provider>
   );
 };
