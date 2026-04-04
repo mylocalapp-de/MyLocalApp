@@ -96,7 +96,7 @@ const WelcomeScreen = ({ navigation }) => {
 
   const handleLoginSubmit = async () => {
     if (!identifier.trim()) {
-      setError('Bitte gib deinen Benutzernamen ein.');
+      setError('Bitte gib deinen Benutzernamen oder deine E-Mail-Adresse ein.');
       return;
     }
 
@@ -140,7 +140,7 @@ const WelcomeScreen = ({ navigation }) => {
 
   const handlePasswordResetRequest = async () => {
     if (!resetUsername.trim()) {
-      setError('Bitte gib deinen Benutzernamen ein.');
+      setError('Bitte gib deinen Benutzernamen oder deine E-Mail-Adresse ein.');
       return;
     }
 
@@ -379,12 +379,12 @@ const WelcomeScreen = ({ navigation }) => {
 
       <View style={styles.formContainer}>
         <View style={styles.inputContainer}>
-          <Text style={styles.inputLabel}>Benutzername</Text>
+          <Text style={styles.inputLabel}>Benutzername oder E-Mail</Text>
           <TextInput
             style={styles.textInput}
             value={identifier}
             onChangeText={setIdentifier}
-            placeholder="deinname"
+            placeholder="deinname oder name@mail.de"
             autoCapitalize="none"
             autoCorrect={false}
           />
@@ -473,18 +473,18 @@ const WelcomeScreen = ({ navigation }) => {
       <Text style={styles.preferencesTitle}>Passwort zurücksetzen</Text>
       <Text style={styles.preferencesText}>
         {resetStage === 'request'
-          ? 'Gib deinen Benutzernamen ein. Wir senden dir einen Code an deine hinterlegte E-Mail-Adresse oder Telefonnummer.'
+          ? 'Gib deinen Benutzernamen oder deine E-Mail-Adresse ein. Wir senden dir einen Code an deine hinterlegte E-Mail-Adresse oder Telefonnummer.'
           : 'Gib den Code ein und vergebe ein neues Passwort.'}
       </Text>
 
       <View style={styles.formContainer}>
         <View style={styles.inputContainer}>
-          <Text style={styles.inputLabel}>Benutzername</Text>
+          <Text style={styles.inputLabel}>Benutzername oder E-Mail</Text>
           <TextInput
             style={[styles.textInput, resetStage === 'confirm' && styles.disabledInput]}
             value={resetUsername}
             onChangeText={setResetUsername}
-            placeholder="deinname"
+            placeholder="deinname oder name@mail.de"
             autoCapitalize="none"
             autoCorrect={false}
             editable={resetStage === 'request'}
@@ -544,8 +544,8 @@ const WelcomeScreen = ({ navigation }) => {
         ) : (
           <View style={styles.infoBox}>
             <Text style={styles.infoText}>
-              Wir nutzen deine im Profil hinterlegte E-Mail-Adresse oder Telefonnummer. Die interne
-              `@users.mylocalapp.de`-Adresse ist dafür nicht relevant.
+              Wir nutzen deine im Profil hinterlegte E-Mail-Adresse oder Telefonnummer. Bei älteren
+              Accounts klappt das auch dann, wenn dein Login noch über eine normale E-Mail-Adresse läuft.
             </Text>
           </View>
         )}

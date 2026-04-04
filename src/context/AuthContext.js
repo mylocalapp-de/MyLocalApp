@@ -812,18 +812,18 @@ export const AuthProvider = ({ children, expoPushToken }) => {
     }
   };
 
-  const requestPasswordReset = async (username) => {
-    const normalizedUsername = normalizeUsername(username);
+  const requestPasswordReset = async (identifier) => {
+    const normalizedIdentifier = normalizeUsername(identifier);
 
-    if (!normalizedUsername) {
-      return { success: false, error: { message: 'Bitte gib deinen Benutzernamen ein.' } };
+    if (!normalizedIdentifier) {
+      return { success: false, error: { message: 'Bitte gib deinen Benutzernamen oder deine E-Mail-Adresse ein.' } };
     }
 
     try {
       const response = await fetch(`${PASSWORD_RESET_API_BASE}/request`, {
         method: 'POST',
         headers: buildApiHeaders(),
-        body: JSON.stringify({ username: normalizedUsername }),
+        body: JSON.stringify({ identifier: normalizedIdentifier, username: normalizedIdentifier }),
       });
       const result = await parseApiResponse(response);
 
@@ -841,12 +841,12 @@ export const AuthProvider = ({ children, expoPushToken }) => {
     }
   };
 
-  const completePasswordReset = async (username, code, newPassword) => {
-    const normalizedUsername = normalizeUsername(username);
+  const completePasswordReset = async (identifier, code, newPassword) => {
+    const normalizedIdentifier = normalizeUsername(identifier);
     const normalizedCode = String(code ?? '').trim();
 
-    if (!normalizedUsername) {
-      return { success: false, error: { message: 'Bitte gib deinen Benutzernamen ein.' } };
+    if (!normalizedIdentifier) {
+      return { success: false, error: { message: 'Bitte gib deinen Benutzernamen oder deine E-Mail-Adresse ein.' } };
     }
 
     if (!normalizedCode) {
@@ -862,7 +862,8 @@ export const AuthProvider = ({ children, expoPushToken }) => {
         method: 'POST',
         headers: buildApiHeaders(),
         body: JSON.stringify({
-          username: normalizedUsername,
+          identifier: normalizedIdentifier,
+          username: normalizedIdentifier,
           code: normalizedCode,
           newPassword,
         }),
