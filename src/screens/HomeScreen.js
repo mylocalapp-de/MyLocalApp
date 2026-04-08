@@ -269,13 +269,16 @@ const HomeScreen = ({ navigation }) => {
 
     let sortedArticles = [];
     if (filter === 'Aktuell') {
-      // Determine names of personal filters to exclude in 'Aktuell' (but NOT 'Aktuell' itself)
-      const personalFilterNames = availableFilters
-        .filter(f => f.enable_personal && f.name !== 'Aktuell')
-        .map(f => f.name);
-      // Show all articles except personal-board ones from OTHER categories, sorted by date
+      // Aktuell should not silently become an aggregate bucket for Verein-only posts.
+      // Personal-only filters stay excluded, and the dedicated "Vereine" stream stays separate.
+      const excludedFromAktuell = new Set(
+        availableFilters
+          .filter(f => (f.enable_personal && f.name !== 'Aktuell') || f.name === 'Vereine')
+          .map(f => f.name)
+      );
+
       sortedArticles = articles
-        .filter(article => !personalFilterNames.includes(article.type))
+        .filter(article => !excludedFromAktuell.has(article.type))
         .sort((a, b) => new Date(b.published_at) - new Date(a.published_at));
     } else {
       // Filter by the selected type, separating pinned articles
