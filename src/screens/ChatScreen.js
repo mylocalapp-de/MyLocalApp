@@ -4,7 +4,6 @@ import ScreenHeader from '../components/common/ScreenHeader';
 import { Ionicons } from '@expo/vector-icons';
 import { useOrganization } from '../context/OrganizationContext';
 import { useAuth } from '../context/AuthContext';
-import { useNetwork } from '../context/NetworkContext';
 import {
   fetchChatGroupTags,
   fetchChatGroupListings,
@@ -39,7 +38,6 @@ const isTrue = (val) => val === true || val === 'true' || val === '1';
 const ChatScreen = ({ navigation, route }) => {
   const { isOrganizationActive, activeOrganizationId, activeOrganization } = useOrganization();
   const { user, profile: currentUserProfile, displayName } = useAuth();
-  const { isOfflineMode, isConnected } = useNetwork();
 
   // Remote configuration
   const { config: appConfig, loading: appConfigLoading } = useAppConfig();
@@ -134,14 +132,6 @@ const ChatScreen = ({ navigation, route }) => {
 
   // Combined data fetching logic
   const fetchData = useCallback(async () => {
-    if (isOfflineMode) {
-        setError("Chats und Nachrichten sind offline nicht verfügbar.");
-        setIsLoading(false);
-        setIsLoadingDms(false);
-        setChatGroups([]);
-        setDmConversations([]);
-        return;
-    }
     if (!user || !currentUserProfile) {
         setError("Bitte melde dich an, um Chats und Nachrichten zu sehen.");
         setIsLoading(false);
@@ -195,7 +185,7 @@ const ChatScreen = ({ navigation, route }) => {
         setIsLoading(false); // Combined loading state
         setIsLoadingDms(false); // Also track DM loading specifically if needed
     }
-  }, [user, currentUserProfile, isOfflineMode, isOrganizationActive, activeOrganizationId, activeFilter, localUnreadCounts, localLastMessages]);
+  }, [user, currentUserProfile, isOrganizationActive, activeOrganizationId, activeFilter, localUnreadCounts, localLastMessages]);
 
   // Fetch data on initial load and when context/user changes
   useEffect(() => {
@@ -206,14 +196,14 @@ const ChatScreen = ({ navigation, route }) => {
   useEffect(() => {
       const unsubscribeFocus = navigation.addListener('focus', () => {
           // console.log('[ChatScreen] Focused, refetching data...');
-          if (!isOfflineMode && user) {
+          if (user) {
               fetchData(); // Use the combined fetch function
           } else {
               filterCombinedList(activeFilter, combinedList);
           }
       });
       return unsubscribeFocus;
-  }, [navigation, isOfflineMode, user, fetchData, activeFilter, combinedList]); // Add dependencies
+  }, [navigation, user, fetchData, activeFilter, combinedList]); // Add dependencies
 
   // --- Internal Fetch Functions ---
 
@@ -242,11 +232,6 @@ const ChatScreen = ({ navigation, route }) => {
     if (!user) {
         // console.log("[ChatScreen] No user, skipping DM fetch.");
         setDmError("Bitte anmelden.");
-        return [];
-    }
-    if (isOfflineMode) {
-        // console.log("[ChatScreen] Offline mode, skipping DM fetch.");
-        setDmError("DMs offline nicht verfügbar.");
         return [];
     }
 
@@ -493,12 +478,6 @@ const ChatScreen = ({ navigation, route }) => {
           setUserSearchResults([]);
           return;
       }
-      if (isOfflineMode) {
-          setUserSearchError('Benutzersuche ist offline nicht verfügbar.');
-          setIsSearchingUsers(false);
-          setUserSearchResults([]);
-          return;
-      }
 
       setIsSearchingUsers(true);
       setUserSearchError(null);
@@ -530,10 +509,6 @@ const ChatScreen = ({ navigation, route }) => {
       try {
           if (!user) {
               Alert.alert('Hinweis', 'Bitte melde dich an, um Nachrichten zu senden.');
-              return;
-          }
-          if (isOfflineMode) {
-              Alert.alert('Hinweis', 'Nachrichten sind offline nicht verfügbar.');
               return;
           }
           const { data: conversationId, error: rpcError } = await findOrCreateUserDmConversation(target.id);
@@ -568,7 +543,7 @@ const ChatScreen = ({ navigation, route }) => {
           setUserSearchError(null);
           setIsSearchingUsers(false);
       }
-  }, [searchQuery, user, isOfflineMode]);
+  }, [searchQuery, user]);
 
   // Filter combined list based on selected filter
   const filterCombinedList = (filter, listToFilter) => {
@@ -781,15 +756,6 @@ const ChatScreen = ({ navigation, route }) => {
         );
     }
 
-    if (isOfflineMode && !showLoading) {
-         return (
-            <View style={styles.centerMessageContainer}>
-                <Ionicons name="cloud-offline-outline" size={40} color="#888" />
-                <Text style={styles.centerMessageText}>Chats und Direktnachrichten sind offline nicht verfügbar.</Text>
-            </View>
-        );
-    }
-
     return (
       <FlatList
         data={filteredList}
@@ -938,7 +904,7 @@ const ChatScreen = ({ navigation, route }) => {
 
       {renderChatList()}
 
-      {user && !isOfflineMode && (
+      {user && (
         <TouchableOpacity
           style={styles.addButton}
           onPress={handleAddButtonPress}

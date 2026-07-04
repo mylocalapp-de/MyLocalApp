@@ -21,7 +21,6 @@ import {
 } from '../services/profileService';
 import { findOrCreateUserDmConversation } from '../services/dmService';
 import { useAuth } from '../context/AuthContext';
-import { useNetwork } from '../context/NetworkContext';
 import ScreenHeader from '../components/common/ScreenHeader'; // Assuming this path is correct
 import ArticleCard from '../components/ArticleCard'; // <<< CORRECT THIS LINE
 
@@ -31,7 +30,6 @@ const androidPaddingTop = height * 0.03;
 const UserProfileViewScreen = ({ route, navigation }) => {
     const { userId } = route.params;
     const { user, profile: currentUserProfile, updateProfile } = useAuth(); // Get current user, profile, and update function
-    const { isOfflineMode } = useNetwork();
 
     const [viewedProfile, setViewedProfile] = useState(null);
     const [userArticles, setUserArticles] = useState([]);
@@ -70,13 +68,8 @@ const UserProfileViewScreen = ({ route, navigation }) => {
             // console.log(`  - Is Viewed User Blocked? ${blockedCheck}`);
         }
 
-        if (isOfflineMode) {
-            setError("Profilansicht ist offline nicht verfügbar.");
-            setLoadingProfile(false);
-        } else {
-            fetchProfileData();
-        }
-    }, [userId, user, currentUserProfile, isOfflineMode]);
+        fetchProfileData();
+    }, [userId, user, currentUserProfile]);
 
     const fetchProfileData = async () => {
         setLoadingProfile(true);

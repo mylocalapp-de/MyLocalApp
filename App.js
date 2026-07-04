@@ -6,7 +6,6 @@ import AppNavigator from './src/navigation/AppNavigator';
 import { AppConfigProvider } from './src/context/AppConfigContext';
 import { OrganizationProvider } from './src/context/OrganizationContext';
 import { AuthProvider } from './src/context/AuthContext';
-import { NetworkProvider } from './src/context/NetworkContext';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import { Platform } from 'react-native';
@@ -235,6 +234,19 @@ export default function App() {
     loadBadgeCount();
   }, [loadBadgeCount]);
 
+  // --- One-time cleanup: remove leftovers of the removed offline mode ---
+  useEffect(() => {
+    (async () => {
+      try {
+        const keys = await AsyncStorage.getAllKeys();
+        const legacy = keys.filter(k => k.startsWith('@offline_data:') || k === '@app_status:isOfflineMode' || k === '@app_status:lastOfflineSaveTimestamp');
+        if (legacy.length) await AsyncStorage.multiRemove(legacy);
+      } catch (e) {
+        // Ignore — cleanup is best-effort
+      }
+    })();
+  }, []);
+
   // --- Notification Setup ---
   useEffect(() => {
     registerForPushNotificationsAsync().then(token => setExpoPushToken(token));
@@ -290,10 +302,8 @@ export default function App() {
       <AppConfigProvider>
         <AuthProvider expoPushToken={expoPushToken}>
           <OrganizationProvider>
-            <NetworkProvider>
-              <StatusBar style="auto" />
-              <AppNavigator />
-            </NetworkProvider>
+            <StatusBar style="auto" />
+            <AppNavigator />
           </OrganizationProvider>
         </AuthProvider>
       </AppConfigProvider>

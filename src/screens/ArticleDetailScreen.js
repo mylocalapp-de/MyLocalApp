@@ -38,8 +38,6 @@ import {
 import { checkOrgMembership } from '../services/profileService';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
-import { useNetwork } from '../context/NetworkContext';
-import { loadOfflineData } from '../utils/storageUtils';
 import { Menu, Provider } from 'react-native-paper';
 import RenderHTML from 'react-native-render-html';
 
@@ -58,12 +56,10 @@ const ArticleDetailScreen = ({ route, navigation }) => {
   const { articleId } = route.params;
   const { user, displayName } = useAuth();
   const { activeOrganizationId } = useOrganization();
-  const { isOfflineMode, isConnected } = useNetwork();
   const { width } = useWindowDimensions();
   
   // State for article data
   const [article, setArticle] = useState(null);
-  const [isFullArticleAvailable, setIsFullArticleAvailable] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [authorName, setAuthorName] = useState('Redaktion');
@@ -100,59 +96,11 @@ const ArticleDetailScreen = ({ route, navigation }) => {
   
   // Load article, comments, and reactions on component mount
   useEffect(() => {
-    if (isOfflineMode) {
-      loadArticleFromStorage();
-    } else {
-      fetchArticleData();
-    }
-  }, [articleId, isOfflineMode]);
-
-  // Load article data from storage
-  const loadArticleFromStorage = async () => {
-    // console.log(`[ArticleDetailScreen] Loading article ${articleId} from offline storage...`);
-    setLoading(true);
-    setError(null);
-    setArticle(null);
-    setIsFullArticleAvailable(false);
-    setComments([]);
-    setReactions({});
-
-    try {
-      const offlineArticlesList = await loadOfflineData('articles');
-
-      if (offlineArticlesList) {
-        const articleFromList = offlineArticlesList.find(item => item.id === articleId);
-
-        if (articleFromList) {
-          setArticle({ 
-            ...articleFromList,
-            content: articleFromList.content,
-            date: articleFromList.date,
-          });
-          setAuthorName(articleFromList.author_name || 'Redaktion');
-          setCanEditDelete(false);
-          setIsFullArticleAvailable(false);
-          // console.log(`[ArticleDetailScreen] Found partial article ${articleId} in offline list.`);
-        } else {
-          setError('Artikel offline nicht gefunden.');
-          // console.log(`[ArticleDetailScreen] Article ${articleId} not found in offline list.`);
-        }
-      } else {
-        setError('Offline-Daten nicht verfügbar. Bitte gehe online und speichere Daten.');
-        // console.log('[ArticleDetailScreen] Offline articles list not found.');
-      }
-    } catch (err) {
-      console.error('[ArticleDetailScreen] Error loading article from storage:', err);
-      setError('Fehler beim Laden des Offline-Artikels.');
-    } finally {
-      setLoading(false);
-    }
-  };
+    fetchArticleData();
+  }, [articleId]);
 
   // Fetch the full article data from Supabase
   const fetchArticleData = async () => {
-    if (isOfflineMode) return;
-
     try {
       setLoading(true);
       setError(null);
@@ -215,7 +163,7 @@ const ArticleDetailScreen = ({ route, navigation }) => {
   
   // Function to check if the current user can edit/delete
   const checkEditDeletePermission = async (articleData) => {
-    if (isOfflineMode || !user) {
+    if (!user) {
         setCanEditDelete(false);
         return;
     }
@@ -335,8 +283,6 @@ const ArticleDetailScreen = ({ route, navigation }) => {
   
   // Fetch comments for the article
   const fetchComments = async () => {
-    if (isOfflineMode) return;
-
     try {
       setLoadingComments(true);
       
@@ -358,8 +304,6 @@ const ArticleDetailScreen = ({ route, navigation }) => {
   
   // Fetch reaction counts for the article
   const fetchReactions = async () => {
-    if (isOfflineMode) return;
-
     try {
       const { data, error } = await fetchArticleReactionsService(articleId);
       
@@ -376,11 +320,6 @@ const ArticleDetailScreen = ({ route, navigation }) => {
   
   // Add a comment
   const addComment = async () => {
-    if (isOfflineMode) {
-        Alert.alert("Offline", "Kommentare sind offline nicht verfügbar.");
-        return;
-    }
-    
     if (!comment.trim()) return;
     
     if (!user) {
@@ -428,11 +367,6 @@ const ArticleDetailScreen = ({ route, navigation }) => {
   
   // Add a reaction
   const addReaction = async (emoji) => {
-    if (isOfflineMode) {
-        Alert.alert("Offline", "Reaktionen sind offline nicht verfügbar.");
-        return;
-    }
-    
     if (!user) {
       Alert.alert(
         'Permanenten Account erstellen',
@@ -496,11 +430,6 @@ const ArticleDetailScreen = ({ route, navigation }) => {
   
   // Handle article deletion
   const handleDeleteArticle = async () => {
-    if (isOfflineMode) {
-        Alert.alert("Offline", "Löschen ist offline nicht verfügbar.");
-        return;
-    }
-    
     if (!canEditDelete) {
       Alert.alert('Fehler', 'Du bist nicht berechtigt, diesen Artikel zu löschen.');
       return;
@@ -554,11 +483,6 @@ const ArticleDetailScreen = ({ route, navigation }) => {
   
   // Handle article editing
   const handleEditArticle = () => {
-    if (isOfflineMode) {
-        Alert.alert("Offline", "Bearbeiten ist offline nicht verfügbar.");
-        return;
-    }
-    
     if (!canEditDelete) {
       Alert.alert('Fehler', 'Du bist nicht berechtigt, diesen Artikel zu bearbeiten.');
       return;
@@ -626,7 +550,6 @@ const ArticleDetailScreen = ({ route, navigation }) => {
         <View style={styles.commentHeader}>
           <TouchableOpacity
             onPress={() => navigation.navigate('UserProfileView', { userId: item.user_id })}
-            disabled={isOfflineMode}
           >
             <Text style={styles.commentUser}>{userName}</Text>
           </TouchableOpacity>
@@ -696,7 +619,7 @@ const ArticleDetailScreen = ({ route, navigation }) => {
           <View style={styles.headerTitle}>
             <Text style={styles.headerType}>{article?.type || 'Artikel'}</Text>
           </View>
-          {canEditDelete && !isOfflineMode && (
+          {canEditDelete && (
             <Menu
               visible={menuVisible}
               onDismiss={closeMenu}
@@ -785,7 +708,7 @@ const ArticleDetailScreen = ({ route, navigation }) => {
           <View style={styles.articleMeta}>
             <Text style={styles.date}>{article?.date || '...'}</Text>
             <TouchableOpacity 
-              disabled={isOfflineMode || (!article?.organization_id && !article?.author_id)} 
+              disabled={!article?.organization_id && !article?.author_id}
               onPress={() => {
                   if (article?.organization_id) {
                      navigation.navigate('OrganizationProfileView', { organizationId: article.organization_id });
@@ -807,36 +730,26 @@ const ArticleDetailScreen = ({ route, navigation }) => {
             </TouchableOpacity>
           </View>
           
-          {/* Conditionally render HTML content or offline message */}
-          {isFullArticleAvailable ? (
-             <RenderHTML
-                contentWidth={width - 30}
-                source={{ html: article?.content || '' }}
-                tagsStyles={htmlStyles}
-                renderersProps={{
-                  a: {
-                    onPress: (_evt, href) => {
-                      if (!href) return;
-                      if (href.startsWith('meinhavelaue://')) {
-                        // Deep-link pattern: meinhavelaue://events/<uuid>
-                        const parts = href.split('/');
-                        const eventId = parts[parts.length - 1];
-                        navigation.navigate('EventDetail', { eventId });
-                      } else {
-                        Linking.openURL(href);
-                      }
-                    }
-                  }
-                }}
-             />
-          ) : (
-              <View style={styles.offlineContentWarning}>
-                  <Ionicons name="cloud-offline-outline" size={24} color="#ff9800" />
-                  <Text style={styles.offlineContentText}>
-                      Vollständiger Artikelinhalt ist im Offline-Modus nicht verfügbar.
-                  </Text>
-              </View>
-          )}
+          <RenderHTML
+             contentWidth={width - 30}
+             source={{ html: article?.content || '' }}
+             tagsStyles={htmlStyles}
+             renderersProps={{
+               a: {
+                 onPress: (_evt, href) => {
+                   if (!href) return;
+                   if (href.startsWith('meinhavelaue://')) {
+                     // Deep-link pattern: meinhavelaue://events/<uuid>
+                     const parts = href.split('/');
+                     const eventId = parts[parts.length - 1];
+                     navigation.navigate('EventDetail', { eventId });
+                   } else {
+                     Linking.openURL(href);
+                   }
+                 }
+               }
+             }}
+          />
 
           {/* File Attachments Section */}
           {articleAttachments.length > 0 && (
@@ -867,74 +780,66 @@ const ArticleDetailScreen = ({ route, navigation }) => {
           
           <View style={styles.divider} />
           
-          {/* Conditionally render interactions section */}
-          {!isOfflineMode && (
-              <>
-                  {renderReactions()}
-                  <View style={styles.actionBar}>
-                      <TouchableOpacity
-                          style={styles.actionButton}
-                          onPress={() => setShowEmojiPicker(!showEmojiPicker)}
-                      >
-                          <Ionicons name="happy-outline" size={20} color="#4285F4" />
-                          <Text style={styles.actionText}>Reaktion</Text>
-                      </TouchableOpacity>
-                      {renderEmojiPicker()}
-                  </View>
-                  <View style={styles.commentsSection}>
-                      <Text style={styles.commentsHeader}>Kommentare ({comments.length})</Text>
-                      {loadingComments ? (
-                          <ActivityIndicator size="small" color="#4285F4" style={styles.commentsLoading} />
-                      ) : (
-                          <FlatList
-                              data={comments}
-                              renderItem={renderComment}
-                              keyExtractor={item => item.id.toString()}
-                              scrollEnabled={false}
-                              ListEmptyComponent={
-                                  <Text style={styles.emptyCommentsText}>
-                                      Noch keine Kommentare. Sei der Erste, der einen Kommentar hinterlässt!
-                                  </Text>
-                              }
-                          />
-                      )}
-                  </View>
-              </>
-          )}
+          {renderReactions()}
+          <View style={styles.actionBar}>
+              <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={() => setShowEmojiPicker(!showEmojiPicker)}
+              >
+                  <Ionicons name="happy-outline" size={20} color="#4285F4" />
+                  <Text style={styles.actionText}>Reaktion</Text>
+              </TouchableOpacity>
+              {renderEmojiPicker()}
+          </View>
+          <View style={styles.commentsSection}>
+              <Text style={styles.commentsHeader}>Kommentare ({comments.length})</Text>
+              {loadingComments ? (
+                  <ActivityIndicator size="small" color="#4285F4" style={styles.commentsLoading} />
+              ) : (
+                  <FlatList
+                      data={comments}
+                      renderItem={renderComment}
+                      keyExtractor={item => item.id.toString()}
+                      scrollEnabled={false}
+                      ListEmptyComponent={
+                          <Text style={styles.emptyCommentsText}>
+                              Noch keine Kommentare. Sei der Erste, der einen Kommentar hinterlässt!
+                          </Text>
+                      }
+                  />
+              )}
+          </View>
         </ScrollView>
         
-        {/* Conditionally render comment input */}
-        {!isOfflineMode && (
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 90}
-            style={styles.inputContainer}
-          >
-            <View style={styles.inputRow}>
-              <TextInput
-                style={styles.input}
-                placeholder="Schreibe einen Kommentar..."
-                value={comment}
-                onChangeText={setComment}
-                multiline
-              />
-              <TouchableOpacity
-                style={[
-                  styles.sendButton,
-                  (comment.trim() === '' || addingComment) && styles.sendButtonDisabled
-                ]}
-                onPress={addComment}
-                disabled={comment.trim() === '' || addingComment}
-              >
-                {addingComment ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Ionicons name="send" size={20} color={comment.trim() === '' ? "#ccc" : "#fff"} />
-                )}
-              </TouchableOpacity>
-            </View>
-          </KeyboardAvoidingView>
-        )}
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 90}
+          style={styles.inputContainer}
+        >
+          <View style={styles.inputRow}>
+            <TextInput
+              style={styles.input}
+              placeholder="Schreibe einen Kommentar..."
+              value={comment}
+              onChangeText={setComment}
+              multiline
+            />
+            <TouchableOpacity
+              style={[
+                styles.sendButton,
+                (comment.trim() === '' || addingComment) && styles.sendButtonDisabled
+              ]}
+              onPress={addComment}
+              disabled={comment.trim() === '' || addingComment}
+            >
+              {addingComment ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Ionicons name="send" size={20} color={comment.trim() === '' ? "#ccc" : "#fff"} />
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
         
         {isDeleting && (
           <View style={styles.deleteOverlay}>
@@ -1238,22 +1143,6 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-  },
-  offlineContentWarning: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff3e0',
-    padding: 15,
-    borderRadius: 8,
-    marginVertical: 15,
-    borderWidth: 1,
-    borderColor: '#ffe0b2',
-  },
-  offlineContentText: {
-    marginLeft: 10,
-    color: '#e65100',
-    fontSize: 14,
-    flex: 1,
   },
   attachmentsSection: {
     marginTop: 20,

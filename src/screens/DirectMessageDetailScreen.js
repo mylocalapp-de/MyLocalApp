@@ -25,7 +25,6 @@ import { markDmConversationRead } from '../services/chatService';
 import { fetchOrganizationLogo, fetchProfile } from '../services/profileService';
 import { uploadImage as uploadImageService } from '../services/uploadService';
 import { useAuth } from '../context/AuthContext';
-import { useNetwork } from '../context/NetworkContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import 'react-native-get-random-values';
@@ -62,7 +61,6 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
   } = route.params;
   
   const { user, displayName } = useAuth();
-  const { isOfflineMode } = useNetwork();
   const { isOrganizationActive, activeOrganization } = useOrganization();
 
   const [message, setMessage] = useState('');
@@ -77,7 +75,7 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
 
   // Mark DM conversation as read on server
   const markConversationAsRead = async () => {
-    if (user && conversationId && !isOfflineMode) {
+    if (user && conversationId) {
       try {
         await markDmConversationRead(conversationId);
       } catch (err) {
@@ -88,17 +86,14 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
 
   // Load messages when component mounts or conversationId changes
   useEffect(() => {
-    if (conversationId && !isOfflineMode) {
+    if (conversationId) {
       fetchMessages();
       markConversationAsRead();
-    } else if (isOfflineMode) {
-      setError("Nachrichten sind offline nicht verfügbar.");
-      setLoading(false);
     } else {
         setError("Konversations-ID fehlt.");
         setLoading(false);
     }
-  }, [conversationId, isOfflineMode]);
+  }, [conversationId]);
 
   // Also mark as read when screen is focused (coming back from another screen)
   useEffect(() => {
@@ -106,11 +101,11 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
       markConversationAsRead();
     });
     return () => unsubscribeFocus();
-  }, [navigation, conversationId, user, isOfflineMode]);
+  }, [navigation, conversationId, user]);
 
   // Subscribe to new messages in this conversation
   useEffect(() => {
-    if (isOfflineMode || !conversationId) return;
+    if (!conversationId) return;
 
     const channel = subscribeToDmConversation(conversationId, (payload) => {
           // console.log('New DM received:', payload.new);
@@ -197,12 +192,11 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
       removeChannel(channel);
     };
     // Dependencies: include isOrgConversation and recipientName for sender resolution
-  }, [conversationId, isOfflineMode, user, displayName, recipientName, isOrgConversation]);
+  }, [conversationId, user, displayName, recipientName, isOrgConversation]);
 
   // --- NEW: Fetch header image --- 
   useEffect(() => {
     const fetchHeaderImage = async () => {
-        if (isOfflineMode) return;
         let imageUrl = null;
         try {
             if (isOrgConversation && organizationId) {
@@ -224,7 +218,7 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
     };
 
     fetchHeaderImage();
-  }, [isOrgConversation, organizationId, recipientId, isOfflineMode]);
+  }, [isOrgConversation, organizationId, recipientId]);
   // --- END NEW: Fetch header image ---
 
   // Fetch messages for the current conversation
@@ -283,10 +277,6 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
   };
 
   const pickImage = async () => {
-     if (isOfflineMode) {
-      Alert.alert("Offline", "Bilder können offline nicht ausgewählt werden.");
-      return;
-    }
      if (!user) {
          Alert.alert("Anmeldung erforderlich", "Bitte melde dich an, um Bilder zu senden.");
          return;
@@ -312,7 +302,7 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
   };
 
   const uploadImage = async (asset) => {
-    if (isOfflineMode || !asset || !asset.base64) return null;
+    if (!asset || !asset.base64) return null;
 
     setIsUploading(true);
     try {
@@ -327,10 +317,6 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
   };
 
   const sendMessage = async () => {
-    if (isOfflineMode) {
-      Alert.alert("Offline", "Nachrichten können offline nicht gesendet werden.");
-      return;
-    }
     if (!user) {
       Alert.alert("Anmeldung erforderlich", "Bitte melde dich an, um Nachrichten zu senden.");
       return;
@@ -416,8 +402,8 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
       <View style={styles.messageContainer}>
         {/* Display sender name ABOVE bubble only if NOT sent by current user */}
         {!isMe && (
-            <TouchableOpacity 
-                disabled={isOfflineMode || !canNavigateToProfile} // Disable if offline or cannot navigate
+            <TouchableOpacity
+                disabled={!canNavigateToProfile} // Disable if cannot navigate
                 onPress={() => canNavigateToProfile && navigation.navigate('UserProfileView', { userId: item.user_id })}
             >
                 <Text style={[styles.messageSenderName, styles.otherMessageSenderName]}>
@@ -473,7 +459,7 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
         {/* --- Conditional Touchable Wrapper for Avatar/Name --- */}
         <TouchableOpacity
           style={styles.headerTouchableContent} // Use a new style for the touchable area
-          disabled={isOfflineMode || (!canNavigateToUserProfile && !canNavigateToOrgProfile)} // Disable if offline or neither navigation possible
+          disabled={!canNavigateToUserProfile && !canNavigateToOrgProfile} // Disable if neither navigation possible
           onPress={() => {
             if (canNavigateToOrgProfile) {
               navigation.navigate('OrganizationProfileView', { organizationId: organizationId });
@@ -530,9 +516,9 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
           <Text style={styles.errorText}>{error}</Text>
            <TouchableOpacity
             style={styles.retryButton}
-            onPress={() => { isOfflineMode ? navigation.goBack() : fetchMessages() }}
+            onPress={() => { fetchMessages() }}
           >
-            <Text style={styles.retryButtonText}>{isOfflineMode ? 'Zurück' : 'Erneut versuchen'}</Text>
+            <Text style={styles.retryButtonText}>Erneut versuchen</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -557,12 +543,12 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
           style={styles.messagesList}
           contentContainerStyle={styles.messagesContent}
           inverted
-          onRefresh={isOfflineMode ? undefined : fetchMessages}
-          refreshing={!isOfflineMode && loading}
+          onRefresh={fetchMessages}
+          refreshing={loading}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>
-                {isOfflineMode ? 'Offline keine Nachrichten.' : 'Schreibe die erste Nachricht!'}
+                Schreibe die erste Nachricht!
               </Text>
             </View>
           }
@@ -592,7 +578,7 @@ const DirectMessageDetailScreen = ({ route, navigation }) => {
             </View>
           )}
 
-          {!isOfflineMode && user && (
+          {user && (
              <View style={styles.inputRow}>
               <TouchableOpacity
                   style={styles.imageButton}

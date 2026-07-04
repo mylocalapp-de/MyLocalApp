@@ -14,12 +14,10 @@ import ScreenHeader from '../components/common/ScreenHeader'; // Reuse if applic
 import { Ionicons } from '@expo/vector-icons';
 import { fetchDmConversations, subscribeToDmListChanges, removeChannel } from '../services/dmService';
 import { useAuth } from '../context/AuthContext';
-import { useNetwork } from '../context/NetworkContext';
 import { useOrganization } from '../context/OrganizationContext'; // <-- Import useOrganization
 
 const DirectMessagesScreen = ({ navigation }) => {
   const { user } = useAuth();
-  const { isOfflineMode } = useNetwork();
   const { isOrganizationActive, activeOrganizationId, activeOrganization } = useOrganization(); // <-- Get org context
   const [conversations, setConversations] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -31,16 +29,11 @@ const DirectMessagesScreen = ({ navigation }) => {
       setLoading(false);
       return;
     }
-    if (!isOfflineMode) {
-      fetchConversations();
-    } else {
-      setError("Direktnachrichten sind offline nicht verfügbar.");
-      setLoading(false);
-    }
+    fetchConversations();
 
     // Listen for focus to refresh data (optional, but good for UX)
     const unsubscribeFocus = navigation.addListener('focus', () => {
-      if (!isOfflineMode && user) {
+      if (user) {
         fetchConversations();
       }
     });
@@ -51,7 +44,7 @@ const DirectMessagesScreen = ({ navigation }) => {
     // 2. Inserts into direct_messages (to potentially trigger a re-sort or update last message preview)
     
     let conversationChangesChannel;
-    if (!isOfflineMode && user) {
+    if (user) {
         // console.log('[DMScreen] Setting up real-time subscription...');
         conversationChangesChannel = subscribeToDmListChanges((payload) => {
                     if (payload.table === 'dm_conversations' || payload.table === 'direct_messages') {
@@ -68,7 +61,7 @@ const DirectMessagesScreen = ({ navigation }) => {
       }
     };
 
-  }, [user, isOfflineMode, navigation]);
+  }, [user, navigation]);
 
   const fetchConversations = async () => {
     // Prevent race condition - Re-enabled based on further thought
@@ -206,7 +199,7 @@ const DirectMessagesScreen = ({ navigation }) => {
       );
     }
 
-    if (error && !isOfflineMode) {
+    if (error) {
       return (
         <View style={styles.centerContainer}>
           <Ionicons name="alert-circle-outline" size={40} color="#ff3b30" />
@@ -216,14 +209,6 @@ const DirectMessagesScreen = ({ navigation }) => {
           </TouchableOpacity>
         </View>
       );
-    }
-    if (isOfflineMode) {
-         return (
-            <View style={styles.centerContainer}>
-                <Ionicons name="cloud-offline-outline" size={40} color="#888" />
-                <Text style={styles.infoText}>{error || "Direktnachrichten sind offline nicht verfügbar."}</Text>
-            </View>
-        );
     }
 
     return (
@@ -235,7 +220,7 @@ const DirectMessagesScreen = ({ navigation }) => {
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         refreshing={loading} // Show refresh indicator while loading
-        onRefresh={isOfflineMode ? undefined : fetchConversations} // Only allow pull-to-refresh online
+        onRefresh={fetchConversations}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Ionicons name="chatbubbles-outline" size={40} color="#888" />
@@ -263,8 +248,8 @@ const DirectMessagesScreen = ({ navigation }) => {
       <ScreenHeader title="Direktnachrichten" showBackButton={true} navigation={navigation}/>
       {renderContent()}
 
-      {/* Floating Action Button - Hide when offline OR in Org context */}
-      {user && !isOfflineMode && !isOrganizationActive && ( 
+      {/* Floating Action Button - Hide in Org context */}
+      {user && !isOrganizationActive && (
         <TouchableOpacity
           style={styles.addButton}
           onPress={() => navigation.navigate('NewDirectMessage')}

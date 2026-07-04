@@ -36,8 +36,6 @@ import {
 import { uploadImage as uploadImageService } from '../services/uploadService';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
-import { useNetwork } from '../context/NetworkContext';
-import { loadOfflineData } from '../utils/storageUtils';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 // uuid and base64-arraybuffer now handled by uploadService
@@ -59,7 +57,6 @@ const ChatDetailScreen = ({ route, navigation }) => {
   const { chatGroup: initialChatGroup, onReturn } = route.params;
   const { user, displayName, userOrganizations, expoPushToken } = useAuth();
   const { activeOrganizationId } = useOrganization();
-  const { isOfflineMode, isConnected } = useNetwork();
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
   const [chatGroup, setChatGroup] = useState(initialChatGroup);
@@ -320,11 +317,6 @@ const ChatDetailScreen = ({ route, navigation }) => {
 
   // Function to pick an image
   const pickImage = async () => {
-    if (isOfflineMode) {
-      Alert.alert("Offline", "Bilder können offline nicht ausgewählt werden.");
-      return;
-    }
-    
     // Check if user is authenticated
     if (!user) {
       showAuthPrompt();
@@ -353,7 +345,6 @@ const ChatDetailScreen = ({ route, navigation }) => {
 
   // Function to upload image and return URL
   const uploadImage = async (asset) => {
-    if (isOfflineMode) return null; // Cannot upload offline
     if (!asset || !asset.base64) return null; // Check if asset and base64 data exist
 
     setIsUploading(true);
@@ -394,18 +385,14 @@ const ChatDetailScreen = ({ route, navigation }) => {
 
   // Auto-scroll to the latest message once after initial load
   useEffect(() => {
-    if (!isOfflineMode && !loading && messages.length > 0 && !hasAutoScrolled) {
+    if (!loading && messages.length > 0 && !hasAutoScrolled) {
       scrollToBottom();
       setHasAutoScrolled(true);
     }
-  }, [messages, loading, isOfflineMode, hasAutoScrolled]);
+  }, [messages, loading, hasAutoScrolled]);
 
   // Fetch messages for the current chat group
   const fetchMessages = async () => {
-    if (isOfflineMode) {
-      setLoading(false); // Ensure loading stops if we somehow enter here while offline
-      return;
-    }
     try {
       setLoading(true);
       setError(null);
@@ -549,11 +536,6 @@ const ChatDetailScreen = ({ route, navigation }) => {
   };
 
   const sendMessage = async () => {
-    if (isOfflineMode) {
-      Alert.alert("Offline", "Nachrichten können offline nicht gesendet werden.");
-      return;
-    }
-    
     // Check if user is authenticated
     if (!user) {
       showAuthPrompt();
@@ -668,11 +650,6 @@ const ChatDetailScreen = ({ route, navigation }) => {
   };
 
   const addReaction = async (messageId, emoji) => {
-    if (isOfflineMode) {
-      Alert.alert("Offline", "Reaktionen sind offline nicht verfügbar.");
-      return;
-    }
-    
     // Check if user is authenticated
     if (!user) {
       showAuthPrompt();
@@ -717,11 +694,6 @@ const ChatDetailScreen = ({ route, navigation }) => {
   };
   
   const addComment = async (messageId, commentText) => {
-    if (isOfflineMode) {
-      Alert.alert("Offline", "Kommentare sind offline nicht verfügbar.");
-      return;
-    }
-    
     // Check if user is authenticated
     if (!user) {
       showAuthPrompt();
@@ -793,7 +765,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
         {item.comments.map(comment => (
           <View key={comment.id} style={styles.commentBubble}>
             <TouchableOpacity
-              disabled={isOfflineMode || !comment.user_id} // Disable if offline or no user ID
+              disabled={!comment.user_id} // Disable if no user ID
               onPress={() => comment.user_id && navigation.navigate('UserProfileView', { userId: comment.user_id })}
             >
                 <Text style={styles.commentSender}>{comment.sender}</Text>
@@ -858,8 +830,8 @@ const ChatDetailScreen = ({ route, navigation }) => {
 
   const renderItem = ({ item }) => {
     const isMe = user && item.user_id === user.id;
-    const canReact = !isBot() && !isOfflineMode && user;
-    const canComment = !isBroadcast() && !isBot() && !isOfflineMode && user;
+    const canReact = !isBot() && user;
+    const canComment = !isBroadcast() && !isBot() && user;
 
     // Transform image url
     const transformedImageUrl = item.image_url ? getTransformedImageUrl(item.image_url) : null;
@@ -880,7 +852,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
             isOpenChat() && item.user_id ? (
               // Make name clickable in Open Chats if user_id exists
               <TouchableOpacity
-                disabled={isOfflineMode || !item.user_id}
+                disabled={!item.user_id}
                 onPress={() => item.user_id && navigation.navigate('UserProfileView', { userId: item.user_id })}
               >
                 <Text style={styles.messageSender}>{item.sender}</Text>
@@ -926,7 +898,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
     // console.log(`Render Header: checking=${checkingSubscription}, toggling=${togglingSubscription}, hasToken=${!!expoPushToken}`);
 
     // Determine if the header title should be clickable
-    const isOrgProfileLinkable = isBroadcast() && chatGroup?.organization_id && !isOfflineMode;
+    const isOrgProfileLinkable = isBroadcast() && chatGroup?.organization_id;
 
     return (
       <View style={styles.header}>
@@ -956,7 +928,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
           <TouchableOpacity 
             style={styles.notificationButton} 
             onPress={toggleSubscription}
-            disabled={checkingSubscription || togglingSubscription || isOfflineMode}
+            disabled={checkingSubscription || togglingSubscription}
           >
             {checkingSubscription || togglingSubscription ? (
               <ActivityIndicator size="small" color="#4285F4" />
@@ -964,7 +936,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
               <Ionicons 
                 name={isSubscribed ? "notifications" : "notifications-outline"} 
                 size={24} 
-                color={(isOfflineMode || checkingSubscription || togglingSubscription) ? "#ccc" : (isSubscribed ? "#4285F4" : "#666")}
+                color={(checkingSubscription || togglingSubscription) ? "#ccc" : (isSubscribed ? "#4285F4" : "#666")}
               />
             )}
           </TouchableOpacity>
@@ -980,7 +952,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
         <View style={styles.centerContent}>
           <ActivityIndicator size="large" color="#4285F4" />
           <Text style={styles.loadingText}>
-            {isOfflineMode ? 'Gruppeninfo laden...' : 'Nachrichten werden geladen...'}
+            Nachrichten werden geladen...
           </Text>
         </View>
       </SafeAreaView>
@@ -1033,21 +1005,15 @@ const ChatDetailScreen = ({ route, navigation }) => {
               scrollToBottom();
             }
           }}
-          onRefresh={isOfflineMode ? undefined : fetchMessages}
-          refreshing={!isOfflineMode && loading}
+          onRefresh={fetchMessages}
+          refreshing={loading}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              {isOfflineMode ? (
-                <Text style={styles.emptyText}>
-                  Nachrichten sind im Offline-Modus nicht verfügbar.
-                </Text>
-              ) : (
-                <Text style={styles.emptyText}>
-                  {isBot() ? 'Frag den Dorfbot etwas über dein Dorf!' :
-                   isOpenChat() ? 'Sei der Erste, der eine Nachricht schreibt!' :
-                   'Keine Ankündigungen vorhanden.'}
-                </Text>
-              )}
+              <Text style={styles.emptyText}>
+                {isBot() ? 'Frag den Dorfbot etwas über dein Dorf!' :
+                 isOpenChat() ? 'Sei der Erste, der eine Nachricht schreibt!' :
+                 'Keine Ankündigungen vorhanden.'}
+              </Text>
             </View>
           }
         />
@@ -1063,16 +1029,16 @@ const ChatDetailScreen = ({ route, navigation }) => {
         )}
         
         {(() => {
-            // Revised condition: Show input if not offline AND (
-            //   it's an open chat OR 
-            //   commenting OR 
-            //   it's the bot OR 
+            // Revised condition: Show input if (
+            //   it's an open chat OR
+            //   commenting OR
+            //   it's the bot OR
             //   it's a broadcast group AND the user is a member of the org owning this group
             // )
-            const showInputCondition = !isOfflineMode && (
+            const showInputCondition = (
                 (isOpenChat()) || // Removed !isBroadcast() check, isOpenChat implies it's not broadcast
-                commentingOnMessageId !== null || 
-                isBot() || 
+                commentingOnMessageId !== null ||
+                isBot() ||
                 (isBroadcast() && isOrgMember) // Removed the check for activeOrganizationId === chatGroup?.organization_id
             );
             
@@ -1182,7 +1148,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
         </View>
 
         {/* Image preview */}
-        {!isOfflineMode && imageAsset && (
+        {imageAsset && (
           <View style={styles.imagePreviewContainer}>
             <Image 
               source={{ uri: imageAsset.uri }} 
