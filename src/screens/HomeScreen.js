@@ -6,6 +6,7 @@ import { useOrganization } from '../context/OrganizationContext';
 import { useAuth } from '../context/AuthContext';
 import { useNetwork } from '../context/NetworkContext';
 import { loadOfflineData } from '../utils/storageUtils';
+import { makeExcerpt } from '../utils/htmlUtils';
 import {
   fetchArticleFilters,
   fetchArticleListings,
@@ -359,11 +360,7 @@ const HomeScreen = ({ navigation }) => {
         const publishDate = article?.published_at ? new Date(article.published_at) : new Date(); // Default to now if missing
         const formattedDate = `${publishDate.getDate().toString().padStart(2, '0')}.${(publishDate.getMonth() + 1).toString().padStart(2, '0')}.${publishDate.getFullYear()}`;
         
-        const contentString = article?.content ?? ''; // Default to empty string if null/undefined
-        const plainTextContent = contentString.replace(/<[^>]*>/g, '');
-        const truncatedContent = plainTextContent.length > 100
-            ? plainTextContent.substring(0, 100) + '...'
-            : plainTextContent;
+        const truncatedContent = makeExcerpt(article?.content ?? '', 100);
             
         return {
             id: article?.id ?? Math.random().toString(), // Use a random fallback ID if necessary
