@@ -1,6 +1,6 @@
 /**
  * PersonalProfileSection — Organizations, preferences, visibility, about me,
- * account settings, offline mode, legal links.
+ * account settings, legal links.
  */
 
 import React from 'react';
@@ -29,9 +29,6 @@ const PersonalProfileSection = ({
   profile,
   userOrganizations,
   isOrgContextLoading,
-  isConnected,
-  lastOfflineSaveTimestamp,
-  isSavingData,
   isUpdatingVisibility,
   navigation,
   onSwitchToOrg,
@@ -40,17 +37,10 @@ const PersonalProfileSection = ({
   onOpenAccountSettings,
   onOpenMakePermanentSettings,
   onOpenCreateAccountModal,
-  onSaveDataForOffline,
   onUpdateVisibility,
   userId,
 }) => {
   const hasNoOrganizations = !userOrganizations || userOrganizations.length === 0;
-
-  const lastSaveDate = lastOfflineSaveTimestamp
-    ? new Date(lastOfflineSaveTimestamp).toLocaleString('de-DE', {
-        day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
-      })
-    : 'nie';
 
   return (
     <>
@@ -173,21 +163,6 @@ const PersonalProfileSection = ({
           </TouchableOpacity>
         </View>
       )}
-
-      {/* Offline */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Offline Modus</Text>
-        <TouchableOpacity
-          style={[styles.button, styles.saveOfflineButton, (!isConnected || isSavingData) && styles.buttonDisabled]}
-          onPress={onSaveDataForOffline}
-          disabled={!isConnected || isSavingData}
-        >
-          {isSavingData ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="download-outline" size={20} color="#fff" style={styles.buttonIcon} />}
-          <Text style={styles.saveOfflineButtonText}>{isSavingData ? 'Speichern...' : 'Daten für Offline-Modus speichern'}</Text>
-        </TouchableOpacity>
-        <Text style={styles.lastSaveText}>Zuletzt gespeichert: {lastSaveDate}</Text>
-        {!isConnected && <Text style={styles.offlineWarningText}>Keine Internetverbindung zum Speichern vorhanden.</Text>}
-      </View>
 
       {/* Legal */}
       <View style={styles.card}>

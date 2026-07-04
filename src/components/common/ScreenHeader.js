@@ -4,7 +4,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFonts, Lobster_400Regular } from '@expo-google-fonts/lobster';
 import Constants from 'expo-constants';
 import FilterButtons from './FilterButtons';
-import { useNetwork } from '../../context/NetworkContext';
 import { Ionicons } from '@expo/vector-icons';
 
 const { height } = Dimensions.get('window');
@@ -32,17 +31,11 @@ const ScreenHeader = ({
   searchQuery = '',
   onSearchChange
 }) => {
-  const { isOfflineMode, toggleOfflineMode } = useNetwork();
-
   let [fontsLoaded] = useFonts({
     Lobster_400Regular,
   });
 
   const appName = Constants.expoConfig?.name || 'MeinStrodehne';
-
-  const handleExitOfflineMode = () => {
-    toggleOfflineMode(false);
-  };
 
   const renderRightContent = () => {
     if (showBlockButton && onBlockToggle) {
@@ -128,15 +121,6 @@ const ScreenHeader = ({
           <View style={styles.iconPlaceholder} />
         )}
       </View>
-      {isOfflineMode && (
-        <View style={styles.offlineBanner}>
-          <Ionicons name="cloud-offline-outline" size={16} color="#ff3b30" style={styles.offlineIcon} />
-          <Text style={styles.offlineText}>Offline-Modus aktiv</Text>
-          <TouchableOpacity onPress={handleExitOfflineMode} style={styles.offlineExitButton}>
-            <Text style={styles.offlineExitButtonText}>Beenden</Text>
-          </TouchableOpacity>
-        </View>
-      )}
       {filters.length > 0 && (
         <FilterButtons 
           filters={filters} 
@@ -263,38 +247,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     color: '#333',
-  },
-  // --- Offline banner styles ---
-  offlineBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff3f3',
-    borderWidth: 1,
-    borderColor: '#ffccd0',
-    marginHorizontal: 10,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    marginBottom: 8,
-  },
-  offlineIcon: {
-    marginRight: 6,
-  },
-  offlineText: {
-    flex: 1,
-    color: '#cc0000',
-    fontSize: 12,
-  },
-  offlineExitButton: {
-    backgroundColor: '#ff3b30',
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 4,
-  },
-  offlineExitButtonText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
   },
 });
 

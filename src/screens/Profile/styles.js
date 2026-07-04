@@ -573,29 +573,6 @@ export default StyleSheet.create({
   boldText: {
     fontWeight: 'bold',
   },
-  saveOfflineButton: {
-    backgroundColor: '#17a2b8',
-    marginBottom: 10,
-  },
-  saveOfflineButtonText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '600',
-    marginLeft: 10,
-  },
-  lastSaveText: {
-    fontSize: 13,
-    color: '#666',
-    textAlign: 'center',
-    marginTop: 5,
-  },
-  offlineWarningText: {
-    fontSize: 13,
-    color: '#ffc107',
-    textAlign: 'center',
-    marginTop: 8,
-    fontWeight: '500',
-  },
   modalInfoText: {
     fontSize: 13,
     color: '#666',

@@ -9,7 +9,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../../context/AuthContext';
-import { useNetwork } from '../../context/NetworkContext';
 import { useAppConfig } from '../../context/AppConfigContext';
 import Constants from 'expo-constants';
 
@@ -47,10 +46,6 @@ const ProfileScreen = () => {
     loadUserProfile, updateProfile,
     updateProfilePicture, loadingProfilePicture,
   } = useAuth();
-
-  const {
-    isConnected, lastOfflineSaveTimestamp, isSavingData, saveDataForOffline,
-  } = useNetwork();
 
   // Hooks
   const account = useAccountSettings();
@@ -237,9 +232,6 @@ const ProfileScreen = () => {
           profile={profile}
           userOrganizations={org.userOrganizations}
           isOrgContextLoading={org.isOrgContextLoading}
-          isConnected={isConnected}
-          lastOfflineSaveTimestamp={lastOfflineSaveTimestamp}
-          isSavingData={isSavingData}
           isUpdatingVisibility={isUpdatingVisibility}
           navigation={navigation}
           onSwitchToOrg={org.handleSwitchToOrg}
@@ -248,7 +240,6 @@ const ProfileScreen = () => {
           onOpenAccountSettings={account.handleOpenAccountSettings}
           onOpenMakePermanentSettings={account.handleOpenMakePermanentSettings}
           onOpenCreateAccountModal={account.handleOpenCreateAccountModal}
-          onSaveDataForOffline={saveDataForOffline}
           onUpdateVisibility={handleUpdateVisibility}
           userId={user?.id}
         />

@@ -4,8 +4,6 @@ import ScreenHeader from '../components/common/ScreenHeader';
 import { Ionicons } from '@expo/vector-icons';
 import { useOrganization } from '../context/OrganizationContext';
 import { useAuth } from '../context/AuthContext';
-import { useNetwork } from '../context/NetworkContext';
-import { loadOfflineData } from '../utils/storageUtils';
 import { makeExcerpt } from '../utils/htmlUtils';
 import {
   fetchArticleFilters,
@@ -26,8 +24,7 @@ const HomeScreen = ({ navigation }) => {
   // Use the refactored organization context for active status
   const { isOrganizationActive, activeOrganizationId } = useOrganization();
   const { user } = useAuth();
-  const { isOfflineMode, isConnected } = useNetwork();
-  
+
   // State for articles and loading
   const [articles, setArticles] = useState([]);
   const [filteredArticles, setFilteredArticles] = useState([]);
@@ -42,15 +39,11 @@ const HomeScreen = ({ navigation }) => {
   const [isLoadingFilters, setIsLoadingFilters] = useState(true);
   const [error, setError] = useState(null);
   
-  // Fetch articles from Supabase or Offline Storage
+  // Fetch articles from Supabase
   useEffect(() => {
-    if (isOfflineMode) {
-      loadDataFromStorage();
-    } else {
-      fetchFilters();
-      fetchArticles();
-    }
-  }, [isOfflineMode]);
+    fetchFilters();
+    fetchArticles();
+  }, []);
 
   // Refresh articles/vereine when screen comes into focus
   useEffect(() => {
@@ -83,74 +76,14 @@ const HomeScreen = ({ navigation }) => {
     
     // Cleanup listener on unmount
     return unsubscribe;
-  }, [navigation, user, isOfflineMode, selectedFilter]); // Include selectedFilter
+  }, [navigation, user, selectedFilter]); // Include selectedFilter
 
   // Apply filter when articles, selectedFilter, pinned IDs, or search query change
   useEffect(() => {
     applyFilter(selectedFilter);
   }, [articles, selectedFilter, pinnedArticleIds, searchQuery, applyFilter]);
 
-  // Function to load data from AsyncStorage
-  const loadDataFromStorage = async () => {
-    // console.log("[HomeScreen] Loading data from offline storage...");
-    setIsLoading(true);
-    setIsLoadingFilters(true);
-    setError(null);
-    let loadedArticles = [];
-    let loadedFilters = [{ name: 'Aktuell', is_highlighted: false }];
-
-    try {
-      // Load Articles
-      const offlineArticles = await loadOfflineData('articles');
-      if (offlineArticles) {
-        loadedArticles = formatArticles(offlineArticles); // Use existing formatting logic
-        setArticles(loadedArticles);
-        // console.log(`[HomeScreen] Loaded ${loadedArticles.length} articles from storage.`);
-      } else {
-         setError('Keine Offline-Artikel gefunden. Bitte gehe online und speichere Daten.');
-         setArticles([]);
-      }
-
-      // Load Filters
-      const offlineFilters = await loadOfflineData('article_filters');
-      if (offlineFilters) {
-          // Build storedFilters without duplicates
-          let storedFilters = offlineFilters.map(f => ({
-              name: f.name,
-              is_highlighted: f.is_highlighted || false,
-              enable_personal: !!f.enable_personal
-          }));
-
-          // Ensure single 'Aktuell' at the front (preserve enable_personal from storage)
-          const aktuellFilter = storedFilters.find(f => f.name === 'Aktuell');
-          storedFilters = storedFilters.filter(f => f.name !== 'Aktuell');
-          storedFilters.unshift(aktuellFilter || { name: 'Aktuell', is_highlighted: false, enable_personal: false });
-          setAvailableFilters(storedFilters);
-          if (!storedFilters.some(f => f.name === selectedFilter)) setSelectedFilter('Aktuell');
-      } else {
-          setAvailableFilters([{ name: 'Aktuell', is_highlighted: false, enable_personal: false }]);
-          setSelectedFilter('Aktuell');
-      }
-
-      // Note: Pinned articles won't work correctly offline without storing pin status
-      // For simplicity, we'll just disable pinning logic in offline mode
-      setPinnedArticleIds(new Set());
-
-    } catch (err) {
-      console.error('[HomeScreen] Error loading data from storage:', err);
-      setError('Fehler beim Laden der Offline-Daten.');
-      setArticles([]);
-      setAvailableFilters([{ name: 'Aktuell', is_highlighted: false, enable_personal: false }]);
-      setSelectedFilter('Aktuell');
-    } finally {
-      setIsLoading(false);
-      setIsLoadingFilters(false);
-    }
-  };
-
   const fetchFilters = async () => {
-    if (isOfflineMode) return;
-
     setIsLoadingFilters(true);
     try {
       const { data, error } = await fetchArticleFilters();
@@ -187,8 +120,6 @@ const HomeScreen = ({ navigation }) => {
   };
 
   const fetchArticles = async () => {
-    if (isOfflineMode) return;
-
     try {
       setIsLoading(true);
       setError(null);
@@ -215,8 +146,6 @@ const HomeScreen = ({ navigation }) => {
   
   // Fetch organizations flagged as "Verein" for Vereine grid
   const fetchVereinOrganizations = async () => {
-    if (isOfflineMode) return;
-
     try {
       setIsLoading(true);
       setError(null);
@@ -241,9 +170,8 @@ const HomeScreen = ({ navigation }) => {
   
   // Fetch pinned article IDs for the selected filter
   const fetchPinnedArticles = async (filter) => {
-    // Added check: Don't fetch if offline
-    if (isOfflineMode || !filter || filter === 'Aktuell') {
-      setPinnedArticleIds(new Set()); // No pins for 'Aktuell' or offline
+    if (!filter || filter === 'Aktuell') {
+      setPinnedArticleIds(new Set()); // No pins for 'Aktuell'
       return;
     }
     try {
@@ -288,8 +216,7 @@ const HomeScreen = ({ navigation }) => {
       const notPinned = [];
 
       relevantArticles.forEach(article => {
-        // Disable pinning logic when offline
-        if (!isOfflineMode && pinnedArticleIds.has(article.id)) {
+        if (pinnedArticleIds.has(article.id)) {
           pinned.push(article);
         } else {
           notPinned.push(article);
@@ -316,18 +243,15 @@ const HomeScreen = ({ navigation }) => {
     }
 
     setFilteredArticles(sortedArticles);
-  }, [articles, pinnedArticleIds, isOfflineMode, availableFilters, searchQuery]);
+  }, [articles, pinnedArticleIds, availableFilters, searchQuery]);
 
   // Handle filter change
   const handleFilterChange = (filter) => {
     setSelectedFilter(filter);
-    // Fetch pinned articles only if online
-    if (!isOfflineMode) {
-        if (filter === 'Vereine') {
-          fetchVereinOrganizations();
-        } else {
-          fetchPinnedArticles(filter);
-        }
+    if (filter === 'Vereine') {
+      fetchVereinOrganizations();
+    } else {
+      fetchPinnedArticles(filter);
     }
   };
   
@@ -471,7 +395,7 @@ const HomeScreen = ({ navigation }) => {
                       <Text style={styles.articleType}>{article.type}</Text>
                       <Text style={styles.articleDate}>{article.date}</Text>
                     </View>
-                    {selectedFilter !== 'Aktuell' && !isOfflineMode && pinnedArticleIds.has(article.id) && (
+                    {selectedFilter !== 'Aktuell' && pinnedArticleIds.has(article.id) && (
                       <Ionicons name="pin" size={16} color="#666" style={styles.pinIcon} />
                     )}
                     <Text 

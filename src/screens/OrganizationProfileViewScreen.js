@@ -22,8 +22,7 @@ import {
 } from '../services/profileService';
 import { findOrCreateOrgDmConversation } from '../services/dmService';
 import { useAuth } from '../context/AuthContext'; // To check if user is member for potential actions
-import { useNetwork } from '../context/NetworkContext';
-import ScreenHeader from '../components/common/ScreenHeader'; 
+import ScreenHeader from '../components/common/ScreenHeader';
 // TODO: Import components for displaying Org Articles/Events if needed
 import ArticleCard from '../components/ArticleCard'; // <-- ADDED Import
 // import EventCard from '../components/EventCard'; // Assuming you have an EventCard component
@@ -42,7 +41,6 @@ const getTransformedImageUrl = (originalUrl, width = 100, quality = 80) => {
 const OrganizationProfileViewScreen = ({ route, navigation }) => {
     const { organizationId } = route.params;
     const { user, userOrganizations, profile: currentUserProfile, updateProfile } = useAuth(); // Get user profile and update func
-    const { isOfflineMode } = useNetwork();
 
     const [organizationProfile, setOrganizationProfile] = useState(null);
     const [articles, setArticles] = useState([]);
@@ -84,16 +82,11 @@ const OrganizationProfileViewScreen = ({ route, navigation }) => {
             // console.log(`[OrgProfileView] Is Org Blocked? ${blockedCheck}`);
         }
 
-        if (isOfflineMode) {
-            setError("Organisationsprofil ist offline nicht verfügbar.");
-            setLoadingProfile(false);
-        } else {
-            fetchOrganizationData();
-            // fetchOrganizationArticles(); // <-- REMOVED Call from here
-            // fetchOrganizationMembers(); // Fetch members if needed
-            // fetchOrganizationContent(); // Fetch articles/events if needed
-        }
-    }, [organizationId, user, userOrganizations, currentUserProfile, isOfflineMode]);
+        fetchOrganizationData();
+        // fetchOrganizationArticles(); // <-- REMOVED Call from here
+        // fetchOrganizationMembers(); // Fetch members if needed
+        // fetchOrganizationContent(); // Fetch articles/events if needed
+    }, [organizationId, user, userOrganizations, currentUserProfile]);
 
     const fetchOrganizationData = async () => {
         setLoadingProfile(true);
@@ -114,7 +107,7 @@ const OrganizationProfileViewScreen = ({ route, navigation }) => {
         } finally {
             setLoadingProfile(false);
             // Call fetch articles and events ONLY if profile was loaded successfully
-            if (orgData && !isOfflineMode) {
+            if (orgData) {
                 fetchOrganizationArticles(orgData.id, orgData.name);
                 fetchOrganizationEvents(orgData.id);
             }
@@ -299,7 +292,7 @@ const OrganizationProfileViewScreen = ({ route, navigation }) => {
 
     // --- ADDED: Function to handle sending message ---
     const handleSendMessage = async () => {
-        if (!organizationProfile || !user || isOfflineMode || loadingConversation || isBlocked) return;
+        if (!organizationProfile || !user || loadingConversation || isBlocked) return;
 
         setLoadingConversation(true);
         try {
@@ -439,7 +432,7 @@ const OrganizationProfileViewScreen = ({ route, navigation }) => {
                     <Text style={styles.orgName}>{organizationProfile.name || 'Unbekannte Organisation'}</Text>
                     {/* Add Join/Leave or other buttons based on membership status if needed */}
                      {/* --- ADDED: Message Button --- */}
-                    {!isOfflineMode && user && !isBlocked && (
+                    {user && !isBlocked && (
                         <TouchableOpacity 
                             style={[styles.dmButton, loadingConversation && styles.dmButtonDisabled]} // Add disabled style
                             onPress={handleSendMessage}
@@ -456,7 +449,7 @@ const OrganizationProfileViewScreen = ({ route, navigation }) => {
                         </TouchableOpacity>
                     )}
                     {/* Show message if org is blocked */}
-                    {!isOfflineMode && user && !isMember && isBlocked && (
+                    {user && !isMember && isBlocked && (
                         <View style={styles.blockedMessageContainer}>
                             <Ionicons name="ban-outline" size={18} color="#ff3b30" />
                             <Text style={styles.blockedMessageText}>Du hast diese Organisation blockiert.</Text>

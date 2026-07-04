@@ -25,7 +25,6 @@ import {
 } from '../services/dmService';
 import { fetchProfileAvatars } from '../services/profileService';
 import { useAuth } from '../context/AuthContext';
-import { useNetwork } from '../context/NetworkContext';
 
 // Helper function to transform Supabase Storage URLs
 const getTransformedImageUrl = (originalUrl) => {
@@ -42,7 +41,6 @@ const getTransformedImageUrl = (originalUrl) => {
 
 const NewDirectMessageScreen = ({ navigation }) => {
   const { user } = useAuth();
-  const { isOfflineMode } = useNetwork();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -58,10 +56,10 @@ const NewDirectMessageScreen = ({ navigation }) => {
 
   useEffect(() => {
     const fetchOrganizations = async () => {
-      if (isOfflineMode || !user) {
+      if (!user) {
         setOrganizations([]);
         setLoadingOrganizations(false);
-        setOrgError(isOfflineMode ? "Organisationen offline nicht verfügbar." : "Bitte anmelden.");
+        setOrgError("Bitte anmelden.");
         return;
       }
 
@@ -89,10 +87,10 @@ const NewDirectMessageScreen = ({ navigation }) => {
     };
 
     const fetchPublicUsers = async () => {
-      if (isOfflineMode || !user) {
+      if (!user) {
         setPublicUsers([]);
         setLoadingPublicUsers(false);
-        setPublicUsersError(isOfflineMode ? "Benutzerliste offline nicht verfügbar." : "Bitte anmelden.");
+        setPublicUsersError("Bitte anmelden.");
         return;
       }
 
@@ -124,7 +122,7 @@ const NewDirectMessageScreen = ({ navigation }) => {
     setSearchError(null);
     setSearchQuery('');
 
-  }, [isOfflineMode, user]);
+  }, [user]);
 
   const fetchAvatarsForSearchResults = async (results) => {
       if (!results || results.length === 0) {
@@ -167,12 +165,6 @@ const NewDirectMessageScreen = ({ navigation }) => {
     }
     if (!user) {
       setSearchError("Bitte melde dich an, um Benutzer zu suchen.");
-      setIsSearching(false);
-      setSearchResults([]);
-      return;
-    }
-     if (isOfflineMode) {
-      setSearchError("Benutzersuche ist offline nicht verfügbar.");
       setIsSearching(false);
       setSearchResults([]);
       return;
@@ -317,15 +309,6 @@ const NewDirectMessageScreen = ({ navigation }) => {
                  <TouchableOpacity style={styles.button} onPress={() => navigation.navigate('Profile')}>
                     <Text style={styles.buttonText}>Zum Profil</Text>
                 </TouchableOpacity>
-            </View>
-        );
-    }
-
-    if (isOfflineMode) {
-         return (
-            <View style={styles.centerContainer}>
-                <Ionicons name="cloud-offline-outline" size={40} color="#888" />
-                <Text style={styles.infoText}>{"Nachrichten sind offline nicht verfügbar."}</Text>
             </View>
         );
     }
