@@ -49,7 +49,9 @@ export const htmlToPlainText = (html) => {
 
 export const makeExcerpt = (html, maxLength = 100) => {
   const plainText = htmlToPlainText(html);
-  return plainText.length > maxLength
+  const excerpt = plainText.length > maxLength
     ? `${plainText.substring(0, maxLength)}...`
     : plainText;
+  // "Satzende." + Ellipse (aus View oder Kürzung) ergäbe "....' — auf "..." normieren
+  return excerpt.replace(/\.{4,}$/, '...');
 };
