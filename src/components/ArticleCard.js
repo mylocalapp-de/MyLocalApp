@@ -1,14 +1,11 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { makeExcerpt } from '../utils/htmlUtils';
 
 const ArticleCard = ({ article, onPress }) => {
   // Basic display of title and content snippet
   const title = article?.title || 'Unbekannter Titel';
-  const contentString = article?.content ?? ''; // Get content or empty string
-  const plainTextContent = contentString.replace(/<[^>]*>/g, ''); // Strip HTML tags
-  const contentSnippet = plainTextContent.length > 80
-    ? `${plainTextContent.substring(0, 80)}...` 
-    : plainTextContent; // Use plain text for snippet
+  const contentSnippet = makeExcerpt(article?.content ?? '', 80);
   const authorName = article?.author_name || 'Unbekannt';
   const date = article?.date || ''
 
