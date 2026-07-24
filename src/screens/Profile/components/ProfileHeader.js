@@ -86,14 +86,19 @@ const ProfileHeader = ({
       <View style={styles.profileInfo}>
         <Text style={styles.headerTitle} numberOfLines={1}>{headerTitle}</Text>
         {hasFullAccount && !isOrganizationActive && (() => {
-          const email = user?.email || '';
-          const isPseudo = email.includes('@users.mylocalapp.de') || email.includes('@user.mylocalapp.de') || email.includes('@temp.mylocalapp.de');
+          const authEmail = user?.email || '';
+          const isPseudo = authEmail.includes('@users.mylocalapp.de') || authEmail.includes('@user.mylocalapp.de') || authEmail.includes('@temp.mylocalapp.de');
           if (isPseudo) {
             const rawDate = profile?.created_at || user?.created_at;
             const since = rawDate ? new Date(rawDate).toLocaleDateString('de-DE') : null;
+            // Show real verified email if available, otherwise membership date
+            const realEmail = profile?.email;
+            if (realEmail) {
+              return <Text style={styles.email}>{realEmail}</Text>;
+            }
             return <Text style={styles.email}>{since ? `Mitglied seit ${since}` : 'Username-Account'}</Text>;
           }
-          return <Text style={styles.email}>{email}</Text>;
+          return <Text style={styles.email}>{authEmail}</Text>;
         })()}
         {!hasFullAccount && (
           <Text style={styles.accountStatus}>Lokaler Account (nicht synchronisiert)</Text>

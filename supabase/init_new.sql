@@ -230,9 +230,11 @@ DECLARE
   original_replication_role TEXT;
   creator_id UUID := NEW.admin_id; -- Get the admin_id passed during INSERT
 BEGIN
-  -- Ensure creator_id is provided (should be enforced by application logic or NOT NULL constraint if kept)
+  -- App-auth flows pass admin_id and should auto-create the initial admin membership.
+  -- Admin-panel service inserts do not map 1:1 to app profile UUIDs, so allow NULL here
+  -- and simply skip the automatic membership bootstrap in that case.
   IF creator_id IS NULL THEN
-     RAISE EXCEPTION 'Cannot create organization without an admin_id (creator).'; 
+     RETURN NEW;
   END IF;
 
   original_replication_role := current_setting('session_replication_role', true);

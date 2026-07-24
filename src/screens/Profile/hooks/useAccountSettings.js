@@ -24,6 +24,13 @@ export default function useAccountSettings() {
   const isTemporaryAccount = hasFullAccount && profile?.is_temporary === true;
   const isUsernameAccount = !!(profile?.username && user?.email?.endsWith('@users.mylocalapp.de'));
 
+  // Helper: real email (profile.email for username/temp accounts, user.email for regular)
+  const getRealEmail = () => {
+    if (isUsernameAccount && profile?.email) return profile.email;
+    if (user?.email?.endsWith('@temp.mylocalapp.de')) return profile?.email || '';
+    return user?.email || '';
+  };
+
   // Create account modal state
   const [showCreateAccountModal, setShowCreateAccountModal] = useState(false);
   const [createEmail, setCreateEmail] = useState('');
@@ -97,7 +104,7 @@ export default function useAccountSettings() {
       return;
     }
     setIsMakingPermanent(false);
-    setNewEmail(user.email || '');
+    setNewEmail(getRealEmail());
     setEmailCurrentPassword('');
     setNewPassword('');
     setConfirmNewPassword('');
@@ -118,7 +125,7 @@ export default function useAccountSettings() {
       return;
     }
     setIsMakingPermanent(true);
-    setNewEmail(user?.email || '');
+    setNewEmail(getRealEmail());
     setEmailCurrentPassword('');
     setNewPassword('');
     setConfirmNewPassword('');
@@ -132,7 +139,7 @@ export default function useAccountSettings() {
       setAccountSettingsError('Bitte gib eine gültige neue E-Mail-Adresse ein.');
       return;
     }
-    if (newEmail.trim() === user?.email) {
+    if (newEmail.trim() === getRealEmail()) {
       setAccountSettingsError('Die neue E-Mail-Adresse muss sich von der aktuellen unterscheiden.');
       return;
     }
@@ -171,7 +178,7 @@ export default function useAccountSettings() {
     try {
       const result = await updatePassword(newPassword);
       if (result.success) {
-        const needsEmailUpdate = isMakingPermanent && user?.email?.includes('@temp.mylocalapp.de') && newEmail.trim() && newEmail.trim() !== user.email;
+        const needsEmailUpdate = isMakingPermanent && user?.email?.includes('@temp.mylocalapp.de') && newEmail.trim() && newEmail.trim() !== getRealEmail();
         if (needsEmailUpdate) {
           if (!newEmail.trim() || !newEmail.includes('@')) {
             setAccountSettingsError('Bitte gib eine gültige neue E-Mail-Adresse ein.');
