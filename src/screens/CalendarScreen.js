@@ -1,13 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Dimensions, Platform, ActivityIndicator, Alert, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, Dimensions, ActivityIndicator, Alert, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Calendar, LocaleConfig } from 'react-native-calendars';
 import ScreenHeader from '../components/common/ScreenHeader';
 import { Ionicons } from '@expo/vector-icons';
-import { RRule, RRuleSet, rrulestr } from 'rrule';
+import { rrulestr } from 'rrule';
 import { fetchEventCategoriesForCalendar, fetchEventListings } from '../services/calendarService';
 import { useAuth } from '../context/AuthContext';
-import { useOrganization } from '../context/OrganizationContext';
 
 // Get screen dimensions for responsive sizing
 const { width, height } = Dimensions.get('window');
@@ -62,9 +61,6 @@ const format_date_german = (date_value) => {
 const CalendarScreen = ({ navigation }) => {
   const [calendarFilters, setCalendarFilters] = useState([{ name: 'Alle', is_highlighted: false }]);
   const [loadingFilters, setLoadingFilters] = useState(true);
-  const [selectedDates, setSelectedDates] = useState({});
-  const [dateRange, setDateRange] = useState({ startDate: '', endDate: '' });
-  const [visibleEvents, setVisibleEvents] = useState([]);
   const [allEventsData, setAllEventsData] = useState([]);
   const [currentMonthString, setCurrentMonthString] = useState(new Date().toISOString().slice(0, 7));
   const [isLoading, setIsLoading] = useState(true);
@@ -72,7 +68,6 @@ const CalendarScreen = ({ navigation }) => {
   const [activeFilter, setActiveFilter] = useState('Alle');
   
   const { user } = useAuth();
-  const { isOrganizationActive, activeOrganizationId } = useOrganization();
 
   // Fetch event data on mount
   useEffect(() => {
@@ -129,20 +124,6 @@ const CalendarScreen = ({ navigation }) => {
         setAllEventsData([]);
       } else {
         setAllEventsData(data || []);
-
-        // Set initial date range (e.g., current week) - No change needed here
-        // The initial display will be handled by useMemo based on currentMonthString
-        const today = new Date();
-        const currentDayOfWeek = today.getDay();
-        const diffToMonday = currentDayOfWeek === 0 ? -6 : 1 - currentDayOfWeek;
-        const monday = new Date(today);
-        monday.setDate(today.getDate() + diffToMonday);
-        const sunday = new Date(monday);
-        sunday.setDate(monday.getDate() + 6);
-        const mondayString = monday.toISOString().split('T')[0];
-        const sundayString = sunday.toISOString().split('T')[0];
-        setDateRange({ startDate: mondayString, endDate: sundayString });
-        // Initial marking will be handled by the useMemo below
       }
     } catch (err) {
       console.error('Unexpected error fetching events:', err);
@@ -251,148 +232,19 @@ const CalendarScreen = ({ navigation }) => {
     return { instances, marked };
   }, [allEventsData, currentMonthString]); // Recalculate when data or month changes
 
-  // Update visible events whenever the date range, filter, or processed events change
-  useEffect(() => {
-    updateVisibleEvents();
-  }, [dateRange, activeFilter, processedEvents.instances]); // Depend on processed instances
-
-  // Update marked dates whenever processed events change or selection occurs
-  useEffect(() => {
-     // Start with the base event markings from recurring/single events for the month
-    let currentMarkedDates = { ...processedEvents.marked };
-
-    // Apply period marking based on dateRange
-    if (dateRange.startDate) {
-        const start = dateRange.startDate;
-        const end = dateRange.endDate || start; // Use start date if end date is not set
-
-        // Ensure start and end dates are valid before proceeding
-        if (start && !isNaN(new Date(start)) && end && !isNaN(new Date(end))) {
-            // Mark start date
-            currentMarkedDates[start] = {
-                ...(currentMarkedDates[start] || {}),
-                selected: true,
-                startingDay: true,
-                endingDay: start === end,
-                color: '#4285F4',
-                textColor: 'white',
-                dotColor: currentMarkedDates[start]?.marked ? 'white' : undefined
-            };
-
-            // Mark dates in between (only if start != end)
-            if (start !== end) {
-                let currentDate = new Date(Date.parse(start + 'T00:00:00Z'));
-                const finalEndDate = new Date(Date.parse(end + 'T00:00:00Z'));
-
-                currentDate.setUTCDate(currentDate.getUTCDate() + 1); // Move to the next day
-
-                while (currentDate < finalEndDate) {
-                    const dateStr = currentDate.toISOString().split('T')[0];
-                    currentMarkedDates[dateStr] = {
-                        ...(currentMarkedDates[dateStr] || {}),
-                        selected: true,
-                        color: '#80b3ff',
-                        textColor: 'white',
-                        dotColor: currentMarkedDates[dateStr]?.marked ? 'white' : undefined
-                    };
-                     currentDate.setUTCDate(currentDate.getUTCDate() + 1);
-                }
-
-                // Mark end date
-                currentMarkedDates[end] = {
-                    ...(currentMarkedDates[end] || {}),
-                    selected: true,
-                    endingDay: true,
-                    color: '#4285F4',
-                    textColor: 'white',
-                    dotColor: currentMarkedDates[end]?.marked ? 'white' : undefined
-                };
-            }
-        } else {
-           console.warn("Invalid date range for marking:", dateRange);
-        }
+  const visibleEvents = useMemo(() => {
+    if (activeFilter === 'Alle') {
+      return processedEvents.instances;
     }
 
-    setSelectedDates(currentMarkedDates);
+    return processedEvents.instances.filter(event => event.category === activeFilter);
+  }, [activeFilter, processedEvents.instances]);
 
-  }, [processedEvents.marked, dateRange]); // Re-run when base marks or range changes
-
-  const updateVisibleEvents = () => {
-    // Filter the processed instances by date range
-    let filteredEvents = getEventsInRange();
-
-    // Then filter by category if needed
-    if (activeFilter !== 'Alle') {
-      filteredEvents = filteredEvents.filter(event => event.category === activeFilter);
-    }
-
-    setVisibleEvents(filteredEvents);
-  };
-
-  // onDayPress remains largely the same, but relies on the useEffect above for marking
-   const onDayPress = (day) => {
-       // console.log('Selected day:', day.dateString);
-
-       // Ensure day.dateString is valid before setting state
-       if (!day.dateString || isNaN(new Date(day.dateString).getTime())) {
-           console.warn("Invalid date pressed:", day.dateString);
-           return;
-       }
-
-
-       if (dateRange.startDate && dateRange.endDate) {
-           // Reset range, select new start date
-           setDateRange({ startDate: day.dateString, endDate: '' });
-       } else if (!dateRange.startDate) {
-           // Set start date
-           setDateRange({ startDate: day.dateString, endDate: '' });
-       } else {
-           // Set end date (or swap if end < start)
-           const start = new Date(dateRange.startDate);
-           const end = new Date(day.dateString);
-           if (end < start) {
-               setDateRange({ startDate: day.dateString, endDate: dateRange.startDate });
-           } else {
-               setDateRange({ ...dateRange, endDate: day.dateString });
-           }
-       }
-   };
-
-  // Helper to get events (now instances) in the selected range
-  const getEventsInRange = () => {
-    if (!dateRange.startDate) return [];
-
-    const start = dateRange.startDate;
-    const end = dateRange.endDate || start; // Use start if end is not set
-
-    // Ensure dates are valid before filtering
-    if (!start || isNaN(new Date(start)) || !end || isNaN(new Date(end))) {
-        console.warn("Invalid date range for filtering:", {start, end});
-        return [];
-    }
-
-    return processedEvents.instances.filter(eventInstance => {
-      const eventDate = eventInstance.date;
-      // Ensure instance date is valid
-      if (!eventDate || isNaN(new Date(eventDate))) return false;
-      return eventDate >= start && eventDate <= end;
-    });
-  };
-
-  // formatDateRange remains the same
-  const formatDateRange = () => {
-    if (!dateRange.startDate) return '';
-
-    const startDate = new Date(dateRange.startDate);
-    const formattedStart = `${String(startDate.getDate()).padStart(2, '0')}.${String(startDate.getMonth() + 1).padStart(2, '0')}`;
-
-    if (!dateRange.endDate) return `Alle Events am ${formattedStart}`;
-
-    const endDate = new Date(dateRange.endDate);
-    const formattedEnd = `${String(endDate.getDate()).padStart(2, '0')}.${String(endDate.getMonth() + 1).padStart(2, '0')}`;
-
-    return `Alle Events vom ${formattedStart} bis ${formattedEnd}`;
-  };
+  const currentMonthLabel = useMemo(() => {
+    const [year, month] = currentMonthString.split('-').map(Number);
+    const monthName = LocaleConfig.locales.de.monthNames[month - 1];
+    return `Alle Events im ${monthName} ${year}`;
+  }, [currentMonthString]);
 
   // renderEvent needs to use the instance date and potentially original ID for navigation
   const renderEvent = ({ item }) => {
@@ -457,16 +309,12 @@ const CalendarScreen = ({ navigation }) => {
 
   // Handle navigation to create event screen
   const handleCreateEvent = () => {
-    if (user && isOrganizationActive) {
-      navigation.navigate('CreateEvent', {
-          organizationId: activeOrganizationId // Pass the active org ID
-      });
-    } else if (user && !isOrganizationActive) {
-      // Optionally allow personal event creation or show a message
-      Alert.alert('Hinweis', 'Eventerstellung ist derzeit nur für Organisationen aktiviert.');
-    } else {
+    if (!user) {
       Alert.alert('Anmeldung erforderlich', 'Bitte melde dich an, um ein Event zu erstellen.');
+      return;
     }
+
+    navigation.navigate('CreateEvent');
   };
 
   // Update month string when calendar month changes
@@ -501,14 +349,13 @@ const CalendarScreen = ({ navigation }) => {
       <View style={styles.content}>
         <View style={styles.calendarSection}>
           <Calendar
-            markingType={'period'}
-            onDayPress={onDayPress}
-            markedDates={selectedDates}
+            markedDates={processedEvents.marked}
             enableSwipeMonths={true}
             current={currentMonthString + '-01'}
             onMonthChange={onMonthChange}
             key={currentMonthString}
             hideExtraDays={false}
+            showSixWeeks={true}
             style={styles.calendar}
             height={calendarHeight}
             theme={{
@@ -549,29 +396,6 @@ const CalendarScreen = ({ navigation }) => {
                   justifyContent: 'space-around'
                 }
               },
-              'stylesheet.day.period': {
-                base: {
-                  width: isSmallScreen ? 25 : 32,
-                  height: isSmallScreen ? 22 : 28,
-                  alignItems: 'center',
-                  overflow: 'hidden'
-                },
-                fillers: {
-                  position: 'absolute',
-                  height: '100%',
-                  flexDirection: 'row',
-                  left: 0,
-                  right: 0
-                },
-                leftFiller: {
-                  height: '100%',
-                  flex: 1
-                },
-                rightFiller: {
-                  height: '100%',
-                  flex: 1
-                }
-              },
               'stylesheet.day.basic': {
                 base: {
                   width: isSmallScreen ? 25 : 32,
@@ -608,13 +432,11 @@ const CalendarScreen = ({ navigation }) => {
             }}
           />
 
-          {dateRange.startDate && (
-            <View style={styles.eventsHeader}>
-              <Text style={styles.eventsHeaderText}>
-                {formatDateRange()}
-              </Text>
-            </View>
-          )}
+          <View style={styles.eventsHeader}>
+            <Text style={styles.eventsHeaderText}>
+              {currentMonthLabel}
+            </Text>
+          </View>
         </View>
         
         <FlatList
@@ -624,16 +446,14 @@ const CalendarScreen = ({ navigation }) => {
           style={styles.eventsList}
           contentContainerStyle={styles.eventsListContent}
           ListEmptyComponent={
-            dateRange.startDate ? (
-              <View style={styles.noEventsContainer}>
-                <Text style={styles.noEventsText}>Keine Events in diesem Zeitraum</Text>
-              </View>
-            ) : null
+            <View style={styles.noEventsContainer}>
+              <Text style={styles.noEventsText}>Keine Events in diesem Monat</Text>
+            </View>
           }
         />
       </View>
       
-      {isOrganizationActive && user && (
+      {user && (
         <TouchableOpacity
           style={styles.addButton}
           onPress={handleCreateEvent}
@@ -798,4 +618,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default CalendarScreen; 
+export default CalendarScreen;
